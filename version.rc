@@ -1,0 +1,32 @@
+#include <winver.h>
+
+1 VERSIONINFO
+	FILEVERSION 1, 6, 0, 0
+	PRODUCTVERSION 1, 6, 0, 0
+	FILEFLAGSMASK 0x17L
+#ifdef _DEBUG
+	FILEFLAGS VS_FF_DEBUG
+#else
+	FILEFLAGS 0
+#endif
+	FILEOS VOS_NT
+	FILETYPE VFT_DLL
+	FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "FileDescription", ""
+			VALUE "FileVersion", "1.6.0"
+			VALUE "InternalName", "StarfieldFlightControl"
+			VALUE "LegalCopyright", "GNU General Public License v3.0"
+			VALUE "ProductName", ""
+			VALUE "ProductVersion", "1.6.0"
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x409, 1200
+	END
+END
