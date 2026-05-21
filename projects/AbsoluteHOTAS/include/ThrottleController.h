@@ -5,11 +5,11 @@
 #include <chrono>
 #include <fstream>
 
-// Combined Phase 2/3/4: vJoy polling, normalization, and memory injection.
+// DirectInput polling, normalization, and memory injection.
 // Runs on a dedicated background thread at ~120Hz.
 class ThrottleController {
 public:
-    // Configuration loaded from ThrottleInterface.ini
+    // Configuration loaded from AbsoluteHOTAS.ini.
     struct Config {
         // [General]
         bool    enabled = true;
@@ -43,9 +43,7 @@ public:
         int     activateButtonId = 69;    // 1-indexed vJoy button to activate hook
         int     stopButtonId = 70;        // 1-indexed vJoy button to stop hook
         int     boostButtonId = -1;       // Optional: Button to pause injection for boost
-
-        // [Maneuvers] - (Deprecated in v0.1.x in favor of Universal Delta-Injection)
-        // No longer required to map Pitch/Yaw/Roll axes.
+        bool    alwaysOn = false;         // Auto-arm discovery when the standalone controller starts
 
         // [Normalization]
         long    detentCenter = 16384;   // Raw axis value at physical detent center
@@ -53,6 +51,13 @@ public:
         bool    reverseEnabled = false; // Axis reverse is disabled for the beta; use keyboard S.
         bool    unipolarMode = true;    // If true, maps whole axis (min-max) to 0.0-1.0 range (linear)
         float   idlePlateau = 0.05f;    // Software deadzone at the bottom (0.0-1.0)
+        bool    incrementalThrottleMode = false; // Use centering spring-loaded sticks as rate controllers
+        float   throttleRampRate = 0.67f; // Ramping sensitivity (rate per second)
+        bool    physicsAdherenceMode = false; // Release control on sharp turns to let engine physics limit speed
+        float   physicsAdherenceDeflection = 0.15f; // Pitch/yaw deflection threshold (>15%)
+        float   physicsAdherenceThrottleThreshold = 0.5f; // Throttle threshold (>50%)
+        bool    incrementalKeyboardMode = false; // Emulate W/S keys dynamically with duty cycle modulation
+
 
         // [Injection]
         int     pollRateHz = 60;          // Polling frequency

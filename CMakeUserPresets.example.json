@@ -1,0 +1,37 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "user-base",
+      "inherits": "base",
+      "hidden": true,
+      "environment": {
+        "VCPKG_ROOT": "C:/path/to/vcpkg"
+      }
+    },
+    {
+      "name": "build-release-user",
+      "inherits": [
+        "build-release",
+        "user-base"
+      ]
+    },
+    {
+      "name": "build-debug-user",
+      "inherits": [
+        "build-debug",
+        "user-base"
+      ]
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release-user",
+      "configurePreset": "build-release-user"
+    },
+    {
+      "name": "debug-user",
+      "configurePreset": "build-debug-user"
+    }
+  ]
+}

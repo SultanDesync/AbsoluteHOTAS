@@ -31,5 +31,3 @@ tools/AbsoluteHOTASConfigurator/src-tauri/gen/
 tools/AbsoluteHOTASConfigurator/src-tauri/icons/
 _deps/
 x64/
-/.papyrus_imports/
-Data/Scripts/*.pex

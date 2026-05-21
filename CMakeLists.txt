@@ -34,15 +34,9 @@ set(shared_sources
 
 set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/Main.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/Hooks.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/Papyrus.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/PapyrusHook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleHook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/vJoyFeeder.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/Hooks.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/Papyrus.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/PapyrusHook.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleController.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleHook.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/vJoyFeeder.h

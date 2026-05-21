@@ -1,63 +1,48 @@
-# AbsoluteHOTAS Driver Plugin
+# AbsoluteHOTAS Standalone Plugin
 
-AbsoluteHOTAS needs a tiny game-data plugin in addition to the SFSE DLL and
-Papyrus scripts. The DLL exposes the native functions; the plugin starts a
-quest that attaches `AbsoluteHOTASPlayer` so Papyrus can tell the DLL when the
-player sits in, or leaves, a ship pilot seat.
+AbsoluteHOTAS 1.6 ships as a standalone SFSE DLL and INI. The previous
+Papyrus/ESM driver bridge has been removed from the release path.
 
 ## Target Artifact
 
-- `Data\AbsoluteHOTAS.esm`
-- ESL/light master flagged if Creation Kit offers the option.
-- Master: `Starfield.esm`
-- One start-game-enabled quest.
-- Quest script: `AbsoluteHOTASPlayer`
-- Script property:
-  - `Ship_PilotSeat_RefType` = vanilla `Ship_PilotSeat_RefType`
+Install these files into `Data\SFSE\Plugins\`:
 
-## Creation Kit Pass
+- `AbsoluteHOTAS.dll`
+- `AbsoluteHOTAS.ini`
 
-1. Deploy or copy the current payload so CK can see:
-   - `Data\Scripts\AbsoluteHOTAS.pex`
-   - `Data\Scripts\AbsoluteHOTASPlayer.pex`
-   - `Data\Scripts\Source\AbsoluteHOTAS.psc`
-   - `Data\Scripts\Source\AbsoluteHOTASPlayer.psc`
+No `AbsoluteHOTAS.esm`, `.pex` scripts, or Creation Kit-generated driver quest
+is required for the standalone build.
 
-2. Open `CreationKit.exe`.
+## Runtime Startup
 
-3. Load `Starfield.esm`.
+The controller starts when SFSE loads the DLL. Discovery is controlled by:
 
-4. Create a new quest:
-   - Editor ID: `AbsoluteHOTAS_DriverQuest`
-   - Name: `AbsoluteHOTAS Driver`
-   - Type: Miscellaneous
-   - Start Game Enabled: checked
-   - Run Once: unchecked
+- `bAlwaysOn = true`: arm discovery when the DLL starts.
+- `bAlwaysOn = false`: wait for `F8` or `iActivateButtonId`.
+- `iStopButtonId`: disarm the current capture/override state.
 
-5. Attach script `AbsoluteHOTASPlayer` to the quest.
+The default public configuration leaves `bAlwaysOn = false` so users can arm
+the signal hunter deliberately after confirming their device mapping.
 
-6. Fill script property:
-   - Property: `Ship_PilotSeat_RefType`
-   - Value: `Ship_PilotSeat_RefType`
+## Package Layout
 
-7. Save as `AbsoluteHOTAS.esm`.
+CMake post-build output is staged under:
 
-8. Compact/flag as light/ESL if CK offers it. This plugin has only one new
-   record, so it is safe to keep light.
+```text
+contrib\PluginRelease\Data\SFSE\Plugins\
+```
 
-9. Put `AbsoluteHOTAS.esm` in:
-   - `contrib\PluginRelease\Data\AbsoluteHOTAS.esm`
-
-10. Re-run:
-   - `tools\deploy_payload.ps1`
+That staging directory is ignored by git and should be treated as build output,
+not source.
 
 ## Runtime Check
 
-With `bLogThrottle=true`, `Data\SFSE\Plugins\AbsoluteHOTAS.log` should show:
+With `bLogThrottle=true`, `Data\SFSE\Plugins\StarfieldThrottleLog.txt` should
+show:
 
 - `[Main] Plugin load complete.`
-- `[PapyrusHook] Installed at Starfield.exe+33611E7`
-- `[Papyrus] Pilot state entered.`
 - `[Controller] Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.`
+- `[PilotState] Standalone mode active; waiting for F8 or activate button.`
 
-The controller should start only after entering the pilot seat.
+If `bAlwaysOn=true`, the final line should instead report that discovery was
+armed automatically.

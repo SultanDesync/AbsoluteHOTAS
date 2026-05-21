@@ -15,5 +15,5 @@ namespace AbsoluteGlobals {
     std::atomic<uint8_t> g_probeInstallRollGate = 0;
     std::atomic<uint8_t> g_probeInstallPitchGate = 0;
     std::atomic<uint8_t> g_probeInstallYawGate = 0;
-    std::atomic<bool> g_isPilotState = false;
+    std::atomic<bool> g_isPilotState = true;
 }

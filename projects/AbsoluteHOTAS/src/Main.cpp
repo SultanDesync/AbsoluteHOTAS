@@ -1,7 +1,5 @@
 #include "ThrottleHook.h"
 #include "ThrottleController.h"
-#include "Papyrus.h"
-#include "PapyrusHook.h"
 #include "RuntimePaths.h"
 #include <SFSE/Interfaces.h>
 #include <windows.h>
@@ -77,7 +75,7 @@ static void InstallCrashLogger() {
 }
 
 // SFSE plugin entry point
-SFSEPluginLoad(const SFSE::LoadInterface* a_sfse)
+SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 {
     InitializeLog();
     InstallCrashLogger();
@@ -93,10 +91,14 @@ SFSEPluginLoad(const SFSE::LoadInterface* a_sfse)
         MainLog("The game may have updated. Check StarfieldThrottleLog.txt for details.");
     }
 
-    PapyrusHook::Install(a_sfse);
-
     if (hookOk) {
-        MainLog("Hook layer ready. Controller startup deferred until Papyrus StartPilotMode().");
+        MainLog("Hook layer ready. Initializing and starting standalone ThrottleController.");
+        if (ThrottleController::Initialize()) {
+            ThrottleController::Start();
+            MainLog("ThrottleController started successfully.");
+        } else {
+            MainLog("WARNING: ThrottleController initialization failed or disabled in config.");
+        }
     }
 
     MainLog("Plugin load complete.");

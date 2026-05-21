@@ -1,0 +1,92 @@
+{
+  "project": "AbsoluteHOTAS",
+  "version": "1.6.0",
+  "type": "Standalone SFSE Plugin",
+  "summary": "Experimental Standalone Starfield Script Extender (SFSE) plugin shipped purely as a standalone DLL and INI. Provides direct HOTAS/HOSAS authority for spaceship flight control (pitch, yaw, roll, strafe, throttle) via direct injection and engine writer-gating, combined with customizable DirectInput-to-KBM button mapping supporting up to 128 buttons.",
+  "technologies": [
+    "C++23",
+    "Starfield Script Extender (SFSE)",
+    "DirectInput 8",
+    "Windows SendInput API",
+    "x86-64 assembly & trampoline hooks"
+  ],
+  "directories": {
+    "projects/AbsoluteHOTAS": {
+      "path": "projects/AbsoluteHOTAS",
+      "purpose": "Core plugin code including the main entry point, hooks, controller thread, and default configuration ini.",
+      "subdirectories": {
+        "src": "C++ source files implementing Main, low-level throttle hooks, and DirectInput controller.",
+        "include": "C++ header files containing class declarations and struct definitions.",
+        "config": "Contains standalone AbsoluteHOTAS.ini configuration file."
+      }
+    },
+    "shared": {
+      "path": "shared",
+      "purpose": "Common headers, global variables, and utilities shared within the project.",
+      "subdirectories": {
+        "src": "Global variable definitions, plugin info details, and runtime paths/logs configuration.",
+        "include": "Common headers, precompiled header (PCH.h), DirectInput/KBM utilities, and global synchronization variables."
+      }
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Technical documentation containing flight control cluster memory maps, hardware specifications, and output scancode reference charts."
+    }
+  },
+  "files": {
+    "projects/AbsoluteHOTAS/src/Main.cpp": {
+      "role": "Plugin Loader & Entry Point",
+      "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, and installs the low-level memory writer hooks via ThrottleHook."
+    },
+    "projects/AbsoluteHOTAS/src/ThrottleHook.cpp": {
+      "role": "Low-level x86 Hook Manager",
+      "purpose": "Handles AOB signature scanning inside the game's .text section, allocates 2GB-near memory trampolines, hooks the critical flight writer path, registers manual camera/rotational gates, and provides safe override logic for ship roll, pitch, and yaw."
+    },
+    "projects/AbsoluteHOTAS/src/ThrottleController.cpp": {
+      "role": "DirectInput Polling Thread & Signal Hunter",
+      "purpose": "Manages the execution thread of the DirectInput controller, normalizes and deadzones axis inputs, runs the 'Signal Hunter' algorithm to locate the memory address of the dynamic control cluster (using magic number 0.0314f), performs the micro-burst throttle injection, handles bi-polar/unipolar translations, and drives custom button/expansion-to-KBM events via SendInput."
+    },
+    "projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini": {
+      "role": "User Configuration File",
+      "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, idle deadzones, and debugging modes."
+    }
+  },
+  "technical_details": {
+    "flight_control_cluster": {
+      "base_register": "RDI (captured from execution stream of the writer block)",
+      "base_pointer_source": "R13 (upstream source object for processed intent)",
+      "memory_lanes": {
+        "cluster_base + 0x58": "Signed Roll / Lateral Output Lane (Float, -1.0 to +1.0)",
+        "cluster_base + 0x5C": "Vertical Strafe Output Lane (Float)",
+        "cluster_base + 0x60": "Signed Yaw Output Lane (Float, -1.0 to +1.0)",
+        "cluster_base + 0x64": "Signed Pitch Output Lane (Float, -1.0 to +1.0)",
+        "cluster_base + 0x68": "Signed Throttle Target / Reverse-Capable Throttle Lane (Float, 0.0 to 1.0 or signed)",
+        "cluster_base + 0x6C": "Signed Throttle Companion / Current-State Lane (Float)"
+      },
+      "validation_heuristics": {
+        "discovery_signal": "0.0314f (fThrottleAtEngineStart/fSignpostValue broadcasted on engine startup)",
+        "corroboration": "Ensuring the read float values are finite, reasonable, and adjacent lanes scale together under isolated inputs."
+      }
+    },
+    "shipping_paradigm": {
+      "standalone_mode": "The mod compiles into AbsoluteHOTAS.dll and AbsoluteHOTAS.ini. Legacy scripting components (Papyrus, .esm, quest seat-trackers) have been removed from the release path, ensuring direct and standalone flight controller execution on DLL load."
+    }
+  },
+  "task_context_mapping": {
+    "how_to_add_new_ship_action": {
+      "ini_config": "Add new i<Action>Button under [ShipButtons] and s<Action>Output under [ShipButtonOutputs] in projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini.",
+      "controller_declaration": "Update ThrottleController::Config struct in projects/AbsoluteHOTAS/include/ThrottleController.h to include the new bindings.",
+      "config_parsing": "Add standard BindingDef in projects/AbsoluteHOTAS/src/ThrottleController.cpp inside LoadShipButtonBindings to map the actionId, INI key, and output string key.",
+      "default_output": "Register default action scancode in DefaultShipOutputForAction inside projects/AbsoluteHOTAS/src/ThrottleController.cpp.",
+      "state_update": "Update state evaluation in UpdateShipButtonBindings to check physical press and trigger SetOutputHeld/PulseOutput."
+    },
+    "how_to_adjust_axis_normalization_or_reverse": {
+      "formula_logic": "Modify ThrottleController::NormalizeAxis in projects/AbsoluteHOTAS/src/ThrottleController.cpp.",
+      "variables": "Change configuration mappings in LoadConfig (detents, idle plateaus, reverse threshold) and adjust matching variables in include/ThrottleController.h."
+    },
+    "how_to_update_writer_block_hooks_for_game_patch": {
+      "signature_update": "Verify assembly signature in InstallRotationalGates and raw Pattern structs in projects/AbsoluteHOTAS/src/ThrottleHook.cpp.",
+      "call_rva_update": "Adjust version constant bounds and target displacement search bounds (e.g. 0x12B0000 to 0x12C0000 range check in ThrottleHook.cpp line 817)."
+    }
+  }
+}

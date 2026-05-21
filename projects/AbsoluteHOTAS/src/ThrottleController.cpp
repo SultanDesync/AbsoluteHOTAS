@@ -581,12 +581,19 @@ void ThrottleController::LoadConfig() {
     s_config.activateButtonId = (int)ini.GetLongValue("Buttons", "iActivateButtonId", 69);
     s_config.stopButtonId = (int)ini.GetLongValue("Buttons", "iStopButtonId", 70);
     s_config.boostButtonId = (int)ini.GetLongValue("Buttons", "iBoostButtonId", -1);
+    s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", false);
     
     s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 16384);
     s_config.detentDeadzone = ini.GetLongValue("Normalization", "iDetentDeadzone", 500);
     s_config.reverseEnabled = ini.GetBoolValue("Normalization", "bReverseEnabled", false);
     s_config.unipolarMode = ini.GetBoolValue("Normalization", "bUnipolarMode", true);
     s_config.idlePlateau = (float)ini.GetDoubleValue("Normalization", "fIdlePlateau", 0.05);
+    s_config.incrementalThrottleMode = ini.GetBoolValue("Normalization", "bIncrementalThrottleMode", false);
+    s_config.throttleRampRate = (float)ini.GetDoubleValue("Normalization", "fThrottleRampRate", 0.67);
+    s_config.physicsAdherenceMode = ini.GetBoolValue("Normalization", "bPhysicsAdherenceMode", false);
+    s_config.physicsAdherenceDeflection = (float)ini.GetDoubleValue("Normalization", "fPhysicsAdherenceDeflection", 0.15);
+    s_config.physicsAdherenceThrottleThreshold = (float)ini.GetDoubleValue("Normalization", "fPhysicsAdherenceThrottleThreshold", 0.5);
+    s_config.incrementalKeyboardMode = ini.GetBoolValue("Normalization", "bIncrementalKeyboardMode", false);
     
     s_config.pollRateHz = (int)ini.GetLongValue("Injection", "iPollRateHz", 120);
     s_config.throttleBurstMs = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
@@ -820,11 +827,15 @@ void ThrottleController::ControlLoop() {
         }
 
         if (!wasPiloting) {
-            CtrlLog("[PilotState] Pilot seat entered; discovery armed.");
             DisarmFlightControlState();
             lastInjectedHardwareValue = -999.0f;
-            g_discoveryArmed = true;
-            ThrottleHook::SetCaptureEnabled(true);
+            if (s_config.alwaysOn) {
+                CtrlLog("[PilotState] Standalone mode active; discovery armed automatically.");
+                g_discoveryArmed = true;
+                ThrottleHook::SetCaptureEnabled(true);
+            } else {
+                CtrlLog("[PilotState] Standalone mode active; waiting for F8 or activate button.");
+            }
             wasPiloting = true;
         }
 
@@ -922,7 +933,75 @@ void ThrottleController::ControlLoop() {
         };
 
         // 1. POLL ALL HARDWARE AXES
-        float throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxisId), axisMin, axisMax);
+        auto NormalizeBipolarRate = [&](long rawValue) -> float {
+            long center = s_config.detentCenter;
+            long deadzone = s_config.detentDeadzone;
+
+            if (rawValue < axisMin) rawValue = axisMin;
+            if (rawValue > axisMax) rawValue = axisMax;
+            if (s_config.bInvertThrottle) {
+                rawValue = axisMin + axisMax - rawValue;
+            }
+
+            if (rawValue >= center - deadzone && rawValue <= center + deadzone) return 0.0f;
+
+            if (rawValue > center + deadzone) {
+                float range = (float)(axisMax - (center + deadzone));
+                return (range <= 0.0f) ? 0.0f : (float)(rawValue - (center + deadzone)) / range;
+            } else {
+                float range = (float)((center - deadzone) - axisMin);
+                return (range <= 0.0f) ? 0.0f : -1.0f + (float)(rawValue - axisMin) / range;
+            }
+        };
+
+        float throttle = 0.0f;
+        if (s_config.incrementalKeyboardMode) {
+            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxisId));
+
+            static DWORD lastKbmPulseTime = 0;
+            DWORD curTime = GetTickCount();
+
+            if (std::abs(stickInput) > 0.05f) {
+                // PWM pulsing frequency: shorter delay at higher deflection.
+                // Scale from 230ms (slight push) down to 20ms (max deflection).
+                float intensity = std::abs(stickInput);
+                DWORD pulseInterval = static_cast<DWORD>(210.0f * (1.0f - intensity) + 20.0f);
+
+                if (curTime - lastKbmPulseTime > pulseInterval) {
+                    lastKbmPulseTime = curTime;
+                    uint16_t scanCode = (stickInput > 0.0f) ? 0x11 : 0x1F; // W = 0x11, S = 0x1F
+                    SendKeyboardScanCode(scanCode, false, false); // Down
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                    SendKeyboardScanCode(scanCode, false, true);  // Up
+                }
+            }
+            if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
+                throttle = SafeReadThrottle(s_activeThrottlePtr);
+            } else {
+                throttle = 0.0f;
+            }
+        } else if (s_config.incrementalThrottleMode) {
+            static float s_accumulatedThrottle = 0.0f;
+            float dt = 1.0f / (float)s_config.pollRateHz;
+
+            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxisId));
+            float minBound = s_config.unipolarMode ? 0.0f : -1.0f;
+
+            if (std::abs(stickInput) > 0.01f) {
+                // Stick is displaced -> Ramp the throttle target
+                s_accumulatedThrottle += stickInput * s_config.throttleRampRate * dt;
+                s_accumulatedThrottle = std::clamp(s_accumulatedThrottle, minBound, 1.0f);
+                throttle = s_accumulatedThrottle;
+            } else {
+                // Stick is centered -> Sync passively with the game's actual live throttle
+                if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
+                    s_accumulatedThrottle = SafeReadThrottle(s_activeThrottlePtr);
+                }
+                throttle = s_accumulatedThrottle;
+            }
+        } else {
+            throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxisId), axisMin, axisMax);
+        }
         
         auto NormBipolar = [&](int axisId, float sens, bool invert) {
             float val = ((float)GetRawAxis(axisId) - 32768.0f) / 32768.0f;
@@ -1036,9 +1115,28 @@ void ThrottleController::ControlLoop() {
                 // can pass through when the pilot is not rolling.
                 bool rollOverrideActive = s_config.rollEnabled && (std::abs(roll) > 0.05f);
                 ThrottleHook::SetRotationalOverride(roll, yaw, pitch, true, rollOverrideActive);
-                
-                if (reverseKeyHeld) {
+                static bool s_lastPhysicsAdherenceActive = false;
+                bool releaseControlForPhysics = false;
+                if (s_config.physicsAdherenceMode) {
+                    bool rightStickActive = (std::abs(pitch) > s_config.physicsAdherenceDeflection ||
+                                             std::abs(yaw) > s_config.physicsAdherenceDeflection);
+                    if (rightStickActive && throttle > s_config.physicsAdherenceThrottleThreshold) {
+                        releaseControlForPhysics = true;
+                    }
+                }
+
+                if (releaseControlForPhysics != s_lastPhysicsAdherenceActive) {
+                    s_lastPhysicsAdherenceActive = releaseControlForPhysics;
+                    if (releaseControlForPhysics) {
+                        CtrlLog("[PhysicsAdherence] Right stick deflected & throttle > " + std::to_string((int)(s_config.physicsAdherenceThrottleThreshold * 100)) + "%. Releasing control for turn physics.");
+                    } else {
+                        CtrlLog("[PhysicsAdherence] Turn complete or throttle feathered. Re-engaging throttle control.");
+                    }
+                }
+
+                if (reverseKeyHeld || releaseControlForPhysics || s_config.incrementalKeyboardMode) {
                      s_throttleBurstFrames = 0;
+                     lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
                 } else if (curBoost) {
                      // Stand down for Boost (while held)
                 } else if (s_boostKickFrames > 0) {
@@ -1138,7 +1236,7 @@ void ThrottleController::Start() {
     if (s_running) return;
     s_running = true;
     
-    // Papyrus arms discovery when the player enters a pilot seat.
+    // In standalone mode discovery is armed by bAlwaysOn, F8, or the activate button.
     ThrottleHook::SetCaptureEnabled(false);
     
     s_thread = std::thread(ControlLoop);

@@ -5,7 +5,7 @@
 | File | Purpose |
 | --- | --- |
 | `key-output-reference.md` | Keyboard/mouse `SendInput` output values for `ShipButtonOutputs`. |
-| `absolutehotas-driver-plugin.md` | Driver/plugin reference notes. |
+| `absolutehotas-driver-plugin.md` | Standalone DLL/INI package and startup reference. |
 | `ship-button-bindings.md` | AbsoluteHOTAS ship action binding keys and vanilla output defaults. |
 
 ## Research Summaries

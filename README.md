@@ -20,6 +20,10 @@ Data\SFSE\Plugins\
 
 ## Recommended Setup
 
+You can configure `AbsoluteHOTAS.ini` manually, or use the optional
+[AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator)
+to select devices, record button IDs, and write the INI.
+
 Use vJoy for flight axes only:
 
 - X: yaw
@@ -40,7 +44,7 @@ Do not use Steam Input or Steam controller bindings for this setup. Steam contro
 
 ## Ship Buttons
 
-AbsoluteHOTAS can also consume HOTAS/vJoy DirectInput buttons from `[ShipButtons]` in `AbsoluteHOTAS.ini`. The companion configurator records the source button ID, and the plugin emits the vanilla Starfield keyboard or mouse input for that ship action. Reverse/brake is handled separately by the reverse slider memory-injection path.
+AbsoluteHOTAS can also consume HOTAS/vJoy DirectInput buttons from `[ShipButtons]` in `AbsoluteHOTAS.ini`. The optional [AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator) records the source button ID, and the plugin emits the vanilla Starfield keyboard or mouse input for that ship action. Reverse/brake is handled separately by the reverse slider memory-injection path.
 
 Input devices are selected per input family:
 
@@ -122,6 +126,39 @@ iThrottleBurstMs = 250
 - Raise it if throttle changes feel too weak.
 
 Holding `S` releases throttle authority so vanilla reverse/brake behavior can take over.
+
+## HOSAS Incremental Throttle & Physics Adherence (Alpha)
+
+This release introduces an **Experimental Alpha** flight mode tailored for dual-joystick (HOSAS) configurations using a centering, spring-loaded axis for speed control.
+
+### Incremental Rate Throttle
+Rather than a direct 1:1 mapping (which resets your throttle to zero when the stick springs to center), **Incremental Mode** treats physical displacement as a rate accelerator/decelerator. When the stick is released back to center, the target speed cruise-locks exactly where it is. This is designed to play nicely with Starfield's native autopilot, boost decay, and landing/takeoff sequences without fighting the engine.
+
+### Keyboard Emulation Pulse (Simple HOSAS Mode)
+For pilots who want a robust alternate bindings pipeline with **zero memory-injection wiggles** and absolute immunity to game patches, we introduce **Keyboard Emulation Pulse Mode**.
+- It dynamically modulates standard `W` and `S` keyboard strokes. Pushing the stick further scales the key-press pulse frequency from a soft **230ms** down to a rapid-fire **20ms**, emulating dynamic analog acceleration.
+- Because it sends standard keyboard keys, the game stays in pure Keyboard/Mouse mode, **completely eliminating UI prompt flickering** between controller and keyboard modes.
+- Downstream memory injection is completely bypassed for the throttle while maintaining high-resolution analog memory overrides for Pitch, Yaw, and Roll.
+
+### Maneuver Physics Adherence
+Continuous throttle injection can override the game's natural speed envelope during sharp turns, making maneuvers feel wider. **Physics Adherence** automatically suspends memory injection when your right stick (Pitch/Yaw) is deflected beyond a threshold (default 15%) while your throttle is high (default >50%). This lets Starfield's native flight physics limit your speed for maximum turning rate, while still allowing you to manually feather the throttle below 50% for high-G tactical turns.
+
+Enable these features in your `AbsoluteHOTAS.ini` under the `[Normalization]` block:
+
+```ini
+[Normalization]
+; Enable relative rate accumulation for spring-to-center sticks
+bIncrementalThrottleMode = false
+fThrottleRampRate = 0.67
+
+; Enable turn physics speed-limiting adherence
+bPhysicsAdherenceMode = false
+fPhysicsAdherenceDeflection = 0.15
+fPhysicsAdherenceThrottleThreshold = 0.50
+
+; Enable keyboard pulse emulation mode (prevents UI flicker, zero-dependency)
+bIncrementalKeyboardMode = false
+```
 
 ## Logging
 

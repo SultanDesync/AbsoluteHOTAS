@@ -149,7 +149,7 @@ Patch compatibility should still be validated after each Starfield/SFSE update. 
 - Whether upstream source-object injection preserves better vanilla camera and assist behavior than downstream cluster gates.
 - Whether direct signed-throttle writes should become a supported reverse mode.
 - Whether adjacent source-object fields contain boost, flight mode, power allocation, or weapon/targeting state.
-- Whether the Papyrus native-registration hook should be replaced with a pure game-data bridge in a future architecture.
+- Whether future builds should add a separate game-data bridge for richer in-game state, or keep the public release strictly DLL/INI-only.
 
 ## Publication Boundary
 
