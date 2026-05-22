@@ -80,7 +80,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
     InitializeLog();
     InstallCrashLogger();
     MainLog("======================================================");
-    MainLog("AbsoluteHOTAS v1.6.0 - Pure Flight Control");
+    MainLog("AbsoluteHOTAS v1.6.1 - Pure Flight Control");
     MainLog("Target: Starfield 1.16.242 / SFSE 0.2.20");
     MainLog("======================================================");
 

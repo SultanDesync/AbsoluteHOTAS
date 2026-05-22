@@ -27,11 +27,13 @@ public:
         int     rollAxisId = 0x33;        // HID usage: 0x33 = Rx axis
         int     strafeLatAxisId = 0x33;   // HID usage: 0x33 = Rx axis
         int     strafeVertAxisId = 0x34;  // HID usage: 0x34 = Ry axis
+        int     reverseAxisId = 0x36;     // HID usage: 0x36 = Slider 0
 
         float   fPitchSensitivity = 1.0f;
         float   fYawSensitivity = 1.0f;
         float   fRollSensitivity = 1.0f;
         float   fStrafeSensitivity = 1.0f;
+        float   fReverseSensitivity = 1.0f;
 
         bool    bInvertPitch = true;
         bool    bInvertThrottle = false;
@@ -39,6 +41,7 @@ public:
         bool    bInvertRoll = false;
         bool    bInvertStrafeLat = false;
         bool    bInvertStrafeVert = false;
+        bool    bInvertReverse = false;
 
         int     activateButtonId = 69;    // 1-indexed vJoy button to activate hook
         int     stopButtonId = 70;        // 1-indexed vJoy button to stop hook
@@ -51,6 +54,8 @@ public:
         bool    reverseEnabled = false; // Axis reverse is disabled for the beta; use keyboard S.
         bool    unipolarMode = true;    // If true, maps whole axis (min-max) to 0.0-1.0 range (linear)
         float   idlePlateau = 0.05f;    // Software deadzone at the bottom (0.0-1.0)
+        float   reverseDeadzone = 0.05f;
+        float   reverseActivationThreshold = 0.05f;
         bool    incrementalThrottleMode = false; // Use centering spring-loaded sticks as rate controllers
         float   throttleRampRate = 0.67f; // Ramping sensitivity (rate per second)
         bool    physicsAdherenceMode = false; // Release control on sharp turns to let engine physics limit speed
@@ -63,12 +68,24 @@ public:
         int     pollRateHz = 60;          // Polling frequency
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
         bool    rollEnabled = true;       // Roll shares the +0x58 writer with lateral strafe.
+        bool    reverseAxisEnabled = true;
 
         bool    logThrottle = false;    // Log throttle values to file
         int     scoutKey = 0x79;        // Virtual Key Code for Scout Mode (F10 default)
 
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
+
+        // [DigitalAxes]
+        int     digitalReverseButton = -1;
+        int     digitalRollLeftButton = -1;
+        int     digitalRollRightButton = -1;
+        int     digitalStrafeLeftButton = -1;
+        int     digitalStrafeRightButton = -1;
+        int     digitalStrafeUpButton = -1;
+        int     digitalStrafeDownButton = -1;
+        float   digitalRollValue = 1.0f;
+        float   digitalStrafeValue = 1.0f;
     };
 
     static bool Initialize();

@@ -32,7 +32,7 @@ public:
     static bool IsSilenceEnabled();
 
     // Engine-timed rotational gates for the validated +58/+60/+64 writer block.
-    static void SetRotationalOverride(float roll, float yaw, float pitch, bool enabled, bool rollEnabled = true);
+    static void SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled = true, float vertical = 0.0f, bool verticalEnabled = false);
     static void SetManualLaneOverride(uintptr_t offset, float value, bool enabled);
     static int GetManualGateCount();
     static uintptr_t GetManualGateAddress(int index);

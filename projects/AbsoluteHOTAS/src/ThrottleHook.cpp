@@ -27,9 +27,11 @@ static volatile bool g_captureEnabled = true;
 static volatile bool g_silenceEnabled = false; // SILENCE FLAG: Skip original writes if true
 static volatile uint8_t g_rotOverrideEnabled = 0;
 static volatile uint8_t g_rollOverrideEnabled = 0;
+static volatile uint8_t g_vertStrafeOverrideEnabled = 0;
 static volatile uint8_t g_yawOverrideEnabled = 0;
 static volatile uint8_t g_pitchOverrideEnabled = 0;
 static volatile uint32_t g_rollBits = 0;
+static volatile uint32_t g_vertStrafeBits = 0;
 static volatile uint32_t g_yawBits = 0;
 static volatile uint32_t g_pitchBits = 0;
 
@@ -261,6 +263,59 @@ static bool InstallRaxDispGate(uintptr_t targetAddr, uint8_t disp, volatile uint
     return true;
 }
 
+static bool InstallRdxDispGate(uintptr_t targetAddr, uint8_t disp, volatile uint32_t* valueBits, volatile uint8_t* activeFlag, const char* label) {
+    uint8_t* trampMem = AllocateNear(targetAddr);
+    if (!trampMem) {
+        HookLog("CRITICAL: Could not allocate " + std::string(label) + " gate trampoline.");
+        return false;
+    }
+
+    int idx = 0;
+    trampMem[idx++] = 0x51; // push rcx
+    trampMem[idx++] = 0x9C; // pushfq
+
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9;
+    uintptr_t activeAddr = (uintptr_t)activeFlag;
+    memcpy(&trampMem[idx], &activeAddr, 8); idx += 8;
+    trampMem[idx++] = 0x80; trampMem[idx++] = 0x39; trampMem[idx++] = 0x00; // cmp byte ptr [rcx],0
+    trampMem[idx++] = 0x74;
+    int inactiveJump = idx++;
+
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9;
+    uintptr_t valueAddr = (uintptr_t)valueBits;
+    memcpy(&trampMem[idx], &valueAddr, 8); idx += 8;
+    trampMem[idx++] = 0x8B; trampMem[idx++] = 0x09; // mov ecx,[rcx]
+    trampMem[idx++] = 0x89; trampMem[idx++] = 0x4A; trampMem[idx++] = disp; // mov [rdx+disp],ecx
+    trampMem[idx++] = 0xEB;
+    int doneJump = idx++;
+
+    int inactiveLabel = idx;
+    trampMem[idx++] = 0x9D; // popfq
+    trampMem[idx++] = 0x59; // pop rcx
+    memcpy(&trampMem[idx], (void*)targetAddr, 5); idx += 5;
+    trampMem[idx++] = 0xE9;
+    int32_t inactiveBack = (int32_t)((targetAddr + 5) - ((uintptr_t)&trampMem[idx] + 4));
+    memcpy(&trampMem[idx], &inactiveBack, 4); idx += 4;
+
+    int doneLabel = idx;
+    trampMem[idx++] = 0x9D; // popfq
+    trampMem[idx++] = 0x59; // pop rcx
+    trampMem[idx++] = 0xE9;
+    int32_t activeBack = (int32_t)((targetAddr + 5) - ((uintptr_t)&trampMem[idx] + 4));
+    memcpy(&trampMem[idx], &activeBack, 4); idx += 4;
+
+    trampMem[inactiveJump] = (uint8_t)(inactiveLabel - inactiveJump - 1);
+    trampMem[doneJump] = (uint8_t)(doneLabel - doneJump - 1);
+
+    if (!PatchJump5(targetAddr, trampMem)) {
+        HookLog("CRITICAL: Could not patch " + std::string(label) + " gate.");
+        return false;
+    }
+
+    HookLog(std::string(label) + " gate installed.");
+    return true;
+}
+
 static bool InstallManualCameraGate(uintptr_t targetAddr, uint8_t disp, int gateIndex, uintptr_t moduleBase) {
     if (gateIndex < 0 || gateIndex >= MAX_MANUAL_CAMERA_GATES) return false;
 
@@ -408,6 +463,7 @@ static bool InstallRotationalGates(uintptr_t textStart, size_t textSize, uintptr
 
     bool ok = true;
     ok = InstallRollGate(blockAddr + 7) && ok;
+    ok = InstallRdxDispGate(blockAddr + 15, 0x04, &g_vertStrafeBits, &g_vertStrafeOverrideEnabled, "Vertical strafe") && ok;
     ok = InstallRaxDispGate(blockAddr + 20, 0x60, &g_yawBits, &g_yawOverrideEnabled, "Yaw") && ok;
     ok = InstallRaxDispGate(blockAddr + 25, 0x64, &g_pitchBits, &g_pitchOverrideEnabled, "Pitch") && ok;
 
@@ -659,12 +715,14 @@ bool ThrottleHook::IsSilenceEnabled() {
     return g_silenceEnabled;
 }
 
-void ThrottleHook::SetRotationalOverride(float roll, float yaw, float pitch, bool enabled, bool rollEnabled) {
-    g_rollBits = FloatToBits(roll);
+void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled) {
+    g_rollBits = FloatToBits(lateral);
+    g_vertStrafeBits = FloatToBits(vertical);
     g_yawBits = FloatToBits(yaw);
     g_pitchBits = FloatToBits(pitch);
     g_rotOverrideEnabled = enabled ? 1 : 0;
-    g_rollOverrideEnabled = (enabled && rollEnabled) ? 1 : 0;
+    g_rollOverrideEnabled = (enabled && lateralEnabled) ? 1 : 0;
+    g_vertStrafeOverrideEnabled = (enabled && verticalEnabled) ? 1 : 0;
     g_yawOverrideEnabled = enabled ? 1 : 0;
     g_pitchOverrideEnabled = enabled ? 1 : 0;
 }
@@ -673,6 +731,7 @@ void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool ena
     uint32_t bits = FloatToBits(value);
 
     g_rollOverrideEnabled = 0;
+    g_vertStrafeOverrideEnabled = 0;
     g_yawOverrideEnabled = 0;
     g_pitchOverrideEnabled = 0;
 
@@ -684,6 +743,9 @@ void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool ena
     if (offset == 0x58) {
         g_rollBits = bits;
         g_rollOverrideEnabled = 1;
+    } else if (offset == 0x5C) {
+        g_vertStrafeBits = bits;
+        g_vertStrafeOverrideEnabled = 1;
     } else if (offset == 0x60) {
         g_yawBits = bits;
         g_yawOverrideEnabled = 1;

@@ -1,6 +1,6 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "Standalone SFSE Plugin",
   "summary": "Experimental Standalone Starfield Script Extender (SFSE) plugin shipped purely as a standalone DLL and INI. Provides direct HOTAS/HOSAS authority for spaceship flight control (pitch, yaw, roll, strafe, throttle) via direct injection and engine writer-gating, combined with customizable DirectInput-to-KBM button mapping supporting up to 128 buttons.",
   "technologies": [

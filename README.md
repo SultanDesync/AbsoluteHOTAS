@@ -1,4 +1,4 @@
-# AbsoluteHOTAS 1.6
+# AbsoluteHOTAS 1.6.1
 
 Experimental SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield.
 
@@ -29,7 +29,7 @@ Use vJoy for flight axes only:
 - X: yaw
 - Y: pitch
 - Z: throttle
-- Rx: roll
+- Rx/Ry/Rz/Slider: roll, strafe, and reverse axes as configured
 
 Use Joystick Gremlin for shaping physical hardware into vJoy axes. For HOTAS buttons, hats, toggles, and mode switches, prefer the plugin's `[ShipButtons]` / `[ButtonExpansion]` DirectInput path when you want to avoid Steam Input or mixed-input flicker. Joystick Gremlin keyboard/mouse simulation can work, but Starfield may receive those simulated inputs inconsistently depending on focus, Steam Input, Proton routing, and UI input mode.
 

@@ -107,6 +107,8 @@ struct ShipButtonBinding {
 static constexpr ShipOutput NoOutput{ ShipOutputKind::None, 0, false };
 static constexpr ShipOutput SpaceOutput{ ShipOutputKind::Keyboard, 0x39, false };
 static constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
+static constexpr ShipOutput ReverseOutput{ ShipOutputKind::Keyboard, 0x1F, false };
+static constexpr uint32_t OwnerDigitalReverse = 0x00000002u;
 static constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 
 static std::vector<ShipButtonBinding> s_shipButtonBindings;
@@ -565,11 +567,13 @@ void ThrottleController::LoadConfig() {
     s_config.rollAxisId = (int)ini.GetLongValue("Hardware", "iRollAxis", 0x33);
     s_config.strafeLatAxisId = (int)ini.GetLongValue("Hardware", "iStrafeLatAxis", 0x33);
     s_config.strafeVertAxisId = (int)ini.GetLongValue("Hardware", "iStrafeVertAxis", 0x34);
+    s_config.reverseAxisId = (int)ini.GetLongValue("Hardware", "iReverseAxis", 0x36);
 
     s_config.fPitchSensitivity = (float)ini.GetDoubleValue("Hardware", "fPitchSensitivity", 1.0);
     s_config.fYawSensitivity = (float)ini.GetDoubleValue("Hardware", "fYawSensitivity", 1.0);
     s_config.fRollSensitivity = (float)ini.GetDoubleValue("Hardware", "fRollSensitivity", 1.0);
     s_config.fStrafeSensitivity = (float)ini.GetDoubleValue("Hardware", "fStrafeSensitivity", 1.0);
+    s_config.fReverseSensitivity = (float)ini.GetDoubleValue("Hardware", "fReverseSensitivity", 1.0);
 
     s_config.bInvertPitch = ini.GetBoolValue("Hardware", "bInvertPitch", true);
     s_config.bInvertThrottle = ini.GetBoolValue("Hardware", "bInvertThrottle", false);
@@ -577,6 +581,7 @@ void ThrottleController::LoadConfig() {
     s_config.bInvertRoll = ini.GetBoolValue("Hardware", "bInvertRoll", false);
     s_config.bInvertStrafeLat = ini.GetBoolValue("Hardware", "bInvertStrafeLat", false);
     s_config.bInvertStrafeVert = ini.GetBoolValue("Hardware", "bInvertStrafeVert", false);
+    s_config.bInvertReverse = ini.GetBoolValue("Hardware", "bInvertReverse", false);
 
     s_config.activateButtonId = (int)ini.GetLongValue("Buttons", "iActivateButtonId", 69);
     s_config.stopButtonId = (int)ini.GetLongValue("Buttons", "iStopButtonId", 70);
@@ -588,6 +593,8 @@ void ThrottleController::LoadConfig() {
     s_config.reverseEnabled = ini.GetBoolValue("Normalization", "bReverseEnabled", false);
     s_config.unipolarMode = ini.GetBoolValue("Normalization", "bUnipolarMode", true);
     s_config.idlePlateau = (float)ini.GetDoubleValue("Normalization", "fIdlePlateau", 0.05);
+    s_config.reverseDeadzone = (float)ini.GetDoubleValue("Normalization", "fReverseDeadzone", 0.05);
+    s_config.reverseActivationThreshold = (float)ini.GetDoubleValue("Normalization", "fReverseActivationThreshold", 0.05);
     s_config.incrementalThrottleMode = ini.GetBoolValue("Normalization", "bIncrementalThrottleMode", false);
     s_config.throttleRampRate = (float)ini.GetDoubleValue("Normalization", "fThrottleRampRate", 0.67);
     s_config.physicsAdherenceMode = ini.GetBoolValue("Normalization", "bPhysicsAdherenceMode", false);
@@ -598,8 +605,19 @@ void ThrottleController::LoadConfig() {
     s_config.pollRateHz = (int)ini.GetLongValue("Injection", "iPollRateHz", 120);
     s_config.throttleBurstMs = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled = ini.GetBoolValue("Injection", "bRollEnabled", true);
+    s_config.reverseAxisEnabled = ini.GetBoolValue("Injection", "bReverseAxisEnabled", true);
     s_config.logThrottle = ini.GetBoolValue("Injection", "bLogThrottle", false);
     g_verboseLog = s_config.logThrottle;
+
+    s_config.digitalReverseButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalReverseButton", -1);
+    s_config.digitalRollLeftButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalRollLeftButton", -1);
+    s_config.digitalRollRightButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalRollRightButton", -1);
+    s_config.digitalStrafeLeftButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeLeftButton", -1);
+    s_config.digitalStrafeRightButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeRightButton", -1);
+    s_config.digitalStrafeUpButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeUpButton", -1);
+    s_config.digitalStrafeDownButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeDownButton", -1);
+    s_config.digitalRollValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalRollValue", 1.0);
+    s_config.digitalStrafeValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalStrafeValue", 1.0);
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
     LoadShipButtonBindings(ini);
@@ -932,6 +950,36 @@ void ThrottleController::ControlLoop() {
             }
         };
 
+        auto IsButtonPressed = [&](int buttonId) -> bool {
+            return buttonId > 0 && buttonId <= 128 &&
+                ((state.rgbButtons[buttonId - 1] & 0x80) != 0);
+        };
+        const bool digitalReverseBound = s_config.digitalReverseButton > 0 && s_config.digitalReverseButton <= 128;
+        const bool digitalReverseHeld = digitalReverseBound && IsButtonPressed(s_config.digitalReverseButton);
+
+        auto ApplyUnipolarDeadzone = [](float value, float deadzone) {
+            const float dz = std::clamp(deadzone, 0.0f, 0.95f);
+            if (value <= dz) return 0.0f;
+            return (value - dz) / (1.0f - dz);
+        };
+
+        auto NormalizeReverseInput = [&]() {
+            float value = 0.0f;
+            if (s_config.reverseAxisEnabled && !digitalReverseBound) {
+                value = ((float)GetRawAxis(s_config.reverseAxisId)) / 65535.0f;
+                value = s_config.bInvertReverse ? (1.0f - value) : value;
+                value = std::clamp(value * s_config.fReverseSensitivity, 0.0f, 1.0f);
+                value = ApplyUnipolarDeadzone(value, s_config.reverseDeadzone);
+            }
+
+            return std::clamp(value, 0.0f, 1.0f);
+        };
+
+        float reverseAxis = NormalizeReverseInput();
+        const bool reverseAxisHeld = reverseAxis > s_config.reverseActivationThreshold;
+        const bool reverseHeld = digitalReverseHeld || reverseAxisHeld;
+        SetOutputHeld(ReverseOutput, OwnerDigitalReverse, reverseHeld);
+
         // 1. POLL ALL HARDWARE AXES
         auto NormalizeBipolarRate = [&](long rawValue) -> float {
             long center = s_config.detentCenter;
@@ -955,7 +1003,13 @@ void ThrottleController::ControlLoop() {
         };
 
         float throttle = 0.0f;
-        if (s_config.incrementalKeyboardMode) {
+        if (reverseHeld) {
+            if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
+                throttle = SafeReadThrottle(s_activeThrottlePtr);
+            } else {
+                throttle = 0.0f;
+            }
+        } else if (s_config.incrementalKeyboardMode) {
             float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxisId));
 
             static DWORD lastKbmPulseTime = 0;
@@ -1006,14 +1060,33 @@ void ThrottleController::ControlLoop() {
         auto NormBipolar = [&](int axisId, float sens, bool invert) {
             float val = ((float)GetRawAxis(axisId) - 32768.0f) / 32768.0f;
             val *= sens;
-            return invert ? -val : val;
+            val = invert ? -val : val;
+            return std::clamp(val, -1.0f, 1.0f);
+        };
+
+        auto ApplyDeadzone = [](float value, float deadzone) {
+            const float dz = std::clamp(deadzone, 0.0f, 0.95f);
+            if (std::abs(value) <= dz) return 0.0f;
+            const float sign = value < 0.0f ? -1.0f : 1.0f;
+            return sign * ((std::abs(value) - dz) / (1.0f - dz));
         };
 
         float pitch = NormBipolar(s_config.pitchAxisId, s_config.fPitchSensitivity, s_config.bInvertPitch);
         float yaw   = NormBipolar(s_config.yawAxisId,   s_config.fYawSensitivity,   s_config.bInvertYaw);
         float roll  = NormBipolar(s_config.rollAxisId,  s_config.fRollSensitivity,  s_config.bInvertRoll);
-        float strafeX = NormBipolar(s_config.strafeLatAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat);
-        float strafeY = NormBipolar(s_config.strafeVertAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert);
+        if (IsButtonPressed(s_config.digitalRollLeftButton)) roll -= s_config.digitalRollValue;
+        if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
+        roll = std::clamp(roll, -1.0f, 1.0f);
+
+        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat), 0.05f);
+        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert), 0.05f);
+        if (IsButtonPressed(s_config.digitalStrafeLeftButton)) strafeX -= s_config.digitalStrafeValue;
+        if (IsButtonPressed(s_config.digitalStrafeRightButton)) strafeX += s_config.digitalStrafeValue;
+        if (IsButtonPressed(s_config.digitalStrafeUpButton)) strafeY += s_config.digitalStrafeValue;
+        if (IsButtonPressed(s_config.digitalStrafeDownButton)) strafeY -= s_config.digitalStrafeValue;
+        strafeX = std::clamp(strafeX, -1.0f, 1.0f);
+        strafeY = std::clamp(strafeY, -1.0f, 1.0f);
+
         const bool strafeModifierHeld = std::abs(strafeX) > 0.05f || std::abs(strafeY) > 0.05f;
         SetOutputHeld(SpaceOutput, OwnerStrafeModifier, strafeModifierHeld);
 
@@ -1111,10 +1184,19 @@ void ThrottleController::ControlLoop() {
                     : std::max(1, (s_config.pollRateHz * s_config.throttleBurstMs) / 1000);
 
                 // Roll shares the +0x58 writer with lateral strafe. Own that slot only
-                // while the roll axis is actually displaced so vanilla/Gremlin strafe
-                // can pass through when the pilot is not rolling.
+                // while roll or plugin-owned lateral strafe is displaced.
                 bool rollOverrideActive = s_config.rollEnabled && (std::abs(roll) > 0.05f);
-                ThrottleHook::SetRotationalOverride(roll, yaw, pitch, true, rollOverrideActive);
+                bool strafeLatOverrideActive = std::abs(strafeX) > 0.05f;
+                bool strafeVertOverrideActive = std::abs(strafeY) > 0.05f;
+                float lateral = strafeLatOverrideActive ? strafeX : roll;
+                ThrottleHook::SetRotationalOverride(
+                    lateral,
+                    yaw,
+                    pitch,
+                    true,
+                    strafeLatOverrideActive || rollOverrideActive,
+                    strafeY,
+                    strafeVertOverrideActive);
                 static bool s_lastPhysicsAdherenceActive = false;
                 bool releaseControlForPhysics = false;
                 if (s_config.physicsAdherenceMode) {
@@ -1134,7 +1216,7 @@ void ThrottleController::ControlLoop() {
                     }
                 }
 
-                if (reverseKeyHeld || releaseControlForPhysics || s_config.incrementalKeyboardMode) {
+                if (reverseKeyHeld || reverseHeld || releaseControlForPhysics || s_config.incrementalKeyboardMode) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
                 } else if (curBoost) {
@@ -1143,14 +1225,15 @@ void ThrottleController::ControlLoop() {
                      // SILENT WINDOW
                      s_boostKickFrames--;
                 } else {
+                     float commandedThrottle = throttle;
                      bool firstThrottleCommand = (lastInjectedHardwareValue == -999.0f);
                      bool throttleMoved = firstThrottleCommand ||
-                         (std::abs(throttle - lastInjectedHardwareValue) > kThrottleDeltaAuthority);
+                         (std::abs(commandedThrottle - lastInjectedHardwareValue) > kThrottleDeltaAuthority);
 
                      if (throttleMoved) {
                          s_throttleBurstFrames = throttleBurstFrameCount;
-                         s_throttleBurstValue = throttle;
-                         lastInjectedHardwareValue = throttle;
+                         s_throttleBurstValue = commandedThrottle;
+                         lastInjectedHardwareValue = commandedThrottle;
                      }
 
                      // Delta burst authority: write the paired throttle fields for a short
