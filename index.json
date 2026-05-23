@@ -1,6 +1,6 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "type": "Standalone SFSE Plugin",
   "summary": "Experimental Standalone Starfield Script Extender (SFSE) plugin shipped purely as a standalone DLL and INI. Provides direct HOTAS/HOSAS authority for spaceship flight control (pitch, yaw, roll, strafe, throttle) via direct injection and engine writer-gating, combined with customizable DirectInput-to-KBM button mapping supporting up to 128 buttons.",
   "technologies": [
@@ -48,7 +48,7 @@
     },
     "projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini": {
       "role": "User Configuration File",
-      "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, idle deadzones, and debugging modes."
+      "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, and idle deadzones."
     }
   },
   "technical_details": {

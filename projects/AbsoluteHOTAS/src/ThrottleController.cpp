@@ -586,6 +586,9 @@ void ThrottleController::LoadConfig() {
     s_config.activateButtonId = (int)ini.GetLongValue("Buttons", "iActivateButtonId", 69);
     s_config.stopButtonId = (int)ini.GetLongValue("Buttons", "iStopButtonId", 70);
     s_config.boostButtonId = (int)ini.GetLongValue("Buttons", "iBoostButtonId", -1);
+    if (s_config.boostButtonId <= 0) {
+        s_config.boostButtonId = (int)ini.GetLongValue("ShipButtons", "iFireBoostersButton", -1);
+    }
     s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", false);
     
     s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 16384);
@@ -698,6 +701,7 @@ static int  s_activeCandidateIndex = -1;
 static uintptr_t s_activeThrottlePtr = 0;
 static int s_plausibilityFailCount = 0;
 static bool s_lastLogLockedState = false;
+static bool s_reacquireWatchdogEnabled = false;
 static int s_boostKickFrames = 0; 
 static float s_lastInjectedThrottle = -999.0f;
 static int s_handoverGraceFrames = 0;
@@ -711,6 +715,7 @@ static void DisarmFlightControlState() {
     s_activeThrottlePtr = 0;
     s_plausibilityFailCount = 0;
     s_boostKickFrames = 0;
+    s_reacquireWatchdogEnabled = false;
     s_lastInjectedThrottle = -999.0f;
     s_handoverGraceFrames = 0;
     s_throttleBurstFrames = 0;
@@ -722,25 +727,20 @@ static void DisarmFlightControlState() {
     ThrottleHook::ClearCandidates();
 }
 
-// ---- Main Control Loop ----
-static void SafeDumpMemory(uintptr_t baseAddr) {
-    char header[128];
-    sprintf_s(header, "---- [ScoutMode] Memory Dump around 0x%llX ----", (unsigned long long)baseAddr);
-    RawCtrlLog(header);
-
-    char line[256];
-    for (int offset = -0x20; offset <= 0x100; offset += 0x10) {
-        uintptr_t addr = baseAddr + offset;
-        __try {
-            uint64_t v1 = *(uint64_t*)addr;
-            uint64_t v2 = *(uint64_t*)(addr + 8);
-            sprintf_s(line, "Offset %02X: %016llX %016llX", offset, v1, v2);
-        } __except (EXCEPTION_EXECUTE_HANDLER) { 
-            sprintf_s(line, "Offset %02X: [READ_FAIL]", offset); 
-        }
-        RawCtrlLog(line);
+static void ArmDiscoveryForReacquire(const char* reason) {
+    if (reason) {
+        CtrlLog(std::string("[SignalHunter] Re-arming discovery: ") + reason);
     }
-    RawCtrlLog("--------------------------------------------------");
+    g_discoveryArmed = true;
+    g_discoveryLocked = false;
+    s_activeCandidateIndex = -1;
+    s_activeThrottlePtr = 0;
+    s_plausibilityFailCount = 0;
+    s_throttleBurstFrames = 0;
+    ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
+    ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::ClearCandidates();
+    ThrottleHook::SetCaptureEnabled(true);
 }
 
 void ThrottleController::ControlLoop() {
@@ -804,8 +804,6 @@ void ThrottleController::ControlLoop() {
     uint64_t iter = 0;
     float lastInjectedHardwareValue = -999.0f;
     int candCount = 0;
-    bool prevBracketLeft = false;
-    bool prevBracketRight = false;
     bool wasPiloting = false;
 
     while (s_running) {
@@ -849,26 +847,16 @@ void ThrottleController::ControlLoop() {
             lastInjectedHardwareValue = -999.0f;
             if (s_config.alwaysOn) {
                 CtrlLog("[PilotState] Standalone mode active; discovery armed automatically.");
+                s_reacquireWatchdogEnabled = true;
                 g_discoveryArmed = true;
                 ThrottleHook::SetCaptureEnabled(true);
             } else {
-                CtrlLog("[PilotState] Standalone mode active; waiting for F8 or activate button.");
+                CtrlLog("[PilotState] Standalone mode active; waiting for activate button.");
             }
             wasPiloting = true;
         }
 
-        bool curF8 = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-        static bool prevF8 = false;
-
-        bool curF10 = (GetAsyncKeyState(s_config.scoutKey) & 0x8000) != 0;
-        static bool prevF10 = false;
         bool reverseKeyHeld = (GetAsyncKeyState('S') & 0x8000) != 0;
-
-        // F10 Scout Mode: Memory Dump
-        if (curF10 && !prevF10 && s_activeThrottlePtr) {
-            SafeDumpMemory(s_activeThrottlePtr);
-        }
-        prevF10 = curF10;
 
         bool curActivate = false;
         bool curStop = false;
@@ -883,6 +871,9 @@ void ThrottleController::ControlLoop() {
         }
         if (s_config.boostButtonId > 0 && s_config.boostButtonId <= 128) {
             curBoost = (state.rgbButtons[s_config.boostButtonId - 1] & 0x80) != 0;
+            if (shipButtonStateValid) {
+                curBoost = curBoost || ((shipButtonState.rgbButtons[s_config.boostButtonId - 1] & 0x80) != 0);
+            }
         }
 
         // Boost Release: Arm a short "Silence" window to allow external Joystick Gremlin pulses through
@@ -896,11 +887,17 @@ void ThrottleController::ControlLoop() {
         static bool prevActivate = false;
         static bool prevStop = false;
 
-        // F8 / HOTAS Activate (Force Reset)
-        if ((curF8 && !prevF8) || (curActivate && !prevActivate)) {
+        bool curFailsafeReset = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
+            ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) &&
+            ((GetAsyncKeyState(VK_F8) & 0x8000) != 0);
+        static bool prevFailsafeReset = false;
+
+        // HOTAS Activate / keyboard failsafe reset.
+        if ((curActivate && !prevActivate) || (curFailsafeReset && !prevFailsafeReset)) {
              CtrlLog("==================================================");
-             CtrlLog("[SignalHunter] MANUAL TRIGGER: F8/HOTAS pressed. Resetting hooks.");
+             CtrlLog("[SignalHunter] MANUAL TRIGGER: activate/failsafe reset pressed. Resetting hooks.");
              CtrlLog("==================================================");
+             s_reacquireWatchdogEnabled = true;
              g_discoveryArmed = true; 
              g_discoveryLocked = false;
              s_activeThrottlePtr = 0;
@@ -919,6 +916,7 @@ void ThrottleController::ControlLoop() {
              CtrlLog("==================================================");
              CtrlLog("[SignalHunter] MANUAL STOP: HOTAS Stop pressed. Disarming hooks.");
              CtrlLog("==================================================");
+             s_reacquireWatchdogEnabled = false;
              g_discoveryArmed = false; 
              g_discoveryLocked = false;
              s_activeThrottlePtr = 0;
@@ -932,7 +930,7 @@ void ThrottleController::ControlLoop() {
              ThrottleHook::SetCaptureEnabled(true); // Back to passive mode waiting for 0.0314
         }
         
-        prevF8 = curF8;
+        prevFailsafeReset = curFailsafeReset;
         prevActivate = curActivate;
         prevStop = curStop;
 
@@ -1127,13 +1125,14 @@ void ThrottleController::ControlLoop() {
                     s_activeCandidateIndex = i;
                     s_activeThrottlePtr = cand;
                     g_discoveryLocked = true;
+                    s_reacquireWatchdogEnabled = true;
                     s_plausibilityFailCount = 0;
                     ThrottleHook::SetCaptureEnabled(false);
                     ThrottleHook::SetSilenceEnabled(false);
                     break;
                 }
 
-                // MANUAL CORRELATION LOCK (F8): If magic number fails, F8 arms pure stability search.
+                // MANUAL CORRELATION LOCK: if the signpost fails, activation arms pure stability search.
                 if (g_candidateAges[i] >= 15 && memVal >= -2.1f && memVal <= 2.1f) {
                     CtrlLog("**************************************************");
                     CtrlLog("[SignalHunter] STABLE SIGNAL DETECTED! Locking (Manual Fallback).");
@@ -1143,6 +1142,7 @@ void ThrottleController::ControlLoop() {
                     s_activeCandidateIndex = i;
                     s_activeThrottlePtr = cand;
                     g_discoveryLocked = true;
+                    s_reacquireWatchdogEnabled = true;
                     g_discoveryArmed = false; // Disarm since it was manual
                     s_plausibilityFailCount = 0;
                     ThrottleHook::SetCaptureEnabled(false);
@@ -1152,24 +1152,13 @@ void ThrottleController::ControlLoop() {
             }
         }
 
-        // Manual override hotkeys
-        bool curLeft = (GetAsyncKeyState(VK_OEM_4) & 0x8000) != 0;
-        bool curRight = (GetAsyncKeyState(VK_OEM_6) & 0x8000) != 0;
-        if (curLeft && !prevBracketLeft) {
-            s_activeCandidateIndex = (s_activeCandidateIndex <= -1) ? candCount - 1 : s_activeCandidateIndex - 1;
-            s_activeThrottlePtr = (s_activeCandidateIndex >= 0) ? ThrottleHook::GetCandidate(s_activeCandidateIndex) : 0;
-            g_discoveryLocked = true;
-            ThrottleHook::SetCaptureEnabled(false);
-            char buf[128]; sprintf_s(buf, "Manual Mode: Candidate #%d", s_activeCandidateIndex); CtrlLog(buf);
+        if (s_reacquireWatchdogEnabled) {
+            if (g_discoveryLocked && !s_activeThrottlePtr) {
+                ArmDiscoveryForReacquire("locked state had no active pointer");
+            } else if (!g_discoveryLocked && !g_discoveryArmed) {
+                ArmDiscoveryForReacquire("inactive state after prior lock");
+            }
         }
-        if (curRight && !prevBracketRight) {
-            s_activeCandidateIndex = (s_activeCandidateIndex >= candCount - 1) ? -1 : s_activeCandidateIndex + 1;
-            s_activeThrottlePtr = (s_activeCandidateIndex >= 0) ? ThrottleHook::GetCandidate(s_activeCandidateIndex) : 0;
-            g_discoveryLocked = true;
-            ThrottleHook::SetCaptureEnabled(false);
-            char buf[128]; sprintf_s(buf, "Manual Mode: Candidate #%d", s_activeCandidateIndex); CtrlLog(buf);
-        }
-        prevBracketLeft = curLeft; prevBracketRight = curRight;
 
         // Injection & Hysteresis
         if (s_activeThrottlePtr) {
@@ -1263,15 +1252,9 @@ void ThrottleController::ControlLoop() {
                 s_plausibilityFailCount++;
                 if (s_plausibilityFailCount > 60) { // 0.5s of failure required to drop
                     CtrlLog("[SignalHunter] Persistent signal loss. Pointer invalidated.");
-                    s_activeThrottlePtr = 0;
-                    g_discoveryLocked = false;
+                    ArmDiscoveryForReacquire("persistent signal loss");
                     lastInjectedHardwareValue = -999.0f;
-                    s_throttleBurstFrames = 0;
                     ReleaseAllShipButtonOutputs();
-                    ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
-                    ThrottleHook::SetSilenceEnabled(false);
-                    ThrottleHook::ClearCandidates();
-                    ThrottleHook::SetCaptureEnabled(true); // Re-enable hunting
                 }
             }
         }
@@ -1319,7 +1302,7 @@ void ThrottleController::Start() {
     if (s_running) return;
     s_running = true;
     
-    // In standalone mode discovery is armed by bAlwaysOn, F8, or the activate button.
+    // In standalone mode discovery is armed by bAlwaysOn or the activate button.
     ThrottleHook::SetCaptureEnabled(false);
     
     s_thread = std::thread(ControlLoop);

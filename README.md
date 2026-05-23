@@ -1,4 +1,4 @@
-# AbsoluteHOTAS 1.6.1
+# AbsoluteHOTAS 1.6.2
 
 Experimental SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield.
 
@@ -41,6 +41,8 @@ Examples:
 - reverse/brake slider -> vJoy reverse axis
 
 Do not use Steam Input or Steam controller bindings for this setup. Steam controller translation can add another input layer between the HOTAS and Starfield, which makes behavior harder to diagnose and can fight the plugin.
+
+`Ctrl+Alt+F8` is reserved as a hard-coded keyboard fail-safe reset. It re-arms the plugin hooks even when no HOTAS activation button is available.
 
 ## Ship Buttons
 

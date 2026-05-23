@@ -71,8 +71,6 @@ public:
         bool    reverseAxisEnabled = true;
 
         bool    logThrottle = false;    // Log throttle values to file
-        int     scoutKey = 0x79;        // Virtual Key Code for Scout Mode (F10 default)
-
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 

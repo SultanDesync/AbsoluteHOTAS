@@ -18,7 +18,7 @@ is required for the standalone build.
 The controller starts when SFSE loads the DLL. Discovery is controlled by:
 
 - `bAlwaysOn = true`: arm discovery when the DLL starts.
-- `bAlwaysOn = false`: wait for `F8` or `iActivateButtonId`.
+- `bAlwaysOn = false`: wait for `iActivateButtonId` or Ctrl+Alt+F8.
 - `iStopButtonId`: disarm the current capture/override state.
 
 The default public configuration leaves `bAlwaysOn = false` so users can arm
@@ -42,7 +42,7 @@ show:
 
 - `[Main] Plugin load complete.`
 - `[Controller] Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.`
-- `[PilotState] Standalone mode active; waiting for F8 or activate button.`
+- `[PilotState] Standalone mode active; waiting for activate button.`
 
 If `bAlwaysOn=true`, the final line should instead report that discovery was
 armed automatically.
