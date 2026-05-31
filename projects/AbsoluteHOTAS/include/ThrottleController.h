@@ -2,8 +2,10 @@
 #include <atomic>
 #include <thread>
 #include <string>
+#include <vector>
 #include <chrono>
 #include <fstream>
+#include "BindingRef.h"
 
 // DirectInput polling, normalization, and memory injection.
 // Runs on a dedicated background thread at ~120Hz.
@@ -14,20 +16,24 @@ public:
         // [General]
         bool    enabled = true;
 
-        // [Hardware]
+        // [Hardware] — Legacy fallback device (used when BindingRef has no device)
         int     vJoyDeviceId = 1;         // vJoy device number (1-16)
         std::string deviceName;           // Optional DirectInput instance/product name match
-        int     axisDeviceIndex = 0;      // [InputDevices] fallback DirectInput enumeration index
-        std::string axisDeviceName;       // [InputDevices] axis source device name match
-        int     shipButtonDeviceIndex = 0;// [InputDevices] fallback DirectInput enumeration index
-        std::string shipButtonDeviceName; // [InputDevices] ship button source device name match
-        int     throttleAxisId = 0x32;    // HID usage: 0x32 = Z axis (default)
-        int     pitchAxisId = 0x31;       // HID usage: 0x31 = Y axis
-        int     yawAxisId = 0x30;         // HID usage: 0x30 = X axis
-        int     rollAxisId = 0x33;        // HID usage: 0x33 = Rx axis
-        int     strafeLatAxisId = 0x33;   // HID usage: 0x33 = Rx axis
-        int     strafeVertAxisId = 0x34;  // HID usage: 0x34 = Ry axis
-        int     reverseAxisId = 0x36;     // HID usage: 0x36 = Slider 0
+
+        // [InputDevices] — Legacy fallback device names for bindings without explicit device
+        int     axisDeviceIndex = 0;
+        std::string axisDeviceName;
+        int     shipButtonDeviceIndex = 0;
+        std::string shipButtonDeviceName;
+
+        // Per-binding axis references (DeviceName@AxisUsageId or just AxisUsageId)
+        BindingRef throttleAxis;
+        BindingRef pitchAxis;
+        BindingRef yawAxis;
+        BindingRef rollAxis;
+        BindingRef strafeLatAxis;
+        BindingRef strafeVertAxis;
+        BindingRef reverseAxis;
 
         float   fPitchSensitivity = 1.0f;
         float   fYawSensitivity = 1.0f;
@@ -43,10 +49,10 @@ public:
         bool    bInvertStrafeVert = false;
         bool    bInvertReverse = false;
 
-        int     activateButtonId = 69;    // 1-indexed vJoy button to activate hook
-        int     stopButtonId = 70;        // 1-indexed vJoy button to stop hook
-        int     boostButtonId = -1;       // Optional: Button to pause injection for boost
-        bool    alwaysOn = false;         // Auto-arm discovery when the standalone controller starts
+        // Per-binding button references (DeviceName@ButtonId or just ButtonId)
+        BindingRef activateButton;
+        BindingRef stopButton;
+        bool    alwaysOn = true;          // Auto-arm discovery when the standalone controller starts
 
         // [Normalization]
         long    detentCenter = 16384;   // Raw axis value at physical detent center
@@ -74,14 +80,14 @@ public:
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 
-        // [DigitalAxes]
-        int     digitalReverseButton = -1;
-        int     digitalRollLeftButton = -1;
-        int     digitalRollRightButton = -1;
-        int     digitalStrafeLeftButton = -1;
-        int     digitalStrafeRightButton = -1;
-        int     digitalStrafeUpButton = -1;
-        int     digitalStrafeDownButton = -1;
+        // [DigitalAxes] — Per-binding button references
+        BindingRef digitalReverseButton;
+        BindingRef digitalRollLeftButton;
+        BindingRef digitalRollRightButton;
+        BindingRef digitalStrafeLeftButton;
+        BindingRef digitalStrafeRightButton;
+        BindingRef digitalStrafeUpButton;
+        BindingRef digitalStrafeDownButton;
         float   digitalRollValue = 1.0f;
         float   digitalStrafeValue = 1.0f;
     };
@@ -91,13 +97,26 @@ public:
     static void Stop();
     static Config& GetConfig();
 
+    // Signal the control loop to reload config from INI on its next iteration.
+    // Thread-safe — can be called from any thread (e.g., ImGui render thread).
+    static void ReloadConfig();
+
     // Returns the last normalized throttle value (-1.0 to 1.0)
     static float GetCurrentThrottle();
+
+    // Ship action info for the binding wizard
+    struct ShipActionInfo {
+        const char* label;
+        const char* iniKey;
+        BindingRef  binding;
+    };
+    static std::vector<ShipActionInfo> GetShipActionBindings();
 
 private:
     static Config s_config;
     static std::atomic<bool> s_running;
     static std::atomic<bool> s_isStandingDown;
+    static std::atomic<bool> s_configReloadRequested;
     static std::atomic<float> s_currentThrottle;
     static std::thread s_thread;
 

@@ -1,6 +1,8 @@
 #include "ThrottleHook.h"
 #include "ThrottleController.h"
 #include "RuntimePaths.h"
+#include "UIHook.h"
+#include "BindingWizard.h"
 #include <SFSE/Interfaces.h>
 #include <windows.h>
 #include <format>
@@ -77,12 +79,17 @@ static void InstallCrashLogger() {
 // SFSE plugin entry point
 SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 {
+    // Read bLogThrottle from INI once and cache the result globally.
+    RuntimePaths::EnableFileLogging();
+
     InitializeLog();
     InstallCrashLogger();
-    MainLog("======================================================");
-    MainLog("AbsoluteHOTAS v1.6.2 - Pure Flight Control");
-    MainLog("Target: Starfield 1.16.242 / SFSE 0.2.20");
-    MainLog("======================================================");
+
+    // Startup banner always writes so the user can confirm the plugin loaded.
+    RuntimePaths::AppendLogAlways("[Main]", "======================================================");
+    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.0.0 - Direct HID + In-Game UI");
+    RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
+    RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 
     // Phase 1: AOB scan + trampoline hook to capture ThrottleInterface pointer
     bool hookOk = ThrottleHook::Install();
@@ -99,6 +106,14 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
         } else {
             MainLog("WARNING: ThrottleController initialization failed or disabled in config.");
         }
+    }
+
+    // Phase 2: D3D12 ImGui overlay
+    if (UIHook::Install()) {
+        BindingWizard::Initialize();
+        MainLog("UIHook + BindingWizard initialized. Press Ctrl+Alt+B in-game.");
+    } else {
+        MainLog("WARNING: UIHook installation failed. In-game UI disabled.");
     }
 
     MainLog("Plugin load complete.");

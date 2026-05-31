@@ -1,16 +1,39 @@
-# AbsoluteHOTAS 1.6.2
+# AbsoluteHOTAS 2.0 Beta
 
-Experimental SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield.
+Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
-This build gives direct HOTAS authority for ship pitch, yaw, roll, and throttle. It also lets DirectInput buttons emit configurable keyboard/mouse outputs for Starfield spaceship actions.
+This build reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
+
+## ⚠️ Required: StarfieldCustom.ini Setup
+
+**You must add the following to your `StarfieldCustom.ini` or the plugin will not work.** This sets a known signal value that the plugin uses to locate the flight control memory structure at runtime.
+
+Add to `Documents\My Games\Starfield\StarfieldCustom.ini`:
+
+```ini
+[Spaceship]
+fThrottleAtEngineStart = 0.0314
+```
+
+> **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using MO2, add it to the profile's `StarfieldCustom.ini` instead.
+
+## What's New in 2.0
+
+- **Direct HID input** — Reads your HOTAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
+- **In-game binding wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware.
+- **Multi-device support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
+- **Per-axis settings** — Inversion toggles and sensitivity sliders per axis, configurable in-game.
+- **22 ship action bindings** — Fire weapons, boost, power management, scanner, target select, and more — all bindable to physical HOTAS buttons.
+- **Digital axis buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
+- **Live config reload** — Bindings saved from the wizard take effect immediately without restarting the game.
+- **Mouse cursor support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
+- **Silent logging** — No log file writes unless `bLogThrottle = true` in the INI (startup banner always writes).
 
 ## Requirements
 
 - Starfield 1.16.242
 - SFSE 0.2.20
 - Latest Starfield Address Library
-- vJoy
-- Joystick Gremlin
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 
@@ -18,160 +41,129 @@ Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 Data\SFSE\Plugins\
 ```
 
-## Recommended Setup
+Or install via MO2 using the provided archive.
 
-You can configure `AbsoluteHOTAS.ini` manually, or use the optional
-[AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator)
-to select devices, record button IDs, and write the INI.
+## Quick Start
 
-Use vJoy for flight axes only:
+1. Install the plugin files.
+2. Launch the game via SFSE.
+3. Press `Ctrl+Alt+B` to open the binding wizard.
+4. Go to the **Axes & Settings** tab, click **Bind** next to each axis, and move the physical control.
+5. Go to the **Ship Actions** tab and bind buttons to ship functions (boost, weapons, power, etc.).
+6. Click **Save & Apply**. Bindings take effect immediately.
 
-- X: yaw
-- Y: pitch
-- Z: throttle
-- Rx/Ry/Rz/Slider: roll, strafe, and reverse axes as configured
+`Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
 
-Use Joystick Gremlin for shaping physical hardware into vJoy axes. For HOTAS buttons, hats, toggles, and mode switches, prefer the plugin's `[ShipButtons]` / `[ButtonExpansion]` DirectInput path when you want to avoid Steam Input or mixed-input flicker. Joystick Gremlin keyboard/mouse simulation can work, but Starfield may receive those simulated inputs inconsistently depending on focus, Steam Input, Proton routing, and UI input mode.
+## In-Game Binding Wizard
 
-Examples:
+Press `Ctrl+Alt+B` to toggle the overlay. The wizard has five tabs:
 
-- hat up/down/left/right -> power management keys
-- trigger/buttons -> weapon keys
-- throttle button -> boost
-- reverse/brake slider -> vJoy reverse axis
+| Tab | Purpose |
+|-----|---------|
+| **Devices** | Live readout of all connected DirectInput devices, axes, and buttons. |
+| **Axes & Settings** | Bind flight axes (throttle, pitch, yaw, roll, strafe, reverse) with inversion and sensitivity controls. |
+| **Control Buttons** | Bind activate/stop buttons for the plugin's signal hunter. |
+| **Ship Actions** | Bind physical buttons to 22 ship functions (boost, weapons, power management, scanner, etc.). |
+| **Digital Axes** | Bind buttons to emulate axis input for roll, strafe, and reverse. |
 
-Do not use Steam Input or Steam controller bindings for this setup. Steam controller translation can add another input layer between the HOTAS and Starfield, which makes behavior harder to diagnose and can fight the plugin.
+## Manual Configuration
 
-`Ctrl+Alt+F8` is reserved as a hard-coded keyboard fail-safe reset. It re-arms the plugin hooks even when no HOTAS activation button is available.
+You can also edit `AbsoluteHOTAS.ini` directly. Axes use HID Usage ID syntax with optional device name prefix:
+
+```ini
+[Hardware]
+; Usage IDs: 0x30=X, 0x31=Y, 0x32=Z, 0x33=Rx, 0x34=Ry, 0x35=Rz, 0x36=Slider0, 0x37=Slider1
+iThrottleAxis = My Throttle@0x32
+iPitchAxis = My Stick@0x31
+iYawAxis = My Stick@0x30
+iRollAxis = My Pedals@0x33
+
+; Per-axis inversion
+bInvertPitch = true
+bInvertThrottle = false
+
+; Per-axis sensitivity (multiplier)
+fPitchSensitivity = 1.0
+fYawSensitivity = 1.0
+```
+
+Device names are matched case-insensitively against DirectInput instance or product names. If no device name is prefixed, the plugin uses the first device with that usage.
 
 ## Ship Buttons
 
-AbsoluteHOTAS can also consume HOTAS/vJoy DirectInput buttons from `[ShipButtons]` in `AbsoluteHOTAS.ini`. The optional [AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator) records the source button ID, and the plugin emits the vanilla Starfield keyboard or mouse input for that ship action. Reverse/brake is handled separately by the reverse slider memory-injection path.
-
-Input devices are selected per input family:
+Button IDs are 1-indexed DirectInput buttons (1–128). Prefix with device name to target a specific device:
 
 ```ini
-[InputDevices]
-sAxisDeviceName = vJoy
-iAxisDeviceIndex = 0
-sShipButtonDeviceName = VKB
-iShipButtonDeviceIndex = 0
+[ShipButtons]
+bShipButtonsEnabled = true
+iFireBoostersButton = VKB Gunfighter@44
+iFireWeapon0Button = VKB Gunfighter@1
+iSelectTargetButton = VKB Gunfighter@2
+iIncreaseSystemPowerButton = -1
 ```
 
-Device names match DirectInput instance or product names case-insensitively. If a name is empty, the corresponding 0-based index is used as a DirectInput enumeration fallback.
+Set an action to `-1` to disable it. Each ship button emits a configurable keyboard or mouse output to Starfield. Default outputs match Starfield's vanilla bindings.
 
-Button IDs are 1-indexed DirectInput buttons from `1..128`. Set an action to `-1` to disable it, or set `bShipButtonsEnabled = false` to leave all ship button output to Joystick Gremlin or another tool. Ship outputs mirror physical DirectInput button duration: press sends key/mouse down, release sends key/mouse up. Treat them as holds, not instant pulses; Starfield can miss very short synthetic taps.
-
-`[ShipButtonOutputs]` is optional. When it is omitted, the plugin uses the vanilla Starfield defaults. Supported override formats are:
+Override outputs in `[ShipButtonOutputs]`:
 
 ```ini
+[ShipButtonOutputs]
 sOpenScannerOutput = key:0x21
 sFireWeapon0Output = mouse:1
 sCancelOutput = none
 ```
 
-Keyboard values are scan codes. Mouse values support `mouse:1` left, `mouse:2` right, `mouse:3` middle, and `mouse:4` XBUTTON1. Synthetic input is delivered through Windows `SendInput`, so Starfield must be the foreground window for reliable in-game behavior.
-
-For manual setup, see:
-
-- [Ship button binding table](docs/reference/ship-button-bindings.md)
-- [Keyboard/mouse output reference](docs/reference/key-output-reference.md)
-
-Optional `[ButtonExpansion]` entries can also map extra physical DirectInput buttons directly to keyboard or mouse outputs, for example `iButton99 = key:0x14`. These are useful for menu or dialog helpers and are documented in the ship button binding table.
-
 ## Throttle Calibration
-
-Edit `AbsoluteHOTAS.ini`:
-
-```ini
-iThrottleAxis = 0x32
-bInvertThrottle = false
-iReverseAxis = 0x36
-bReverseEnabled = false
-bReverseAxisEnabled = true
-bUnipolarMode = true
-```
-
-The default beta setup is unipolar throttle: physical minimum is 0% thrust and physical maximum is 100% thrust. Reverse/brake should use the dedicated reverse slider fields:
-
-Set `bInvertThrottle = true` if your throttle axis reports physical minimum as maximum thrust and physical maximum as idle.
-
-- `iReverseAxis`
-- `fReverseSensitivity`
-- `bInvertReverse`
-- `fReverseDeadzone`
-- `fReverseActivationThreshold`
-- `bReverseAxisEnabled`
-
-Leave `bReverseEnabled = false` unless using legacy center-detent throttle reverse. It is separate from `bReverseAxisEnabled`.
-
-Only change `iDetentCenter` if you set `bUnipolarMode=false` for a centered throttle.
-
-Common values:
-
-- `0..65535` axis range: midpoint `32768`
-- `0..32768` axis range: midpoint `16384`
-
-If your hardware detent is offset, use the raw value shown in vJoy Monitor at the detent.
-
-## Tuning
-
-Throttle authority is applied as a short burst when the physical throttle moves, then released back to Starfield physics.
-
-```ini
-iPollRateHz = 120
-iThrottleBurstMs = 250
-```
-
-- Lower `iThrottleBurstMs` for a softer, more vanilla feel.
-- Set `iThrottleBurstMs = 0` for an instant one-frame throttle command.
-- Raise it if throttle changes feel too weak.
-
-Holding `S` releases throttle authority so vanilla reverse/brake behavior can take over.
-
-## HOSAS Incremental Throttle & Physics Adherence (Alpha)
-
-This release introduces an **Experimental Alpha** flight mode tailored for dual-joystick (HOSAS) configurations using a centering, spring-loaded axis for speed control.
-
-### Incremental Rate Throttle
-Rather than a direct 1:1 mapping (which resets your throttle to zero when the stick springs to center), **Incremental Mode** treats physical displacement as a rate accelerator/decelerator. When the stick is released back to center, the target speed cruise-locks exactly where it is. This is designed to play nicely with Starfield's native autopilot, boost decay, and landing/takeoff sequences without fighting the engine.
-
-### Keyboard Emulation Pulse (Simple HOSAS Mode)
-For pilots who want a robust alternate bindings pipeline with **zero memory-injection wiggles** and absolute immunity to game patches, we introduce **Keyboard Emulation Pulse Mode**.
-- It dynamically modulates standard `W` and `S` keyboard strokes. Pushing the stick further scales the key-press pulse frequency from a soft **230ms** down to a rapid-fire **20ms**, emulating dynamic analog acceleration.
-- Because it sends standard keyboard keys, the game stays in pure Keyboard/Mouse mode, **completely eliminating UI prompt flickering** between controller and keyboard modes.
-- Downstream memory injection is completely bypassed for the throttle while maintaining high-resolution analog memory overrides for Pitch, Yaw, and Roll.
-
-### Maneuver Physics Adherence
-Continuous throttle injection can override the game's natural speed envelope during sharp turns, making maneuvers feel wider. **Physics Adherence** automatically suspends memory injection when your right stick (Pitch/Yaw) is deflected beyond a threshold (default 15%) while your throttle is high (default >50%). This lets Starfield's native flight physics limit your speed for maximum turning rate, while still allowing you to manually feather the throttle below 50% for high-G tactical turns.
-
-Enable these features in your `AbsoluteHOTAS.ini` under the `[Normalization]` block:
 
 ```ini
 [Normalization]
-; Enable relative rate accumulation for spring-to-center sticks
-bIncrementalThrottleMode = false
+bUnipolarMode = true          ; 0% to 100% throttle range
+fIdlePlateau = 0.05           ; Bottom 5% treated as idle
+bReverseEnabled = false       ; Legacy center-detent reverse
+bReverseAxisEnabled = true    ; Dedicated reverse slider
+iDetentCenter = 16384         ; Only for bUnipolarMode=false
+```
+
+Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
+
+## Tuning
+
+```ini
+[Injection]
+iPollRateHz = 120             ; DirectInput polling rate
+iThrottleBurstMs = 250        ; Throttle authority burst duration
+bLogThrottle = false          ; Enable verbose logging
+```
+
+## HOSAS Modes (Experimental)
+
+For dual-joystick setups with spring-to-center throttle axes:
+
+```ini
+[Normalization]
+bIncrementalThrottleMode = false    ; Rate-based throttle accumulation
 fThrottleRampRate = 0.67
 
-; Enable turn physics speed-limiting adherence
-bPhysicsAdherenceMode = false
+bPhysicsAdherenceMode = false       ; Suspend injection during hard turns
 fPhysicsAdherenceDeflection = 0.15
 fPhysicsAdherenceThrottleThreshold = 0.50
 
-; Enable keyboard pulse emulation mode (prevents UI flicker, zero-dependency)
-bIncrementalKeyboardMode = false
+bIncrementalKeyboardMode = false    ; Pure keyboard pulse emulation (zero UI flicker)
 ```
 
 ## Logging
 
-Logging is off by default:
+Logging is **off by default**. Only the startup banner (4 lines) is written to confirm the plugin loaded.
 
-```ini
-bLogThrottle = false
-```
+Set `bLogThrottle = true` to enable full diagnostic logging. Logs rotate at 1 MB.
 
-Set it to `true` only when diagnosing input behavior.
+## Migration from 1.x
+
+- **vJoy and Joystick Gremlin are no longer required.** Remove them from your setup unless you use them for other games.
+- **`iBoostButtonId` is deprecated.** Use `iFireBoostersButton` in `[ShipButtons]` instead.
+- **`bAlwaysOn` defaults to `true`.** The plugin arms automatically on load. Activate/stop buttons are optional.
+- All axis bindings default to empty. Use the in-game wizard (`Ctrl+Alt+B`) or edit the INI manually.
 
 ## Notes
 
-This is a beta/experimental build. Expect tuning differences between HOTAS hardware, vJoy resolution, and Joystick Gremlin profiles.
+This is a beta build. Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bLogThrottle = true`).

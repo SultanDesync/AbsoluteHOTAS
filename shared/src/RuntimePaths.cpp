@@ -38,7 +38,14 @@ namespace RuntimePaths {
         return PluginDirectory() / L"AbsoluteHOTAS.log";
     }
 
+    static bool g_fileLoggingEnabled = false;
+
     bool IsFileLoggingEnabled()
+    {
+        return g_fileLoggingEnabled;
+    }
+
+    void EnableFileLogging()
     {
         wchar_t value[32]{};
         GetPrivateProfileStringW(L"Injection", L"bLogThrottle", L"0", value, static_cast<DWORD>(std::size(value)), IniPath().c_str());
@@ -57,15 +64,21 @@ namespace RuntimePaths {
             normalized.push_back(static_cast<wchar_t>(std::towlower(ch)));
         }
 
-        return normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on";
+        g_fileLoggingEnabled = (normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on");
     }
 
-    void AppendLog(const char* a_prefix, const std::string& a_message)
+    void AppendLogAlways(const char* a_prefix, const std::string& a_message)
     {
         std::ofstream log(LogPath(), std::ios::app);
         if (log.is_open()) {
             log << a_prefix << ' ' << a_message << '\n';
             log.flush();
         }
+    }
+
+    void AppendLog(const char* a_prefix, const std::string& a_message)
+    {
+        if (!g_fileLoggingEnabled) return;
+        AppendLogAlways(a_prefix, a_message);
     }
 }

@@ -1,7 +1,9 @@
+#include "PCH.h"
 #include "ThrottleController.h"
 #include "ThrottleHook.h"
 #include "AbsoluteGlobals.h"
 #include "RuntimePaths.h"
+#include "DeviceManager.h"
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -24,13 +26,10 @@
 ThrottleController::Config ThrottleController::s_config;
 std::atomic<bool>  ThrottleController::s_running{ false };
 std::atomic<bool>  ThrottleController::s_isStandingDown{ false };
+std::atomic<bool>  ThrottleController::s_configReloadRequested{ false };
 std::atomic<float> ThrottleController::s_currentThrottle{ 0.0f };
 std::thread        ThrottleController::s_thread;
 
-// DirectInput globals
-static LPDIRECTINPUT8 g_pDI = nullptr;
-static LPDIRECTINPUTDEVICE8 g_pAxisDevice = nullptr;
-static LPDIRECTINPUTDEVICE8 g_pShipButtonDevice = nullptr;
 static bool g_verboseLog = false;
 
 // ---- Logging ----
@@ -56,7 +55,7 @@ static void RotateLogIfNeeded() {
 static void RawCtrlLog(const char* msg) {
     if (!g_verboseLog) return;
     RotateLogIfNeeded();
-    RuntimePaths::AppendLog("[Controller]", msg);
+    RuntimePaths::AppendLogAlways("[Controller]", msg);
 }
 
 static void CtrlLog(const std::string& msg) {
@@ -98,7 +97,7 @@ struct ShipButtonBinding {
     const char* actionId;
     const char* sourceIniKey;
     const char* outputIniKey;
-    int buttonId;
+    BindingRef buttonRef;
     ShipOutput output;
     ShipBindingMode mode;
     bool previousPressed;
@@ -375,11 +374,48 @@ static void LoadButtonExpansionBindings(CSimpleIniA& ini) {
             continue;
         }
 
+        // For expansion buttons, we assume they use the global fallback device for now,
+        // or we could support DeviceName@Output? No, expansion buttons are just 
+        // [ButtonExpansion] iButton1 = key:0x12. If they want a device, they could do
+        // [ButtonExpansion] S-TECS@1 = key:0x12 ... but wait, the plan was to put the device 
+        // in the value, but ButtonExpansion puts the key in the key and the output in the value.
+        // E.g., iButton1 = key:0x14. It doesn't use the value for the input!
+        // To support per-device button expansions, we'd need to parse the KEY as the binding ref.
+        // Let's parse the key (key.pItem) which looks like "DeviceName@iButton42" or "iButton42".
+        
+        BindingRef ref = ParseBindingRef(key.pItem, -1);
+        int parsedBtnId = -1;
+        if (ref.HasDevice()) {
+            parsedBtnId = ParseExpansionButtonKey(ref.value > 0 ? ("iButton" + std::to_string(ref.value)).c_str() : "invalid");
+        } else {
+            parsedBtnId = buttonId;
+        }
+        
+        // Actually, ButtonExpansion is defined as `iButton12 = key:0x39`. The device name would have to go in the key: `DeviceName@iButton12 = key:0x39`.
+        // Let's do a simpler parse just for the device name from the key.
+        std::string deviceName = "";
+        std::string_view svKey(key.pItem);
+        auto atPos = svKey.rfind('@');
+        if (atPos != std::string_view::npos) {
+            deviceName = std::string(svKey.substr(0, atPos));
+            svKey = svKey.substr(atPos + 1);
+        }
+        int finalButtonId = ParseExpansionButtonKey(std::string(svKey).c_str());
+        
+        if (finalButtonId < 1 || finalButtonId > 128) {
+            continue;
+        }
+
+        BindingRef finalRef;
+        finalRef.deviceName = deviceName;
+        finalRef.value = finalButtonId;
+        finalRef.deviceIndex = -1;
+
         s_shipButtonBindings.push_back({
             "ButtonExpansion",
             key.pItem,
             key.pItem,
-            buttonId,
+            finalRef,
             output,
             ShipBindingMode::Hold,
             false
@@ -431,19 +467,21 @@ static void LoadShipButtonBindings(CSimpleIniA& ini) {
     for (const auto& def : defs) {
         const ShipOutput fallback = DefaultShipOutputForAction(def.actionId);
         const char* outputValue = ini.GetValue("ShipButtonOutputs", def.outputIniKey, nullptr);
+        BindingRef bRef = ParseBindingRef(ini.GetValue("ShipButtons", def.sourceIniKey, ""), -1);
+        
         ShipButtonBinding binding{
             def.actionId,
             def.sourceIniKey,
             def.outputIniKey,
-            static_cast<int>(ini.GetLongValue("ShipButtons", def.sourceIniKey, -1)),
+            bRef,
             outputValue ? ParseShipOutput(outputValue, fallback) : fallback,
             DefaultShipBindingModeForAction(def.actionId),
             false
         };
 
-        if (binding.buttonId > 128) {
+        if (binding.buttonRef.value > 128) {
             CtrlLog("Warning: [ShipButtons] " + std::string(def.sourceIniKey) + " is outside DirectInput's 1-128 button range; disabling.");
-            binding.buttonId = -1;
+            binding.buttonRef.value = -1;
         }
 
         s_shipButtonBindings.push_back(binding);
@@ -452,7 +490,7 @@ static void LoadShipButtonBindings(CSimpleIniA& ini) {
     LoadButtonExpansionBindings(ini);
 }
 
-static void UpdateShipButtonBindings(const DIJOYSTATE2& state) {
+static void UpdateShipButtonBindings() {
     if (!ThrottleController::GetConfig().shipButtonsEnabled) {
         ReleaseAllShipButtonOutputs();
         return;
@@ -460,8 +498,15 @@ static void UpdateShipButtonBindings(const DIJOYSTATE2& state) {
 
     for (size_t i = 0; i < s_shipButtonBindings.size(); ++i) {
         auto& binding = s_shipButtonBindings[i];
-        const bool pressed = binding.buttonId > 0 && binding.buttonId <= 128 &&
-            ((state.rgbButtons[binding.buttonId - 1] & 0x80) != 0);
+        bool pressed = false;
+
+        if (binding.buttonRef.value > 0 && binding.buttonRef.value <= 128) {
+            const DIJOYSTATE2* state = DeviceManager::GetCachedState(binding.buttonRef.deviceIndex);
+            if (state) {
+                pressed = ((state->rgbButtons[binding.buttonRef.value - 1] & 0x80) != 0);
+            }
+        }
+        
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
         if (binding.mode == ShipBindingMode::Hold) {
@@ -478,66 +523,6 @@ static void UpdateShipButtonBindings(const DIJOYSTATE2& state) {
 
         binding.previousPressed = pressed;
     }
-}
-
-struct DirectInputDeviceRequest {
-    std::string name;
-    int index;
-    int enumIndex;
-    const char* role;
-    LPDIRECTINPUTDEVICE8 device;
-};
-
-// ---- DirectInput device enumeration callback ----
-static BOOL CALLBACK EnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance, VOID* pContext) {
-    auto* request = static_cast<DirectInputDeviceRequest*>(pContext);
-    char buf[256];
-    sprintf_s(buf, "  DI Device[%d]: '%s' (%s)",
-        request->enumIndex,
-        pdidInstance->tszInstanceName,
-        pdidInstance->tszProductName);
-    CtrlLog(buf);
-
-    const std::string targetName = TrimLower(request->name);
-    const std::string instanceName = LowerAscii(pdidInstance->tszInstanceName);
-    const std::string productName = LowerAscii(pdidInstance->tszProductName);
-    const bool nameMatches = !targetName.empty() &&
-        (instanceName.find(targetName) != std::string::npos || productName.find(targetName) != std::string::npos);
-    const bool indexMatches = targetName.empty() && request->enumIndex == request->index;
-
-    if ((nameMatches || indexMatches) && !request->device) {
-        HRESULT hr = g_pDI->CreateDevice(pdidInstance->guidInstance, &request->device, NULL);
-        if (FAILED(hr)) {
-            CtrlLog("Failed to create DirectInput device!");
-            request->enumIndex++;
-            return DIENUM_CONTINUE;
-        }
-        CtrlLog(std::string("Selected this device for ") + request->role + ".");
-        return DIENUM_STOP;
-    }
-
-    request->enumIndex++;
-    return DIENUM_CONTINUE;
-}
-
-static LPDIRECTINPUTDEVICE8 SelectDirectInputDevice(const std::string& name, int index, const char* role) {
-    DirectInputDeviceRequest request{ name, index, 0, role, nullptr };
-    g_pDI->EnumDevices(DI8DEVCLASS_GAMECTRL, EnumJoysticksCallback, &request, DIEDFL_ATTACHEDONLY);
-    if (!request.device) {
-        CtrlLog(std::string("DirectInput device NOT found for ") + role + ".");
-    }
-    return request.device;
-}
-
-static bool PrepareDirectInputDevice(LPDIRECTINPUTDEVICE8 device, const char* role) {
-    if (!device) return false;
-    if (FAILED(device->SetDataFormat(&c_dfDIJoystick2))) {
-        CtrlLog(std::string("Failed to set DirectInput data format for ") + role + "!");
-        return false;
-    }
-    device->Acquire();
-    CtrlLog(std::string("DirectInput ") + role + " device acquired successfully!");
-    return true;
 }
 
 // ---- INI Config Loading ----
@@ -561,13 +546,13 @@ void ThrottleController::LoadConfig() {
     s_config.shipButtonDeviceName = ini.GetValue("InputDevices", "sShipButtonDeviceName", s_config.axisDeviceName.c_str());
     s_config.shipButtonDeviceIndex = (int)ini.GetLongValue("InputDevices", "iShipButtonDeviceIndex", s_config.axisDeviceIndex);
     
-    s_config.throttleAxisId = (int)ini.GetLongValue("Hardware", "iThrottleAxis", 0x32);
-    s_config.pitchAxisId = (int)ini.GetLongValue("Hardware", "iPitchAxis", 0x31);
-    s_config.yawAxisId = (int)ini.GetLongValue("Hardware", "iYawAxis", 0x30);
-    s_config.rollAxisId = (int)ini.GetLongValue("Hardware", "iRollAxis", 0x33);
-    s_config.strafeLatAxisId = (int)ini.GetLongValue("Hardware", "iStrafeLatAxis", 0x33);
-    s_config.strafeVertAxisId = (int)ini.GetLongValue("Hardware", "iStrafeVertAxis", 0x34);
-    s_config.reverseAxisId = (int)ini.GetLongValue("Hardware", "iReverseAxis", 0x36);
+    s_config.throttleAxis = ParseBindingRef(ini.GetValue("Hardware", "iThrottleAxis", ""), 0x32);
+    s_config.pitchAxis = ParseBindingRef(ini.GetValue("Hardware", "iPitchAxis", ""), 0x31);
+    s_config.yawAxis = ParseBindingRef(ini.GetValue("Hardware", "iYawAxis", ""), 0x30);
+    s_config.rollAxis = ParseBindingRef(ini.GetValue("Hardware", "iRollAxis", ""), 0x33);
+    s_config.strafeLatAxis = ParseBindingRef(ini.GetValue("Hardware", "iStrafeLatAxis", ""), 0x33);
+    s_config.strafeVertAxis = ParseBindingRef(ini.GetValue("Hardware", "iStrafeVertAxis", ""), 0x34);
+    s_config.reverseAxis = ParseBindingRef(ini.GetValue("Hardware", "iReverseAxis", ""), 0x36);
 
     s_config.fPitchSensitivity = (float)ini.GetDoubleValue("Hardware", "fPitchSensitivity", 1.0);
     s_config.fYawSensitivity = (float)ini.GetDoubleValue("Hardware", "fYawSensitivity", 1.0);
@@ -583,13 +568,10 @@ void ThrottleController::LoadConfig() {
     s_config.bInvertStrafeVert = ini.GetBoolValue("Hardware", "bInvertStrafeVert", false);
     s_config.bInvertReverse = ini.GetBoolValue("Hardware", "bInvertReverse", false);
 
-    s_config.activateButtonId = (int)ini.GetLongValue("Buttons", "iActivateButtonId", 69);
-    s_config.stopButtonId = (int)ini.GetLongValue("Buttons", "iStopButtonId", 70);
-    s_config.boostButtonId = (int)ini.GetLongValue("Buttons", "iBoostButtonId", -1);
-    if (s_config.boostButtonId <= 0) {
-        s_config.boostButtonId = (int)ini.GetLongValue("ShipButtons", "iFireBoostersButton", -1);
-    }
-    s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", false);
+    s_config.activateButton = ParseBindingRef(ini.GetValue("Buttons", "iActivateButtonId", ""), -1);
+    s_config.stopButton = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId", ""), -1);
+    // iBoostButtonId is deprecated in 2.0; boost is now in [ShipButtons] iFireBoostersButton
+    s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", true);
     
     s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 16384);
     s_config.detentDeadzone = ini.GetLongValue("Normalization", "iDetentDeadzone", 500);
@@ -612,13 +594,13 @@ void ThrottleController::LoadConfig() {
     s_config.logThrottle = ini.GetBoolValue("Injection", "bLogThrottle", false);
     g_verboseLog = s_config.logThrottle;
 
-    s_config.digitalReverseButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalReverseButton", -1);
-    s_config.digitalRollLeftButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalRollLeftButton", -1);
-    s_config.digitalRollRightButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalRollRightButton", -1);
-    s_config.digitalStrafeLeftButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeLeftButton", -1);
-    s_config.digitalStrafeRightButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeRightButton", -1);
-    s_config.digitalStrafeUpButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeUpButton", -1);
-    s_config.digitalStrafeDownButton = (int)ini.GetLongValue("DigitalAxes", "iDigitalStrafeDownButton", -1);
+    s_config.digitalReverseButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalReverseButton", ""), -1);
+    s_config.digitalRollLeftButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalRollLeftButton", ""), -1);
+    s_config.digitalRollRightButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalRollRightButton", ""), -1);
+    s_config.digitalStrafeLeftButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalStrafeLeftButton", ""), -1);
+    s_config.digitalStrafeRightButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalStrafeRightButton", ""), -1);
+    s_config.digitalStrafeUpButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalStrafeUpButton", ""), -1);
+    s_config.digitalStrafeDownButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalStrafeDownButton", ""), -1);
     s_config.digitalRollValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalRollValue", 1.0);
     s_config.digitalStrafeValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalStrafeValue", 1.0);
 
@@ -746,58 +728,86 @@ static void ArmDiscoveryForReacquire(const char* reason) {
 void ThrottleController::ControlLoop() {
     CtrlLog("=== DirectInput Polling Loop Starting ===");
 
-    if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (VOID**)&g_pDI, NULL))) {
-        CtrlLog("Failed to create DirectInput8!");
+    if (!DeviceManager::Initialize()) {
+        CtrlLog("Failed to initialize DeviceManager!");
         return;
     }
 
-    g_pAxisDevice = SelectDirectInputDevice(s_config.axisDeviceName, s_config.axisDeviceIndex, "axes");
+    DeviceManager::LogDeviceManifest();
 
-    if (!g_pAxisDevice) {
-        return;
-    }
+    // 1. Resolve and open all referenced devices
+    auto ResolveAndOpen = [](BindingRef& ref, int defaultIndex, const std::string& defaultName) {
+        if (!ref.IsValid()) return;
+        
+        int resolvedIndex = -1;
+        if (ref.HasDevice()) {
+            resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
+        } else {
+            resolvedIndex = DeviceManager::ResolveDevice("", defaultName, defaultIndex);
+        }
+        
+        if (resolvedIndex >= 0) {
+            ref.deviceIndex = resolvedIndex;
+            DeviceManager::OpenDevice(resolvedIndex);
+        } else {
+            char buf[256];
+            sprintf_s(buf, "Warning: Could not resolve device for binding: %s", ref.HasDevice() ? ref.deviceName.c_str() : defaultName.c_str());
+            CtrlLog(buf);
+        }
+    };
 
-    g_pShipButtonDevice = SelectDirectInputDevice(s_config.shipButtonDeviceName, s_config.shipButtonDeviceIndex, "ship buttons");
-    if (!g_pShipButtonDevice) {
-        g_pShipButtonDevice = g_pAxisDevice;
-        CtrlLog("Using axes device for ship buttons.");
-    }
+    ResolveAndOpen(s_config.throttleAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.pitchAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.yawAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.rollAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.strafeLatAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.strafeVertAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.reverseAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
 
-    // --- HARDWARE HANDSHAKE (RESTORED) ---
-    if (!PrepareDirectInputDevice(g_pAxisDevice, "axes")) {
-        return;
-    }
+    ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
 
-    if (g_pShipButtonDevice != g_pAxisDevice && !PrepareDirectInputDevice(g_pShipButtonDevice, "ship buttons")) {
-        g_pShipButtonDevice->Release();
-        g_pShipButtonDevice = g_pAxisDevice;
-        CtrlLog("Falling back to axes device for ship buttons.");
+    ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalRollRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalStrafeLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalStrafeRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalStrafeUpButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalStrafeDownButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+
+    for (auto& sb : s_shipButtonBindings) {
+        ResolveAndOpen(sb.buttonRef, s_config.shipButtonDeviceIndex, s_config.shipButtonDeviceName);
     }
 
     // Detect Range for the primary Throttle axis
-    DIPROPRANGE dipr;
-    dipr.diph.dwSize = sizeof(DIPROPRANGE);
-    dipr.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-    dipr.diph.dwHow = DIPH_BYUSAGE;
-    dipr.diph.dwObj = s_config.throttleAxisId;
-
     long axisMin = 0, axisMax = 65535;
-    HRESULT hr = g_pAxisDevice->GetProperty(DIPROP_RANGE, &dipr.diph);
-    if (FAILED(hr)) {
-        // Fallback: Try Axis ID directly (might be DI index instead of usage)
-        dipr.diph.dwHow = DIPH_BYID;
-        dipr.diph.dwObj = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE(0); // Try first axis
-        hr = g_pAxisDevice->GetProperty(DIPROP_RANGE, &dipr.diph);
-    }
+    if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.deviceIndex >= 0) {
+        LPDIRECTINPUTDEVICE8 tDev = DeviceManager::OpenDevice(s_config.throttleAxis.deviceIndex);
+        if (tDev) {
+            DIPROPRANGE dipr;
+            dipr.diph.dwSize = sizeof(DIPROPRANGE);
+            dipr.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+            dipr.diph.dwHow = DIPH_BYUSAGE;
+            dipr.diph.dwObj = s_config.throttleAxis.value;
 
-    if (SUCCEEDED(hr)) {
-        axisMin = dipr.lMin;
-        axisMax = dipr.lMax;
-        char rangeBuf[128];
-        sprintf_s(rangeBuf, "Hardware Range Detected: [%ld, %ld]", axisMin, axisMax);
-        CtrlLog(rangeBuf);
-    } else {
-        CtrlLog("Warning: Could not detect hardware range. Using default 0-65535.");
+            HRESULT hr = tDev->GetProperty(DIPROP_RANGE, &dipr.diph);
+            if (FAILED(hr)) {
+                // Fallback: Try Axis ID directly (might be DI index instead of usage)
+                dipr.diph.dwHow = DIPH_BYID;
+                dipr.diph.dwObj = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE(0); // Try first axis
+                hr = tDev->GetProperty(DIPROP_RANGE, &dipr.diph);
+            }
+
+            if (SUCCEEDED(hr)) {
+                axisMin = dipr.lMin;
+                axisMax = dipr.lMax;
+                char rangeBuf[128];
+                sprintf_s(rangeBuf, "Hardware Range Detected: [%ld, %ld]", axisMin, axisMax);
+                CtrlLog(rangeBuf);
+            } else {
+                CtrlLog("Warning: Could not detect hardware range. Using default 0-65535.");
+            }
+        }
     }
 
     auto sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
@@ -808,27 +818,45 @@ void ThrottleController::ControlLoop() {
 
     while (s_running) {
         iter++;
-        DIJOYSTATE2 state;
-        if (FAILED(g_pAxisDevice->GetDeviceState(sizeof(DIJOYSTATE2), &state))) {
-            ReleaseAllShipButtonOutputs();
-            g_pAxisDevice->Acquire();
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
 
-        DIJOYSTATE2 shipButtonState = state;
-        bool shipButtonStateValid = true;
-        if (g_pShipButtonDevice && g_pShipButtonDevice != g_pAxisDevice) {
-            if (FAILED(g_pShipButtonDevice->GetDeviceState(sizeof(DIJOYSTATE2), &shipButtonState))) {
-                ReleaseAllShipButtonOutputs();
-                g_pShipButtonDevice->Acquire();
-                shipButtonStateValid = false;
+        // Hot-reload: if BindingWizard (or anything) requested a config reload,
+        // re-parse the INI and re-resolve/re-open all devices on the loop thread.
+        if (s_configReloadRequested.exchange(false)) {
+            CtrlLog("=== CONFIG HOT-RELOAD REQUESTED ===");
+            LoadConfig();
+
+            // Re-resolve and re-open all devices for the new bindings
+            ResolveAndOpen(s_config.throttleAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.pitchAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.yawAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.rollAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.strafeLatAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.strafeVertAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.reverseAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+
+            ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+
+            ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalRollRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalStrafeLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalStrafeRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalStrafeUpButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalStrafeDownButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+
+            for (auto& sb : s_shipButtonBindings) {
+                ResolveAndOpen(sb.buttonRef, s_config.shipButtonDeviceIndex, s_config.shipButtonDeviceName);
             }
+
+            sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
+            CtrlLog("=== CONFIG HOT-RELOAD COMPLETE ===");
         }
 
-        if (shipButtonStateValid) {
-            UpdateShipButtonBindings(shipButtonState);
-        }
+        // Batch poll all tracked devices
+        DeviceManager::PollAll();
+
+        UpdateShipButtonBindings();
 
         const bool isPiloting = AbsoluteGlobals::g_isPilotState.load(std::memory_order_acquire);
         if (!isPiloting) {
@@ -858,34 +886,29 @@ void ThrottleController::ControlLoop() {
 
         bool reverseKeyHeld = (GetAsyncKeyState('S') & 0x8000) != 0;
 
-        bool curActivate = false;
-        bool curStop = false;
-        bool curBoost = false;
+        auto IsButtonPressed = [](const BindingRef& ref) -> bool {
+            if (ref.value > 0 && ref.value <= 128) {
+                const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
+                if (st) {
+                    return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
+                }
+            }
+            return false;
+        };
+
+        bool curActivate = IsButtonPressed(s_config.activateButton);
+        bool curStop = IsButtonPressed(s_config.stopButton);
+        bool curBoost = false; // Deprecated: boost now handled via ShipButtons/FireBoosters
+        
+        static bool prevActivate = false;
+        static bool prevStop = false;
         static bool prevBoost = false;
 
-        if (s_config.activateButtonId > 0 && s_config.activateButtonId <= 128) {
-            curActivate = (state.rgbButtons[s_config.activateButtonId - 1] & 0x80) != 0;
-        }
-        if (s_config.stopButtonId > 0 && s_config.stopButtonId <= 128) {
-            curStop = (state.rgbButtons[s_config.stopButtonId - 1] & 0x80) != 0;
-        }
-        if (s_config.boostButtonId > 0 && s_config.boostButtonId <= 128) {
-            curBoost = (state.rgbButtons[s_config.boostButtonId - 1] & 0x80) != 0;
-            if (shipButtonStateValid) {
-                curBoost = curBoost || ((shipButtonState.rgbButtons[s_config.boostButtonId - 1] & 0x80) != 0);
-            }
-        }
-
-        // Boost Release: Arm a short "Silence" window to allow external Joystick Gremlin pulses through
         if (!curBoost && prevBoost) {
             s_boostKickFrames = 15; // ~125ms of silence
             CtrlLog("[Physics] Boost Released. Silent window active for external pulses.");
         }
         prevBoost = curBoost;
-
-        // Maneuver Detection (Axis based)
-        static bool prevActivate = false;
-        static bool prevStop = false;
 
         bool curFailsafeReset = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
             ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) &&
@@ -934,25 +957,26 @@ void ThrottleController::ControlLoop() {
         prevActivate = curActivate;
         prevStop = curStop;
 
-        auto GetRawAxis = [&](int axisId) -> long {
-            switch (axisId) {
-                case 0x30: return state.lX;
-                case 0x31: return state.lY;
-                case 0x32: return state.lZ;
-                case 0x33: return state.lRx;
-                case 0x34: return state.lRy;
-                case 0x35: return state.lRz;
-                case 0x36: return state.rglSlider[0];
-                case 0x37: return state.rglSlider[1];
-                default: return 32768;
+        auto GetRawAxis = [&](const BindingRef& ref) -> long {
+            if (ref.value > 0) {
+                const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
+                if (st) {
+                    switch (ref.value) {
+                        case 0x30: return st->lX;
+                        case 0x31: return st->lY;
+                        case 0x32: return st->lZ;
+                        case 0x33: return st->lRx;
+                        case 0x34: return st->lRy;
+                        case 0x35: return st->lRz;
+                        case 0x36: return st->rglSlider[0];
+                        case 0x37: return st->rglSlider[1];
+                    }
+                }
             }
+            return 32768; // Neutral fallback
         };
 
-        auto IsButtonPressed = [&](int buttonId) -> bool {
-            return buttonId > 0 && buttonId <= 128 &&
-                ((state.rgbButtons[buttonId - 1] & 0x80) != 0);
-        };
-        const bool digitalReverseBound = s_config.digitalReverseButton > 0 && s_config.digitalReverseButton <= 128;
+        const bool digitalReverseBound = s_config.digitalReverseButton.IsValid() && s_config.digitalReverseButton.value > 0 && s_config.digitalReverseButton.value <= 128;
         const bool digitalReverseHeld = digitalReverseBound && IsButtonPressed(s_config.digitalReverseButton);
 
         auto ApplyUnipolarDeadzone = [](float value, float deadzone) {
@@ -964,7 +988,7 @@ void ThrottleController::ControlLoop() {
         auto NormalizeReverseInput = [&]() {
             float value = 0.0f;
             if (s_config.reverseAxisEnabled && !digitalReverseBound) {
-                value = ((float)GetRawAxis(s_config.reverseAxisId)) / 65535.0f;
+                value = ((float)GetRawAxis(s_config.reverseAxis)) / 65535.0f;
                 value = s_config.bInvertReverse ? (1.0f - value) : value;
                 value = std::clamp(value * s_config.fReverseSensitivity, 0.0f, 1.0f);
                 value = ApplyUnipolarDeadzone(value, s_config.reverseDeadzone);
@@ -1008,7 +1032,7 @@ void ThrottleController::ControlLoop() {
                 throttle = 0.0f;
             }
         } else if (s_config.incrementalKeyboardMode) {
-            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxisId));
+            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
 
             static DWORD lastKbmPulseTime = 0;
             DWORD curTime = GetTickCount();
@@ -1036,7 +1060,7 @@ void ThrottleController::ControlLoop() {
             static float s_accumulatedThrottle = 0.0f;
             float dt = 1.0f / (float)s_config.pollRateHz;
 
-            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxisId));
+            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
             float minBound = s_config.unipolarMode ? 0.0f : -1.0f;
 
             if (std::abs(stickInput) > 0.01f) {
@@ -1052,11 +1076,11 @@ void ThrottleController::ControlLoop() {
                 throttle = s_accumulatedThrottle;
             }
         } else {
-            throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxisId), axisMin, axisMax);
+            throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
         }
         
-        auto NormBipolar = [&](int axisId, float sens, bool invert) {
-            float val = ((float)GetRawAxis(axisId) - 32768.0f) / 32768.0f;
+        auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert) {
+            float val = ((float)GetRawAxis(ref) - 32768.0f) / 32768.0f;
             val *= sens;
             val = invert ? -val : val;
             return std::clamp(val, -1.0f, 1.0f);
@@ -1069,15 +1093,15 @@ void ThrottleController::ControlLoop() {
             return sign * ((std::abs(value) - dz) / (1.0f - dz));
         };
 
-        float pitch = NormBipolar(s_config.pitchAxisId, s_config.fPitchSensitivity, s_config.bInvertPitch);
-        float yaw   = NormBipolar(s_config.yawAxisId,   s_config.fYawSensitivity,   s_config.bInvertYaw);
-        float roll  = NormBipolar(s_config.rollAxisId,  s_config.fRollSensitivity,  s_config.bInvertRoll);
+        float pitch = NormBipolar(s_config.pitchAxis, s_config.fPitchSensitivity, s_config.bInvertPitch);
+        float yaw   = NormBipolar(s_config.yawAxis,   s_config.fYawSensitivity,   s_config.bInvertYaw);
+        float roll  = NormBipolar(s_config.rollAxis,  s_config.fRollSensitivity,  s_config.bInvertRoll);
         if (IsButtonPressed(s_config.digitalRollLeftButton)) roll -= s_config.digitalRollValue;
         if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
         roll = std::clamp(roll, -1.0f, 1.0f);
 
-        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat), 0.05f);
-        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxisId, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert), 0.05f);
+        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat), 0.05f);
+        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert), 0.05f);
         if (IsButtonPressed(s_config.digitalStrafeLeftButton)) strafeX -= s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeRightButton)) strafeX += s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeUpButton)) strafeY += s_config.digitalStrafeValue;
@@ -1284,18 +1308,17 @@ void ThrottleController::ControlLoop() {
     }
 
     ReleaseAllShipButtonOutputs();
-    if (g_pShipButtonDevice && g_pShipButtonDevice != g_pAxisDevice) {
-        g_pShipButtonDevice->Unacquire();
-        g_pShipButtonDevice->Release();
-    }
-    g_pShipButtonDevice = nullptr;
-    if (g_pAxisDevice) { g_pAxisDevice->Unacquire(); g_pAxisDevice->Release(); g_pAxisDevice = nullptr; }
-    if (g_pDI) { g_pDI->Release(); g_pDI = nullptr; }
+    DeviceManager::Shutdown();
 }
 
 bool ThrottleController::Initialize() {
     LoadConfig();
     return s_config.enabled;
+}
+
+void ThrottleController::ReloadConfig() {
+    s_configReloadRequested.store(true, std::memory_order_release);
+    CtrlLog("Config reload requested (will apply on next loop iteration).");
 }
 
 void ThrottleController::Start() {
@@ -1304,7 +1327,6 @@ void ThrottleController::Start() {
     
     // In standalone mode discovery is armed by bAlwaysOn or the activate button.
     ThrottleHook::SetCaptureEnabled(false);
-    
     s_thread = std::thread(ControlLoop);
     s_thread.detach();
     CtrlLog("Signal Hunter thread launched.");
@@ -1316,3 +1338,26 @@ void ThrottleController::Stop() {
 }
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }
 float ThrottleController::GetCurrentThrottle() { return s_currentThrottle.load(std::memory_order_relaxed); }
+
+std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActionBindings() {
+    static const char* labels[] = {
+        "Fire Boosters", "Switch Flight Modes", "Toggle POV",
+        "Fire Weapon 0", "Fire Weapon 1", "Fire Weapon 2",
+        "Ship Action 1", "Select Target",
+        "Increase System Power", "Decrease System Power",
+        "Previous System", "Next System",
+        "Open Scanner", "Repair",
+        "Ship Alternate Control", "Cruise", "Cancel",
+        "Undock / Take-Off", "Get Up", "Exit Ship",
+        "Zoom Camera In", "Zoom Camera Out", "Autopilot On/Off"
+    };
+    std::vector<ShipActionInfo> result;
+    for (size_t i = 0; i < s_shipButtonBindings.size() && i < 23; i++) {
+        result.push_back({
+            labels[i],
+            s_shipButtonBindings[i].sourceIniKey,
+            s_shipButtonBindings[i].buttonRef
+        });
+    }
+    return result;
+}
