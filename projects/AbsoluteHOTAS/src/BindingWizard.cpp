@@ -389,8 +389,10 @@ static void SaveBindingsToINI() {
     WizLog("INI saved. Reloading config...");
 
     ThrottleController::ReloadConfig();
-    s_bindingsLoaded = false;
-    WizLog("Config reloaded.");
+    // NOTE: Do NOT reset s_bindingsLoaded here. The UI locals already hold the
+    // correct values. ReloadConfig() is async (control-loop thread), so reading
+    // back from GetConfig() on the next frame would revert to stale data.
+    WizLog("Config reload requested. UI retains current values.");
 }
 
 // ============================================================================

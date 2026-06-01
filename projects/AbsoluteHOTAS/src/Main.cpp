@@ -40,18 +40,18 @@ static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
         GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), modulePath, static_cast<DWORD>(std::size(modulePath)));
     }
 
-    RuntimePaths::AppendLog("[Crash]",
+    RuntimePaths::AppendLogAlways("[Crash]",
         std::format("Exception code=0x{:08X} address=0x{:016X}",
             static_cast<std::uint32_t>(record->ExceptionCode),
             reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)));
     if (queryOk) {
-        RuntimePaths::AppendLog("[Crash]",
+        RuntimePaths::AppendLogAlways("[Crash]",
             std::format("Module base=0x{:016X} rva=0x{:X} path={}",
                 reinterpret_cast<std::uintptr_t>(mbi.AllocationBase),
                 reinterpret_cast<std::uintptr_t>(record->ExceptionAddress) - reinterpret_cast<std::uintptr_t>(mbi.AllocationBase),
                 modulePath[0] ? modulePath : "<unknown>"));
     }
-    RuntimePaths::AppendLog("[Crash]",
+    RuntimePaths::AppendLogAlways("[Crash]",
         std::format("RIP=0x{:016X} RSP=0x{:016X} RCX=0x{:016X} RDX=0x{:016X} R8=0x{:016X} R9=0x{:016X}",
             static_cast<std::uintptr_t>(context->Rip),
             static_cast<std::uintptr_t>(context->Rsp),
@@ -60,7 +60,7 @@ static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
             static_cast<std::uintptr_t>(context->R8),
             static_cast<std::uintptr_t>(context->R9)));
     if (record->NumberParameters > 1) {
-        RuntimePaths::AppendLog("[Crash]",
+        RuntimePaths::AppendLogAlways("[Crash]",
             std::format("Exception info[0]=0x{:016X} info[1]=0x{:016X}",
                 static_cast<std::uintptr_t>(record->ExceptionInformation[0]),
                 static_cast<std::uintptr_t>(record->ExceptionInformation[1])));
@@ -87,7 +87,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.0.0 - Direct HID + In-Game UI");
+    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.0.1 - Direct HID + In-Game UI");
     RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 

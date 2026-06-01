@@ -987,7 +987,8 @@ void ThrottleController::ControlLoop() {
 
         auto NormalizeReverseInput = [&]() {
             float value = 0.0f;
-            if (s_config.reverseAxisEnabled && !digitalReverseBound) {
+            if (s_config.reverseAxisEnabled && !digitalReverseBound
+                && s_config.reverseAxis.IsValid() && s_config.reverseAxis.value > 0) {
                 value = ((float)GetRawAxis(s_config.reverseAxis)) / 65535.0f;
                 value = s_config.bInvertReverse ? (1.0f - value) : value;
                 value = std::clamp(value * s_config.fReverseSensitivity, 0.0f, 1.0f);
@@ -1075,11 +1076,13 @@ void ThrottleController::ControlLoop() {
                 }
                 throttle = s_accumulatedThrottle;
             }
-        } else {
+        } else if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
             throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
         }
+        // else: throttle axis unbound — leave throttle at 0 (no injection)
         
         auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert) {
+            if (!ref.IsValid() || ref.value <= 0) return 0.0f; // Unbound = neutral
             float val = ((float)GetRawAxis(ref) - 32768.0f) / 32768.0f;
             val *= sens;
             val = invert ? -val : val;
