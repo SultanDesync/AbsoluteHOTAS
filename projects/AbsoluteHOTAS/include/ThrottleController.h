@@ -3,6 +3,7 @@
 #include <thread>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <chrono>
 #include <fstream>
 #include "BindingRef.h"
@@ -52,6 +53,7 @@ public:
         // Per-binding button references (DeviceName@ButtonId or just ButtonId)
         BindingRef activateButton;
         BindingRef stopButton;
+        BindingRef toggleWizardButton;
         bool    alwaysOn = true;          // Auto-arm discovery when the standalone controller starts
 
         // [Normalization]
@@ -90,6 +92,11 @@ public:
         BindingRef digitalStrafeDownButton;
         float   digitalRollValue = 1.0f;
         float   digitalStrafeValue = 1.0f;
+
+        // Per-axis calibration overrides from [Calibration] section.
+        // Key = (deviceIndex << 8) | usageId.  Value = {min, max}.
+        // When present, these replace hardware-reported DIPROP_RANGE values.
+        std::unordered_map<int, std::pair<long, long>> axisCalibration;
     };
 
     static bool Initialize();
@@ -111,6 +118,9 @@ public:
         BindingRef  binding;
     };
     static std::vector<ShipActionInfo> GetShipActionBindings();
+
+    // Returns the stored per-axis calibration map (read-only).
+    static const std::unordered_map<int, std::pair<long, long>>& GetCalibrationData();
 
 private:
     static Config s_config;

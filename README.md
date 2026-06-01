@@ -1,4 +1,4 @@
-# AbsoluteHOTAS 2.0 Beta
+# AbsoluteHOTAS 2.1 Beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -17,7 +17,28 @@ fThrottleAtEngineStart = 0.0314
 
 > **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using MO2, add it to the profile's `StarfieldCustom.ini` instead.
 
-## What's New in 2.0
+## ⚠️ Antivirus / Threat Protection Notice
+
+AbsoluteHOTAS uses **memory injection** (`SendInput`, DirectInput polling, and in-process memory writes) to inject HOTAS input into Starfield's flight control system. These are standard game modding techniques, but they look identical to the methods used by keyloggers and game cheats — which is exactly what antivirus heuristics are designed to flag.
+
+**You may see a Windows Defender / antivirus warning when installing or running `AbsoluteHOTAS.dll`.** This is a false positive. The plugin:
+
+- Calls `SendInput()` to emit keyboard/mouse events mapped to your HOTAS buttons — the same Win32 API used by AutoHotKey, vJoy, and accessibility tools.
+- Hooks Direct3D12 `Present` to render the ImGui overlay — standard technique used by RivaTuner, MSI Afterburner, and SFSE itself.
+- Writes to Starfield's in-process memory to inject throttle/axis values — same approach as every SFSE plugin.
+
+**To resolve:** Add an exception for `AbsoluteHOTAS.dll` in your antivirus, or review the full source code linked on the Nexus mod page.
+
+## What's New in 2.1
+
+- **Per-axis hardware calibration** — Sweep each axis to its physical limits on the Devices tab. Compensates for worn potentiometers and low-resolution ADCs (e.g., 8-bit T.Flight HOTAS X).
+- **Custom Bindings tab** — Bind any controller button to any keyboard/mouse output. Visual UI for `[ButtonExpansion]`, with a one-click "Add Menu Cluster" preset for WASD/Tab/E/Esc navigation.
+- **Toggle Wizard button** — Open/close the binding overlay from a HOTAS button instead of only via `Ctrl+Alt+B`.
+- **ButtonExpansion device-prefix fix** — Device-prefixed keys (e.g., `T.16000M@iButton5`) now parse correctly.
+- **Unbound axis hardening** — All axis reads guarded against garbage data from unbound or misconfigured axes.
+- **Race condition fix** — Resolved UI state reversion in the binding wizard during save.
+
+### What's New in 2.0
 
 - **Direct HID input** — Reads your HOTAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 - **In-game binding wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware.
@@ -56,15 +77,16 @@ Or install via MO2 using the provided archive.
 
 ## In-Game Binding Wizard
 
-Press `Ctrl+Alt+B` to toggle the overlay. The wizard has five tabs:
+Press `Ctrl+Alt+B` to toggle the overlay (or bind a HOTAS button via the **Toggle Wizard** slot in Control Buttons). The wizard has six tabs:
 
 | Tab | Purpose |
 |-----|---------|
-| **Devices** | Live readout of all connected DirectInput devices, axes, and buttons. |
+| **Devices** | Live readout of all connected DirectInput devices, axes, and buttons. Per-axis calibration. |
 | **Axes & Settings** | Bind flight axes (throttle, pitch, yaw, roll, strafe, reverse) with inversion and sensitivity controls. |
-| **Control Buttons** | Bind activate/stop buttons for the plugin's signal hunter. |
+| **Control Buttons** | Bind activate/stop/toggle-wizard buttons for the plugin's signal hunter. |
 | **Ship Actions** | Bind physical buttons to 22 ship functions (boost, weapons, power management, scanner, etc.). |
 | **Digital Axes** | Bind buttons to emulate axis input for roll, strafe, and reverse. |
+| **Custom Bindings** | Free-form button → keyboard/mouse output mapping. Menu Cluster preset for WASD/Tab/E/Esc. |
 
 ## Manual Configuration
 

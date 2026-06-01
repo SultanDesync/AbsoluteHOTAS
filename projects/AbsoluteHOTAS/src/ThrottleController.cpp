@@ -4,6 +4,7 @@
 #include "AbsoluteGlobals.h"
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
+#include "UIHook.h"
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -358,12 +359,6 @@ static void LoadButtonExpansionBindings(CSimpleIniA& ini) {
     for (const auto& key : keys) {
         if (!key.pItem) continue;
 
-        const int buttonId = ParseExpansionButtonKey(key.pItem);
-        if (buttonId < 1 || buttonId > 128) {
-            CtrlLog("Warning: [ButtonExpansion] key '" + std::string(key.pItem) + "' is not iButton1..iButton128; ignoring.");
-            continue;
-        }
-
         const char* outputValue = ini.GetValue("ButtonExpansion", key.pItem, nullptr);
         if (!outputValue || TrimLower(outputValue).empty() || TrimLower(outputValue) == "none") {
             continue;
@@ -374,41 +369,24 @@ static void LoadButtonExpansionBindings(CSimpleIniA& ini) {
             continue;
         }
 
-        // For expansion buttons, we assume they use the global fallback device for now,
-        // or we could support DeviceName@Output? No, expansion buttons are just 
-        // [ButtonExpansion] iButton1 = key:0x12. If they want a device, they could do
-        // [ButtonExpansion] S-TECS@1 = key:0x12 ... but wait, the plan was to put the device 
-        // in the value, but ButtonExpansion puts the key in the key and the output in the value.
-        // E.g., iButton1 = key:0x14. It doesn't use the value for the input!
-        // To support per-device button expansions, we'd need to parse the KEY as the binding ref.
-        // Let's parse the key (key.pItem) which looks like "DeviceName@iButton42" or "iButton42".
-        
-        BindingRef ref = ParseBindingRef(key.pItem, -1);
-        int parsedBtnId = -1;
-        if (ref.HasDevice()) {
-            parsedBtnId = ParseExpansionButtonKey(ref.value > 0 ? ("iButton" + std::to_string(ref.value)).c_str() : "invalid");
-        } else {
-            parsedBtnId = buttonId;
-        }
-        
-        // Actually, ButtonExpansion is defined as `iButton12 = key:0x39`. The device name would have to go in the key: `DeviceName@iButton12 = key:0x39`.
-        // Let's do a simpler parse just for the device name from the key.
-        std::string deviceName = "";
+        // Parse key: "iButton12" or "DeviceName@iButton12"
+        std::string deviceName;
         std::string_view svKey(key.pItem);
         auto atPos = svKey.rfind('@');
         if (atPos != std::string_view::npos) {
             deviceName = std::string(svKey.substr(0, atPos));
             svKey = svKey.substr(atPos + 1);
         }
-        int finalButtonId = ParseExpansionButtonKey(std::string(svKey).c_str());
-        
-        if (finalButtonId < 1 || finalButtonId > 128) {
+
+        int buttonId = ParseExpansionButtonKey(std::string(svKey).c_str());
+        if (buttonId < 1 || buttonId > 128) {
+            CtrlLog("Warning: [ButtonExpansion] key '" + std::string(key.pItem) + "' is not iButton1..iButton128; ignoring.");
             continue;
         }
 
         BindingRef finalRef;
         finalRef.deviceName = deviceName;
-        finalRef.value = finalButtonId;
+        finalRef.value = buttonId;
         finalRef.deviceIndex = -1;
 
         s_shipButtonBindings.push_back({
@@ -570,6 +548,7 @@ void ThrottleController::LoadConfig() {
 
     s_config.activateButton = ParseBindingRef(ini.GetValue("Buttons", "iActivateButtonId", ""), -1);
     s_config.stopButton = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId", ""), -1);
+    s_config.toggleWizardButton = ParseBindingRef(ini.GetValue("Buttons", "iToggleWizardButton", ""), -1);
     // iBoostButtonId is deprecated in 2.0; boost is now in [ShipButtons] iFireBoostersButton
     s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", true);
     
@@ -606,6 +585,28 @@ void ThrottleController::LoadConfig() {
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
     LoadShipButtonBindings(ini);
+
+    // Load per-axis calibration overrides from [Calibration]
+    s_config.axisCalibration.clear();
+    CSimpleIniA::TNamesDepend calibKeys;
+    ini.GetAllKeys("Calibration", calibKeys);
+    for (const auto& entry : calibKeys) {
+        const char* key = entry.pItem;
+        // Expected format: iCalib_<devIdx>_0x<usage>
+        if (strncmp(key, "iCalib_", 7) != 0) continue;
+        int devIdx = -1, usage = -1;
+        if (sscanf_s(key, "iCalib_%d_0x%x", &devIdx, &usage) == 2 && devIdx >= 0 && usage >= 0) {
+            const char* val = ini.GetValue("Calibration", key, "");
+            long cmin = 0, cmax = 65535;
+            if (sscanf_s(val, "%ld,%ld", &cmin, &cmax) == 2 && cmin < cmax) {
+                int calibKey = (devIdx << 8) | usage;
+                s_config.axisCalibration[calibKey] = { cmin, cmax };
+                char logBuf[128];
+                sprintf_s(logBuf, "Calibration loaded: dev=%d axis=0x%02X range=[%ld, %ld]", devIdx, usage, cmin, cmax);
+                CtrlLog(logBuf);
+            }
+        }
+    }
 
     CtrlLog("Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.");
 }
@@ -766,6 +767,7 @@ void ThrottleController::ControlLoop() {
 
     ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
     ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.toggleWizardButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
 
     ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
     ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
@@ -810,6 +812,19 @@ void ThrottleController::ControlLoop() {
         }
     }
 
+    // Override with calibration data if present
+    if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.deviceIndex >= 0) {
+        int calibKey = (s_config.throttleAxis.deviceIndex << 8) | s_config.throttleAxis.value;
+        auto it = s_config.axisCalibration.find(calibKey);
+        if (it != s_config.axisCalibration.end()) {
+            axisMin = it->second.first;
+            axisMax = it->second.second;
+            char calibBuf[128];
+            sprintf_s(calibBuf, "Throttle using CALIBRATED range: [%ld, %ld]", axisMin, axisMax);
+            CtrlLog(calibBuf);
+        }
+    }
+
     auto sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
     uint64_t iter = 0;
     float lastInjectedHardwareValue = -999.0f;
@@ -836,6 +851,7 @@ void ThrottleController::ControlLoop() {
 
             ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
             ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.toggleWizardButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
 
             ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
             ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
@@ -898,10 +914,12 @@ void ThrottleController::ControlLoop() {
 
         bool curActivate = IsButtonPressed(s_config.activateButton);
         bool curStop = IsButtonPressed(s_config.stopButton);
+        bool curToggleWizard = IsButtonPressed(s_config.toggleWizardButton);
         bool curBoost = false; // Deprecated: boost now handled via ShipButtons/FireBoosters
         
         static bool prevActivate = false;
         static bool prevStop = false;
+        static bool prevToggleWizard = false;
         static bool prevBoost = false;
 
         if (!curBoost && prevBoost) {
@@ -953,9 +971,15 @@ void ThrottleController::ControlLoop() {
              ThrottleHook::SetCaptureEnabled(true); // Back to passive mode waiting for 0.0314
         }
         
+        // Toggle Wizard overlay from HOTAS button
+        if (curToggleWizard && !prevToggleWizard) {
+            UIHook::ToggleUI();
+        }
+        
         prevFailsafeReset = curFailsafeReset;
         prevActivate = curActivate;
         prevStop = curStop;
+        prevToggleWizard = curToggleWizard;
 
         auto GetRawAxis = [&](const BindingRef& ref) -> long {
             if (ref.value > 0) {
@@ -1083,7 +1107,23 @@ void ThrottleController::ControlLoop() {
         
         auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert) {
             if (!ref.IsValid() || ref.value <= 0) return 0.0f; // Unbound = neutral
-            float val = ((float)GetRawAxis(ref) - 32768.0f) / 32768.0f;
+            float raw = (float)GetRawAxis(ref);
+            float aMin = 0.0f, aMax = 65535.0f;
+
+            // Use calibrated range if available, otherwise defaults
+            if (ref.deviceIndex >= 0) {
+                int calibKey = (ref.deviceIndex << 8) | ref.value;
+                auto it = s_config.axisCalibration.find(calibKey);
+                if (it != s_config.axisCalibration.end()) {
+                    aMin = (float)it->second.first;
+                    aMax = (float)it->second.second;
+                }
+            }
+
+            float center = (aMin + aMax) / 2.0f;
+            float halfRange = (aMax - aMin) / 2.0f;
+            if (halfRange <= 0.0f) return 0.0f;
+            float val = (raw - center) / halfRange;
             val *= sens;
             val = invert ? -val : val;
             return std::clamp(val, -1.0f, 1.0f);
@@ -1363,4 +1403,8 @@ std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActio
         });
     }
     return result;
+}
+
+const std::unordered_map<int, std::pair<long, long>>& ThrottleController::GetCalibrationData() {
+    return s_config.axisCalibration;
 }

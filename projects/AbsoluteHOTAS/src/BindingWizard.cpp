@@ -8,9 +8,11 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <climits>
 
 static void WizLog(const std::string& msg) {
     RuntimePaths::AppendLog("[BindingWizard]", msg);
@@ -95,8 +97,9 @@ struct ButtonSlot {
 };
 
 static const ButtonSlot kButtonSlots[] = {
-    {"Activate",  "iActivateButtonId"},
-    {"Stop",      "iStopButtonId"},
+    {"Activate",       "iActivateButtonId"},
+    {"Stop",           "iStopButtonId"},
+    {"Toggle Wizard",  "iToggleWizardButton"},
 };
 static constexpr int kNumButtonSlots = sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
 
@@ -133,6 +136,62 @@ static std::string s_digitalAxisBindings[kNumDigitalAxisSlots];
 static float       s_digitalRollValue = 1.0f;
 static float       s_digitalStrafeValue = 1.0f;
 static bool        s_bindingsLoaded = false;
+
+// ============================================================================
+// Per-axis calibration state
+// ============================================================================
+struct CalibrationState {
+    bool  active = false;
+    int   deviceIndex = -1;
+    int   usageId = -1;
+    long  observedMin = LONG_MAX;
+    long  observedMax = LONG_MIN;
+};
+static CalibrationState s_calib;
+
+// Stored calibration results: key = (deviceIndex << 8) | usageId, value = {min, max}
+static std::unordered_map<int, std::pair<long, long>> s_calibData;
+static bool s_calibLoaded = false;
+
+// ============================================================================
+// Custom button expansion bindings (Button → Keyboard/Mouse output)
+// ============================================================================
+struct CustomBindingRow {
+    std::string buttonBinding;  // "DeviceName@42" or "(unbound)"
+    std::string output;         // "key:0x11" or "mouse:1" or "none"
+};
+static std::vector<CustomBindingRow> s_customBindings;
+static bool s_customBindingsLoaded = false;
+
+struct OutputOption {
+    const char* label;
+    const char* value;
+};
+static const OutputOption kOutputCatalog[] = {
+    {"W", "key:0x11"}, {"A", "key:0x1E"}, {"S", "key:0x1F"}, {"D", "key:0x20"},
+    {"E", "key:0x12"}, {"R", "key:0x13"}, {"F", "key:0x21"}, {"G", "key:0x22"},
+    {"Q", "key:0x10"}, {"X", "key:0x2D"}, {"T", "key:0x14"}, {"O", "key:0x18"},
+    {"Tab", "key:0x0F"}, {"Space", "key:0x39"}, {"Esc", "key:0x01"},
+    {"L Shift", "key:0x2A"}, {"L Ctrl", "key:0x1D"}, {"L Alt", "key:0x38"},
+    {"Enter", "key:0x1C"},
+    {"Up", "key:0x48"}, {"Down", "key:0x50"}, {"Left", "key:0x4B"}, {"Right", "key:0x4D"},
+    {"[", "key:0x1A"}, {"]", "key:0x1B"}, {";", "key:0x27"}, {"'", "key:0x28"},
+    {",", "key:0x33"}, {".", "key:0x34"}, {"/", "key:0x35"},
+    {"Mouse 1", "mouse:1"}, {"Mouse 2", "mouse:2"}, {"Mouse 3", "mouse:3"}, {"Mouse 4", "mouse:4"},
+    {"Numpad 0", "key:0x52"}, {"Numpad 1", "key:0x4F"}, {"Numpad 3", "key:0x51"},
+    {"Numpad 5", "key:0x4C"}, {"Numpad 7", "key:0x47"}, {"Numpad 9", "key:0x49"},
+    {"F1", "key:0x3B"}, {"F2", "key:0x3C"}, {"F3", "key:0x3D"}, {"F4", "key:0x3E"},
+    {"F5", "key:0x3F"}, {"F6", "key:0x40"}, {"F7", "key:0x41"}, {"F8", "key:0x42"},
+};
+static constexpr int kOutputCatalogSize = sizeof(kOutputCatalog) / sizeof(kOutputCatalog[0]);
+
+// Find the catalog index for a given output value string, or -1
+static int FindOutputIndex(const std::string& val) {
+    for (int i = 0; i < kOutputCatalogSize; i++) {
+        if (val == kOutputCatalog[i].value) return i;
+    }
+    return -1;
+}
 
 // ============================================================================
 // Format a BindingRef as a display string
@@ -215,6 +274,56 @@ static void LoadCurrentBindings() {
     s_digitalAxisBindings[6] = FormatButtonRef(cfg.digitalStrafeDownButton);
     s_digitalRollValue = cfg.digitalRollValue;
     s_digitalStrafeValue = cfg.digitalStrafeValue;
+
+    // Load calibration data from config
+    if (!s_calibLoaded) {
+        s_calibData = ThrottleController::GetCalibrationData();
+        s_calibLoaded = true;
+    }
+
+    // Load custom bindings from [ButtonExpansion]
+    if (!s_customBindingsLoaded) {
+        s_customBindings.clear();
+        auto iniPath = RuntimePaths::IniPath();
+        CSimpleIniA ini;
+        ini.SetUnicode(false);
+        if (ini.LoadFile(iniPath.string().c_str()) == SI_OK) {
+            CSimpleIniA::TNamesDepend keys;
+            if (ini.GetAllKeys("ButtonExpansion", keys)) {
+                for (const auto& entry : keys) {
+                    const char* iniKey = entry.pItem;
+                    const char* outputVal = ini.GetValue("ButtonExpansion", iniKey, "none");
+
+                    // Parse key: could be "iButton12" or "DeviceName@iButton12"
+                    std::string keyStr(iniKey);
+                    std::string devicePrefix;
+                    std::string btnPart = keyStr;
+                    auto atPos = keyStr.rfind('@');
+                    if (atPos != std::string::npos) {
+                        devicePrefix = keyStr.substr(0, atPos);
+                        btnPart = keyStr.substr(atPos + 1);
+                    }
+
+                    // Extract button number
+                    int btnId = -1;
+                    if (btnPart.size() > 7 && (btnPart.substr(0, 7) == "iButton" || btnPart.substr(0, 7) == "IButton")) {
+                        btnId = std::atoi(btnPart.c_str() + 7);
+                    }
+                    if (btnId < 1 || btnId > 128) continue;
+
+                    std::string binding;
+                    if (!devicePrefix.empty()) {
+                        binding = devicePrefix + "@" + std::to_string(btnId);
+                    } else {
+                        binding = std::to_string(btnId);
+                    }
+
+                    s_customBindings.push_back({ binding, outputVal });
+                }
+            }
+        }
+        s_customBindingsLoaded = true;
+    }
 
     s_bindingsLoaded = true;
 }
@@ -316,6 +425,11 @@ static void UpdateCapture() {
                         }
                     } else if (slot >= 300 && slot < 400) {
                         s_digitalAxisBindings[slot - 300] = buf;
+                    } else if (slot >= 400 && slot < 600) {
+                        int idx = slot - 400;
+                        if (idx < (int)s_customBindings.size()) {
+                            s_customBindings[idx].buttonBinding = buf;
+                        }
                     }
 
                     WizLog("Button captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
@@ -384,6 +498,35 @@ static void SaveBindingsToINI() {
     sprintf_s(strafeStr, "%.2f", s_digitalStrafeValue);
     ini.SetValue("DigitalAxes", "fDigitalRollValue", rollStr);
     ini.SetValue("DigitalAxes", "fDigitalStrafeValue", strafeStr);
+
+    // Write calibration data
+    ini.Delete("Calibration", nullptr); // Clear entire section
+    for (const auto& [key, range] : s_calibData) {
+        int devIdx = (key >> 8) & 0xFF;
+        int usage = key & 0xFF;
+        char keyBuf[64], valBuf[64];
+        sprintf_s(keyBuf, "iCalib_%d_0x%02X", devIdx, usage);
+        sprintf_s(valBuf, "%ld,%ld", range.first, range.second);
+        ini.SetValue("Calibration", keyBuf, valBuf);
+    }
+
+    // Write custom button expansion bindings
+    ini.Delete("ButtonExpansion", nullptr); // Clear entire section
+    for (const auto& row : s_customBindings) {
+        if (row.buttonBinding == "(unbound)" || row.output == "none" || row.output.empty()) continue;
+
+        // Convert binding "DeviceName@42" to INI key "DeviceName@iButton42"
+        std::string iniKey;
+        auto atPos = row.buttonBinding.rfind('@');
+        if (atPos != std::string::npos) {
+            std::string dev = row.buttonBinding.substr(0, atPos);
+            std::string btnNum = row.buttonBinding.substr(atPos + 1);
+            iniKey = dev + "@iButton" + btnNum;
+        } else {
+            iniKey = "iButton" + row.buttonBinding;
+        }
+        ini.SetValue("ButtonExpansion", iniKey.c_str(), row.output.c_str());
+    }
 
     ini.SaveFile(iniPath.string().c_str());
     WizLog("INI saved. Reloading config...");
@@ -482,7 +625,19 @@ void BindingWizard::Draw() {
                         for (int a = 0; a < 8; a++) {
                             int usageId = 0x30 + a;
                             long val = GetAxisFromState(st, usageId);
-                            float normalized = static_cast<float>(val) / 65535.0f;
+                            int calibKey = (d << 8) | usageId;
+
+                            // Normalize using calibrated range if available
+                            float normalized;
+                            auto calibIt = s_calibData.find(calibKey);
+                            if (calibIt != s_calibData.end()) {
+                                long cmin = calibIt->second.first;
+                                long cmax = calibIt->second.second;
+                                long crange = cmax - cmin;
+                                normalized = (crange > 0) ? std::clamp((float)(val - cmin) / (float)crange, 0.0f, 1.0f) : 0.0f;
+                            } else {
+                                normalized = static_cast<float>(val) / 65535.0f;
+                            }
 
                             char label[64];
                             sprintf_s(label, "0x%02X (%s)", usageId, AxisName(usageId));
@@ -491,6 +646,49 @@ void BindingWizard::Draw() {
                             ImGui::ProgressBar(normalized, ImVec2(200, 0), "");
                             ImGui::SameLine();
                             ImGui::Text("%-14s %6ld", label, val);
+
+                            // Calibration controls
+                            bool isCalibrating = s_calib.active && s_calib.deviceIndex == d && s_calib.usageId == usageId;
+                            if (isCalibrating) {
+                                // Update observed range
+                                if (val < s_calib.observedMin) s_calib.observedMin = val;
+                                if (val > s_calib.observedMax) s_calib.observedMax = val;
+
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("Done")) {
+                                    if (s_calib.observedMax > s_calib.observedMin) {
+                                        s_calibData[calibKey] = { s_calib.observedMin, s_calib.observedMax };
+                                        char logBuf[128];
+                                        sprintf_s(logBuf, "Calibrated dev=%d axis=0x%02X: [%ld, %ld]", d, usageId, s_calib.observedMin, s_calib.observedMax);
+                                        WizLog(logBuf);
+                                    }
+                                    s_calib = {};
+                                }
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f),
+                                    "Sweep axis... Min:%ld Max:%ld", s_calib.observedMin, s_calib.observedMax);
+                            } else {
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("Calibrate")) {
+                                    s_calib = {};
+                                    s_calib.active = true;
+                                    s_calib.deviceIndex = d;
+                                    s_calib.usageId = usageId;
+                                    s_calib.observedMin = val;
+                                    s_calib.observedMax = val;
+                                }
+                                if (calibIt != s_calibData.end()) {
+                                    ImGui::SameLine();
+                                    if (ImGui::SmallButton("Clear")) {
+                                        s_calibData.erase(calibIt);
+                                        WizLog("Cleared calibration for dev=" + std::to_string(d) + " axis=0x" + std::to_string(usageId));
+                                    }
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "[%ld-%ld]",
+                                        calibIt->second.first, calibIt->second.second);
+                                }
+                            }
+
                             ImGui::PopID();
                         }
 
@@ -606,6 +804,92 @@ void BindingWizard::Draw() {
             ImGui::SliderFloat("Roll Value", &s_digitalRollValue, 0.0f, 1.0f, "%.2f");
             ImGui::SliderFloat("Strafe Value", &s_digitalStrafeValue, 0.0f, 1.0f, "%.2f");
             ImGui::PopItemWidth();
+
+            ImGui::EndTabItem();
+        }
+
+        // ==== TAB 6: Custom Bindings ====
+        if (ImGui::BeginTabItem("Custom Bindings")) {
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Custom Button Bindings");
+            ImGui::TextWrapped("Bind controller buttons to emit keyboard/mouse outputs. Use Starfield's vanilla binding menu to assign matching secondary bindings.");
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // Add / Menu Cluster buttons
+            if (ImGui::Button("Add Binding")) {
+                s_customBindings.push_back({"(unbound)", "none"});
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Add Menu Cluster")) {
+                s_customBindings.push_back({"(unbound)", "key:0x11"}); // W
+                s_customBindings.push_back({"(unbound)", "key:0x1E"}); // A
+                s_customBindings.push_back({"(unbound)", "key:0x1F"}); // S
+                s_customBindings.push_back({"(unbound)", "key:0x20"}); // D
+                s_customBindings.push_back({"(unbound)", "key:0x0F"}); // Tab
+                s_customBindings.push_back({"(unbound)", "key:0x12"}); // E
+                s_customBindings.push_back({"(unbound)", "key:0x01"}); // Esc
+                WizLog("Added menu cluster preset (WASD/Tab/E/Esc).");
+            }
+
+            ImGui::Spacing();
+
+            int removeIdx = -1;
+            for (int i = 0; i < (int)s_customBindings.size(); i++) {
+                auto& row = s_customBindings[i];
+                ImGui::PushID(5000 + i);
+
+                // Button binding display
+                ImGui::Text("%-22s", row.buttonBinding.c_str());
+                ImGui::SameLine(180);
+
+                // Output dropdown
+                int currentOutput = FindOutputIndex(row.output);
+                const char* previewLabel = (currentOutput >= 0) ? kOutputCatalog[currentOutput].label : row.output.c_str();
+                ImGui::PushItemWidth(120);
+                if (ImGui::BeginCombo("##output", previewLabel)) {
+                    for (int j = 0; j < kOutputCatalogSize; j++) {
+                        bool selected = (j == currentOutput);
+                        if (ImGui::Selectable(kOutputCatalog[j].label, selected)) {
+                            row.output = kOutputCatalog[j].value;
+                        }
+                        if (selected) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::PopItemWidth();
+
+                // Bind button
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Bind")) {
+                    char label[64];
+                    int outputIdx = FindOutputIndex(row.output);
+                    sprintf_s(label, "Custom #%d (%s)", i + 1,
+                        outputIdx >= 0 ? kOutputCatalog[outputIdx].label : "?");
+                    StartButtonCapture(i, 400, label);
+                }
+
+                // Clear button
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear")) {
+                    row.buttonBinding = "(unbound)";
+                }
+
+                // Remove button
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove")) {
+                    removeIdx = i;
+                }
+
+                ImGui::PopID();
+            }
+
+            if (removeIdx >= 0) {
+                s_customBindings.erase(s_customBindings.begin() + removeIdx);
+            }
+
+            if (s_customBindings.empty()) {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No custom bindings. Click 'Add Binding' or 'Add Menu Cluster' to get started.");
+            }
 
             ImGui::EndTabItem();
         }
