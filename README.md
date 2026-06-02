@@ -15,7 +15,7 @@ Add to `Documents\My Games\Starfield\StarfieldCustom.ini`:
 fThrottleAtEngineStart = 0.0314
 ```
 
-> **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using MO2, add it to the profile's `StarfieldCustom.ini` instead.
+> **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using a mod manager, add it to the profile's `StarfieldCustom.ini` instead.
 
 ## ⚠️ Antivirus / Threat Protection Notice
 
@@ -54,7 +54,7 @@ Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 Data\SFSE\Plugins\
 ```
 
-Or install via MO2 using the provided archive.
+Or install via your mod manager using the provided archive.
 
 ## Quick Start
 
