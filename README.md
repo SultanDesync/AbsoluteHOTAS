@@ -21,17 +21,13 @@ fThrottleAtEngineStart = 0.0314
 
 AbsoluteHOTAS uses **memory injection** (`SendInput`, DirectInput polling, and in-process memory writes) to inject HOTAS input into Starfield's flight control system. These are standard game modding techniques, but they look identical to the methods used by keyloggers and game cheats — which is exactly what antivirus heuristics are designed to flag.
 
-**You may see a Windows Defender / antivirus warning when installing or running `AbsoluteHOTAS.dll`.** This is a false positive. The plugin:
-
-- Calls `SendInput()` to emit keyboard/mouse events mapped to your HOTAS buttons — the same Win32 API used by AutoHotKey, vJoy, and accessibility tools.
-- Hooks Direct3D12 `Present` to render the ImGui overlay — standard technique used by RivaTuner, MSI Afterburner, and SFSE itself.
-- Writes to Starfield's in-process memory to inject throttle/axis values — same approach as every SFSE plugin.
+Additionally, **using a virtualizing mod manager (like Mod Organizer 2)** significantly escalates this threat profile. MO2 injects its own VFS DLL (`usvfs_x64.dll`) to intercept file system access, forcing Starfield to load `AbsoluteHOTAS.dll` from a separate directory. To antivirus heuristics, a process hooked by virtual file systems that then performs low-level input injection and memory writes looks like a highly suspicious multi-stage threat, frequently triggering a quarantine or error `000011CC` (`ERROR_SYSTEM_INTEGRITY_REPUTATION_MALICIOUS`).
 
 **To resolve:**
-1. **Unblock the DLL**: Right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** checkbox at the bottom of the General tab, and click **Apply** / **OK**. (This is required if Windows Defender or Smart App Control prevents loading with error `000011CC` / `ERROR_SYSTEM_INTEGRITY_REPUTATION_MALICIOUS`).
+1. **Unblock the DLL**: Right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** checkbox at the bottom of the General tab, and click **Apply** / **OK**. (This is required if Windows Defender or Smart App Control prevents loading with error `000011CC`).
 2. **Add Antivirus Exclusions**: Add exceptions/exclusions in your antivirus settings for:
    - Your **Starfield game folder** (where the game and loader execute).
-   - Your **mod manager's mods folder** (where mod files are stored physically).
+   - Your **mod manager's mods/installation folder** (where mod files and virtualizers are stored physically).
 
 Alternatively, you can review the source code directly here on GitHub.
 
