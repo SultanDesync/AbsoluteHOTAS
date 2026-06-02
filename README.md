@@ -27,7 +27,11 @@ AbsoluteHOTAS uses **memory injection** (`SendInput`, DirectInput polling, and i
 - Hooks Direct3D12 `Present` to render the ImGui overlay — standard technique used by RivaTuner, MSI Afterburner, and SFSE itself.
 - Writes to Starfield's in-process memory to inject throttle/axis values — same approach as every SFSE plugin.
 
-**To resolve:** Add an exception for `AbsoluteHOTAS.dll` in your antivirus, or review the source code directly here on GitHub.
+**To resolve:**
+1. **Unblock the DLL**: Right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** checkbox at the bottom of the General tab, and click **Apply** / **OK**. (This is required if Windows Defender or Smart App Control prevents loading with error `000011CC` / `ERROR_SYSTEM_INTEGRITY_REPUTATION_MALICIOUS`).
+2. **Add Antivirus Exclusion**: Add an exception/exclusion for the DLL or its folder in your antivirus settings.
+
+Alternatively, you can review the source code directly here on GitHub.
 
 ## Key Features
 
