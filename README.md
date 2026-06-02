@@ -17,19 +17,7 @@ fThrottleAtEngineStart = 0.0314
 
 > **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using a mod manager, add it to the profile's `StarfieldCustom.ini` instead.
 
-## ⚠️ Antivirus / Threat Protection Notice
-
-AbsoluteHOTAS uses **memory injection** (`SendInput`, DirectInput polling, and in-process memory writes) to inject HOTAS input into Starfield's flight control system. These are standard game modding techniques, but they look identical to the methods used by keyloggers and game cheats — which is exactly what antivirus heuristics are designed to flag.
-
-Additionally, **using a virtualizing mod manager (like Mod Organizer 2)** significantly escalates this threat profile. MO2 injects its own VFS DLL (`usvfs_x64.dll`) to intercept file system access, forcing Starfield to load `AbsoluteHOTAS.dll` from a separate directory. To antivirus heuristics, a process hooked by virtual file systems that then performs low-level input injection and memory writes looks like a highly suspicious multi-stage threat, frequently triggering a quarantine or error `000011CC` (`ERROR_SYSTEM_INTEGRITY_REPUTATION_MALICIOUS`).
-
-**To resolve:**
-1. **Unblock the DLL**: Right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** checkbox at the bottom of the General tab, and click **Apply** / **OK**. (This is required if Windows Defender or Smart App Control prevents loading with error `000011CC`).
-2. **Add Antivirus Exclusions**: Add exceptions/exclusions in your antivirus settings for:
-   - Your **Starfield game folder** (where the game and loader execute).
-   - Your **mod manager's mods/installation folder** (where mod files and virtualizers are stored physically).
-
-Alternatively, you can review the source code directly here on GitHub.
+> **Plugin Fails to Load / DLL Blocked?** If the plugin fails to load or shows error `000011CC`, right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** box at the bottom of the General tab, and click **Apply**. For virtualizing mod managers like MO2, see the [Mod Manager Compatibility](#mod-manager-compatibility) section at the bottom.
 
 ## Key Features
 
@@ -172,6 +160,14 @@ bIncrementalKeyboardMode = false    ; Pure keyboard pulse emulation (zero UI fli
 Logging is **off by default**. Only the startup banner (4 lines) is written to confirm the plugin loaded.
 
 Set `bLogThrottle = true` to enable full diagnostic logging. Logs rotate at 1 MB.
+
+## Mod Manager Compatibility
+
+If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual File System (VFS) hook mechanism (`usvfs_x64.dll`) intercepts file paths dynamically. Because AbsoluteHOTAS hooks DirectX and uses input injection (standard techniques for Direct HID input), the combination of virtualization and hooking can occasionally trigger false positives in antivirus heuristics or Windows Smart App Control, resulting in error `000011CC` or a silent load failure.
+
+**To resolve:**
+1. Right-click `AbsoluteHOTAS.dll` inside your mod manager's physical mods directory, select **Properties**, check **Unblock** at the bottom of the General tab, and click **Apply** / **OK**.
+2. If the issue persists, add exceptions/exclusions in your security software for both your **Starfield game folder** and your **Mod manager's installation/mods folder**.
 
 ## Notes
 
