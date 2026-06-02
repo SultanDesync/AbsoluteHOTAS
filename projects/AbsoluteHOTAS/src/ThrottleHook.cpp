@@ -12,7 +12,6 @@ std::atomic<uintptr_t> ThrottleHook::s_basePtr{ 0 };
 std::atomic<int64_t>   ThrottleHook::s_lastHookTimestamp{ 0 };
 uint8_t*               ThrottleHook::s_trampoline = nullptr;
 uintptr_t              ThrottleHook::s_hookAddress = 0;
-std::atomic<bool>      ThrottleHook::s_silenceEnabled{ false };
 
 // ---- Global pointer storage (accessed by shellcode via absolute address) ----
 static volatile uintptr_t g_capturedRDI = 0;

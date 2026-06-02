@@ -98,7 +98,7 @@ static const AxisSlot kAxisSlots[] = {
 };
 static constexpr int kNumAxisSlots = sizeof(kAxisSlots) / sizeof(kAxisSlots[0]);
 
-// Control button slots (activate/stop only — boost deprecated)
+// Control button slots
 struct ButtonSlot {
     const char* label;
     const char* iniKey;

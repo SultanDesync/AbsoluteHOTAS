@@ -549,7 +549,6 @@ void ThrottleController::LoadConfig() {
     s_config.activateButton = ParseBindingRef(ini.GetValue("Buttons", "iActivateButtonId", ""), -1);
     s_config.stopButton = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId", ""), -1);
     s_config.toggleWizardButton = ParseBindingRef(ini.GetValue("Buttons", "iToggleWizardButton", ""), -1);
-    // iBoostButtonId is deprecated in 2.0; boost is now in [ShipButtons] iFireBoostersButton
     s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", true);
     
     s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 16384);
@@ -685,7 +684,6 @@ static uintptr_t s_activeThrottlePtr = 0;
 static int s_plausibilityFailCount = 0;
 static bool s_lastLogLockedState = false;
 static bool s_reacquireWatchdogEnabled = false;
-static int s_boostKickFrames = 0; 
 static float s_lastInjectedThrottle = -999.0f;
 static int s_handoverGraceFrames = 0;
 static int s_throttleBurstFrames = 0;
@@ -697,7 +695,6 @@ static void DisarmFlightControlState() {
     s_activeCandidateIndex = -1;
     s_activeThrottlePtr = 0;
     s_plausibilityFailCount = 0;
-    s_boostKickFrames = 0;
     s_reacquireWatchdogEnabled = false;
     s_lastInjectedThrottle = -999.0f;
     s_handoverGraceFrames = 0;
@@ -930,18 +927,9 @@ void ThrottleController::ControlLoop() {
         bool curActivate = IsButtonPressed(s_config.activateButton);
         bool curStop = IsButtonPressed(s_config.stopButton);
         bool curToggleWizard = IsButtonPressed(s_config.toggleWizardButton);
-        bool curBoost = false; // Deprecated: boost now handled via ShipButtons/FireBoosters
-        
         static bool prevActivate = false;
         static bool prevStop = false;
         static bool prevToggleWizard = false;
-        static bool prevBoost = false;
-
-        if (!curBoost && prevBoost) {
-            s_boostKickFrames = 15; // ~125ms of silence
-            CtrlLog("[Physics] Boost Released. Silent window active for external pulses.");
-        }
-        prevBoost = curBoost;
 
         bool curFailsafeReset = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
             ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) &&
@@ -1290,11 +1278,6 @@ void ThrottleController::ControlLoop() {
                 if (reverseKeyHeld || reverseHeld || releaseControlForPhysics || s_config.incrementalKeyboardMode) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
-                } else if (curBoost) {
-                     // Stand down for Boost (while held)
-                } else if (s_boostKickFrames > 0) {
-                     // SILENT WINDOW
-                     s_boostKickFrames--;
                 } else {
                      float commandedThrottle = throttle;
                      bool firstThrottleCommand = (lastInjectedHardwareValue == -999.0f);

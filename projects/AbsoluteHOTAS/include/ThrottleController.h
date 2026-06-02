@@ -18,7 +18,7 @@ public:
         bool    enabled = true;
 
         // [Hardware] — Legacy fallback device (used when BindingRef has no device)
-        int     vJoyDeviceId = 1;         // vJoy device number (1-16)
+        int     vJoyDeviceId = 1;         // Legacy device index fallback (formerly vJoyDeviceId)
         std::string deviceName;           // Optional DirectInput instance/product name match
 
         // [InputDevices] — Legacy fallback device names for bindings without explicit device

@@ -44,5 +44,4 @@ private:
     static std::atomic<int64_t>   s_lastHookTimestamp;
     static uint8_t*               s_trampoline;
     static uintptr_t              s_hookAddress;
-    static std::atomic<bool>      s_silenceEnabled;
 };
