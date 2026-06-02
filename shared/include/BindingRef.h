@@ -29,8 +29,14 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
     BindingRef ref;
     ref.deviceIndex = -1;
 
-    if (!iniValue || iniValue[0] == '\0') {
+    // Key missing entirely (nullptr) → use legacy default for backwards compat
+    // Key present but empty ("") → user explicitly cleared it → unbound
+    if (!iniValue) {
         ref.value = defaultValue;
+        return ref;
+    }
+    if (iniValue[0] == '\0') {
+        ref.value = -1;
         return ref;
     }
 
@@ -41,7 +47,7 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
     while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back())))  sv.remove_suffix(1);
 
     if (sv.empty()) {
-        ref.value = defaultValue;
+        ref.value = -1;
         return ref;
     }
 

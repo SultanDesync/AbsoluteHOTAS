@@ -872,7 +872,13 @@ void ThrottleController::ControlLoop() {
         // Batch poll all tracked devices
         DeviceManager::PollAll();
 
-        UpdateShipButtonBindings();
+        // Suppress ship button outputs while wizard overlay is open to prevent
+        // noisy buttons from feeding SendInput events back into ImGui keyboard nav.
+        if (!UIHook::IsUIOpen()) {
+            UpdateShipButtonBindings();
+        } else {
+            ReleaseAllShipButtonOutputs();
+        }
 
         const bool isPiloting = AbsoluteGlobals::g_isPilotState.load(std::memory_order_acquire);
         if (!isPiloting) {

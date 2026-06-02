@@ -65,6 +65,14 @@ struct PendingBind {
         BYTE buttons[128];
     };
     std::vector<DeviceSnapshot> snapshots;
+
+    // Debounce state for sustained-signal capture
+    int debounceDeviceIndex = -1;
+    int debounceButtonIndex = -1;
+    int debounceButtonFrames = 0;
+    int debounceAxisDeviceIndex = -1;
+    int debounceAxisIndex = -1;
+    int debounceAxisFrames = 0;
 };
 
 static PendingBind s_pendingBind;
@@ -354,10 +362,20 @@ static void TakeSnapshots() {
 //   200..299    = ship action slots
 //   300..399    = digital axis slots
 
+static void ResetDebounce() {
+    s_pendingBind.debounceDeviceIndex = -1;
+    s_pendingBind.debounceButtonIndex = -1;
+    s_pendingBind.debounceButtonFrames = 0;
+    s_pendingBind.debounceAxisDeviceIndex = -1;
+    s_pendingBind.debounceAxisIndex = -1;
+    s_pendingBind.debounceAxisFrames = 0;
+}
+
 static void StartAxisCapture(int slotIndex, const char* label) {
     s_pendingBind.active = true;
     s_pendingBind.targetLabel = label;
     s_pendingBind.targetConfigSlot = slotIndex;
+    ResetDebounce();
     TakeSnapshots();
     WizLog("Axis capture started for: " + std::string(label));
 }
@@ -366,6 +384,7 @@ static void StartButtonCapture(int slotIndex, int categoryOffset, const char* la
     s_pendingBind.active = true;
     s_pendingBind.targetLabel = label;
     s_pendingBind.targetConfigSlot = categoryOffset + slotIndex;
+    ResetDebounce();
     TakeSnapshots();
     WizLog("Button capture started for: " + std::string(label));
 }
@@ -374,6 +393,11 @@ static void UpdateCapture() {
     if (!s_pendingBind.active) return;
 
     int slot = s_pendingBind.targetConfigSlot;
+
+    // Debounce thresholds: require sustained signal over multiple frames
+    // to filter out noise, ghost presses, and Proton/Wine artifacts.
+    constexpr int kButtonDebounceFrames = 8;  // ~130ms at 60fps
+    constexpr int kAxisDebounceFrames = 5;    // ~80ms at 60fps
 
     if (slot >= 0 && slot < 100) {
         // Axis capture: compare current state to snapshot
@@ -388,20 +412,36 @@ static void UpdateCapture() {
                 long current = GetAxisFromState(st, 0x30 + a);
                 long delta = std::abs(current - snap.axes[a]);
                 if (delta > kAxisThreshold) {
-                    const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
-                    int usageId = 0x30 + a;
-                    char buf[256];
-                    sprintf_s(buf, "%s@0x%02X", info.productName.c_str(), usageId);
+                    // Sustained displacement check
+                    if (s_pendingBind.debounceAxisDeviceIndex == snap.deviceIndex &&
+                        s_pendingBind.debounceAxisIndex == a) {
+                        s_pendingBind.debounceAxisFrames++;
+                    } else {
+                        s_pendingBind.debounceAxisDeviceIndex = snap.deviceIndex;
+                        s_pendingBind.debounceAxisIndex = a;
+                        s_pendingBind.debounceAxisFrames = 1;
+                    }
 
-                    s_axisBindings[slot] = buf;
-                    WizLog("Axis captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
-                    s_pendingBind.active = false;
-                    return;
+                    if (s_pendingBind.debounceAxisFrames >= kAxisDebounceFrames) {
+                        const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
+                        int usageId = 0x30 + a;
+                        char buf[256];
+                        sprintf_s(buf, "%s@0x%02X", info.productName.c_str(), usageId);
+
+                        s_axisBindings[slot] = buf;
+                        WizLog("Axis captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
+                        s_pendingBind.active = false;
+                        return;
+                    }
+                } else if (s_pendingBind.debounceAxisDeviceIndex == snap.deviceIndex &&
+                           s_pendingBind.debounceAxisIndex == a) {
+                    // Axis fell back below threshold — reset debounce for this axis
+                    s_pendingBind.debounceAxisFrames = 0;
                 }
             }
         }
     } else {
-        // Button capture (all categories): detect delta
+        // Button capture (all categories): detect delta with debounce
         for (auto& snap : s_pendingBind.snapshots) {
             if (snap.deviceIndex >= DeviceManager::GetDeviceCount()) continue;
             const auto* st = DeviceManager::GetCachedState(snap.deviceIndex);
@@ -410,7 +450,28 @@ static void UpdateCapture() {
             for (int b = 0; b < 128; b++) {
                 bool nowPressed = (st->rgbButtons[b] & 0x80) != 0;
                 bool wasPressed = (snap.buttons[b] & 0x80) != 0;
-                if (nowPressed && !wasPressed) {
+
+                // Only consider buttons that are newly pressed (delta from snapshot)
+                if (!nowPressed || wasPressed) {
+                    // If this was our debounce candidate but it released, reset
+                    if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
+                        s_pendingBind.debounceButtonIndex == b && !nowPressed) {
+                        s_pendingBind.debounceButtonFrames = 0;
+                    }
+                    continue;
+                }
+
+                // Button is pressed and wasn't at snapshot — count debounce frames
+                if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
+                    s_pendingBind.debounceButtonIndex == b) {
+                    s_pendingBind.debounceButtonFrames++;
+                } else {
+                    s_pendingBind.debounceDeviceIndex = snap.deviceIndex;
+                    s_pendingBind.debounceButtonIndex = b;
+                    s_pendingBind.debounceButtonFrames = 1;
+                }
+
+                if (s_pendingBind.debounceButtonFrames >= kButtonDebounceFrames) {
                     const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
                     char buf[256];
                     sprintf_s(buf, "%s@%d", info.productName.c_str(), b + 1);
@@ -456,6 +517,8 @@ static void SaveBindingsToINI() {
     for (int i = 0; i < kNumAxisSlots; i++) {
         if (s_axisBindings[i] != "(unbound)") {
             ini.SetValue("Hardware", kAxisSlots[i].iniKey, s_axisBindings[i].c_str());
+        } else {
+            ini.SetValue("Hardware", kAxisSlots[i].iniKey, "");
         }
         if (kAxisSlots[i].invertIniKey) {
             ini.SetBoolValue("Hardware", kAxisSlots[i].invertIniKey, s_axisInvert[i]);
@@ -905,6 +968,7 @@ void BindingWizard::Draw() {
     if (s_pendingBind.active) {
         if (ImGui::Button("Cancel Capture")) {
             s_pendingBind.active = false;
+            ResetDebounce();
             WizLog("Capture cancelled by user.");
         }
         ImGui::SameLine();
