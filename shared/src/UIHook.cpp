@@ -1,6 +1,9 @@
 #include "UIHook.h"
 #include "RuntimePaths.h"
 
+// For module enumeration (compatibility diagnostics)
+#include <tlhelp32.h>
+
 // MinHook
 #include <MinHook.h>
 
@@ -25,6 +28,52 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 static void UILog(const std::string& msg) {
     // Always log UIHook messages — these are diagnostics, not per-frame spam
     RuntimePaths::AppendLogAlways("[UIHook]", msg);
+}
+
+static void CompatLog(const std::string& msg) {
+    RuntimePaths::AppendLogAlways("[Compat]", msg);
+}
+
+// ============================================================================
+// Compatibility Diagnostic Helpers
+// ============================================================================
+
+// Resolve a code/data pointer back to the DLL filename that owns it.
+// Returns "<unknown>" if VirtualQuery or GetModuleFileNameA fails.
+static std::string ModuleOf(const void* addr) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(addr, &mbi, sizeof(mbi)) || !mbi.AllocationBase)
+        return "<unknown>";
+    char path[MAX_PATH]{};
+    if (!GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), path, MAX_PATH))
+        return "<unknown>";
+    const char* fname = strrchr(path, '\\');
+    return fname ? (fname + 1) : path;
+}
+
+// Log every DLL currently loaded in the process.
+// Called once during UIHook::Install — zero runtime overhead thereafter.
+// Captures: ReShade (dxgi.dll proxy), ENB helpers, competing SFSE UI plugins,
+// DLSS/FSR injectors, etc. — anything that might hook D3D12 Present.
+static void LogLoadedModules() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        CompatLog("WARNING: CreateToolhelp32Snapshot failed — cannot enumerate modules.");
+        return;
+    }
+    MODULEENTRY32W me{ sizeof(me) };
+    CompatLog("--- Loaded modules at hook install time ---");
+    if (Module32FirstW(snap, &me)) {
+        do {
+            char name[MAX_PATH]{};
+            WideCharToMultiByte(CP_UTF8, 0, me.szModule, -1, name, MAX_PATH, nullptr, nullptr);
+            char path[MAX_PATH]{};
+            WideCharToMultiByte(CP_UTF8, 0, me.szExePath, -1, path, MAX_PATH, nullptr, nullptr);
+            CompatLog(std::string("  ") + name + "  [" + path + "]");
+        } while (Module32NextW(snap, &me));
+    }
+    CompatLog("--- End module list ---");
+    CloseHandle(snap);
 }
 
 // ============================================================================
@@ -727,10 +776,32 @@ static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void**
 }
 
 // ============================================================================
+// Compatibility Diagnostic — Hook Chain Origin
+// ============================================================================
+// After MinHook installs our Present hook, g_origPresent is a trampoline that
+// chains to whatever Present implementation was live at hook install time.
+// Resolving g_origPresent's module tells us who was upstream in the hook chain:
+//   -> dxgi.dll    : we are first in the chain (clean)
+//   -> reshade.dll : ReShade hooked Present before us
+//   -> <other>     : some other injector is upstream
+static void LogHookChainOrigin() {
+    if (!g_origPresent) return;
+    std::string mod = ModuleOf(reinterpret_cast<const void*>(g_origPresent));
+    CompatLog("Present trampoline resolves to: " + mod
+        + (mod == "dxgi.dll" ? " (clean \u2014 we are first in the hook chain)"
+                             : " (UPSTREAM HOOK DETECTED \u2014 another injector owns Present before us)"));
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 bool UIHook::Install() {
     UILog("Installing D3D12 hooks...");
+
+    // ── Compatibility Diagnostic ─────────────────────────────────────────────
+    // Log every loaded DLL so users can share this log to identify conflicting
+    // graphics injectors (ReShade, ENB, DLSS tools, competing SFSE UI plugins).
+    LogLoadedModules();
 
     void* pPresent = nullptr;
     void* pResizeBuffers = nullptr;
@@ -776,6 +847,18 @@ bool UIHook::Install() {
         UILog("ERROR: Failed to enable hooks.");
         return false;
     }
+
+    // ── Compatibility Diagnostic ─────────────────────────────────────────────
+    // Log which module each harvested vtable entry currently lives in.
+    // If these read something other than dxgi.dll / d3d12.dll, another injector
+    // patched the vtable before us.
+    CompatLog("Vtable entry modules at hook install:");
+    CompatLog("  IDXGISwapChain::Present         -> " + ModuleOf(pPresent));
+    CompatLog("  IDXGISwapChain::ResizeBuffers   -> " + ModuleOf(pResizeBuffers));
+    CompatLog("  ID3D12CommandQueue::ExecuteCommandLists -> " + ModuleOf(pExecuteCommandLists));
+    CompatLog("  IDXGIFactory2::CreateSwapChainForHwnd  -> " + ModuleOf(pCreateSwapChainForHwnd));
+    // Log hook chain origin (who MinHook's trampoline points back to).
+    LogHookChainOrigin();
 
     UILog("D3D12 hooks installed successfully. Press Ctrl+Alt+B to toggle overlay.");
     return true;
