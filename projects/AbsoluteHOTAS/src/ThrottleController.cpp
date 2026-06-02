@@ -741,7 +741,16 @@ void ThrottleController::ControlLoop() {
         if (!ref.IsValid()) return;
         
         int resolvedIndex = -1;
-        if (ref.HasDevice()) {
+        if (ref.HasIndex()) {
+            // Pre-resolved by #N@ syntax — validate index exists
+            if (ref.deviceIndex < DeviceManager::GetDeviceCount()) {
+                resolvedIndex = ref.deviceIndex;
+            } else {
+                char buf[256];
+                sprintf_s(buf, "Warning: Device index #%d out of range (only %d devices)", ref.deviceIndex, DeviceManager::GetDeviceCount());
+                CtrlLog(buf);
+            }
+        } else if (ref.HasDevice()) {
             resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
         } else {
             resolvedIndex = DeviceManager::ResolveDevice("", defaultName, defaultIndex);

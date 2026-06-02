@@ -7,24 +7,27 @@
 #include <cstdlib>
 
 // Represents a parsed INI binding reference.
-// Format: "DeviceName@0x32" or "DeviceName@42" or just "0x32" / "42"
-// The '@' delimiter separates an optional device name from the axis/button value.
+// Format: "DeviceName@0x32" or "#0@0x32" or just "0x32" / "42"
+// The '@' delimiter separates an optional device name (or #N index) from the axis/button value.
 struct BindingRef {
     std::string deviceName;   // Empty = use legacy default device from [InputDevices]
     int         value;        // Axis usage ID (0x30-0x37) or button ID (1-128), or -1
     int         deviceIndex;  // Resolved DeviceManager index, -1 = unresolved/default
 
     bool HasDevice() const { return !deviceName.empty(); }
+    bool HasIndex()  const { return deviceIndex >= 0; }
     bool IsValid()   const { return value >= 0; }
 };
 
 // Parses an INI value into a BindingRef.
 //   "S-TECS SPACE-L THROTTLE@0x32"  → { "S-TECS SPACE-L THROTTLE", 0x32, -1 }
+//   "#0@0x32"                       → { "", 0x32, 0 }
+//   "#1@5"                          → { "", 5, 1 }
 //   "VKBsim Gladiator EVO R@1"      → { "VKBsim Gladiator EVO R", 1, -1 }
 //   "0x32"                           → { "", 0x32, -1 }
 //   "42"                             → { "", 42, -1 }
 //   "-1"                             → { "", -1, -1 }
-//   ""                               → { "", defaultValue, -1 }
+//   ""                               → { "", -1, -1 }  (explicitly cleared)
 inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
     BindingRef ref;
     ref.deviceIndex = -1;
@@ -49,6 +52,28 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
     if (sv.empty()) {
         ref.value = -1;
         return ref;
+    }
+
+    // Check for #N@ device index prefix (e.g., "#0@0x30", "#1@5")
+    if (sv.front() == '#') {
+        auto atPos = sv.find('@');
+        if (atPos != std::string_view::npos && atPos > 1 && atPos < sv.size() - 1) {
+            std::string idxStr(sv.substr(1, atPos - 1));
+            char* endPtr = nullptr;
+            long idx = std::strtol(idxStr.c_str(), &endPtr, 10);
+            if (endPtr != idxStr.c_str() && idx >= 0) {
+                ref.deviceIndex = static_cast<int>(idx);
+
+                // Parse the value after @
+                std::string_view valPart = sv.substr(atPos + 1);
+                while (!valPart.empty() && std::isspace(static_cast<unsigned char>(valPart.front()))) valPart.remove_prefix(1);
+                std::string valStr(valPart);
+                endPtr = nullptr;
+                long parsed = std::strtol(valStr.c_str(), &endPtr, 0);
+                ref.value = (endPtr != valStr.c_str()) ? static_cast<int>(parsed) : -1;
+                return ref;
+            }
+        }
     }
 
     // Find the last '@' — device names may contain spaces but not '@'

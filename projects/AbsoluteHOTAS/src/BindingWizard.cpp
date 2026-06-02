@@ -207,7 +207,9 @@ static int FindOutputIndex(const std::string& val) {
 static std::string FormatRef(const BindingRef& ref) {
     if (!ref.IsValid() || ref.value <= 0) return "(unbound)";
     char buf[256];
-    if (ref.deviceName.empty()) {
+    if (ref.HasIndex() && ref.deviceName.empty()) {
+        sprintf_s(buf, "#%d@0x%02X", ref.deviceIndex, ref.value);
+    } else if (ref.deviceName.empty()) {
         sprintf_s(buf, "0x%02X", ref.value);
     } else {
         sprintf_s(buf, "%s@0x%02X", ref.deviceName.c_str(), ref.value);
@@ -218,7 +220,9 @@ static std::string FormatRef(const BindingRef& ref) {
 static std::string FormatButtonRef(const BindingRef& ref) {
     if (!ref.IsValid() || ref.value <= 0) return "(unbound)";
     char buf[256];
-    if (ref.deviceName.empty()) {
+    if (ref.HasIndex() && ref.deviceName.empty()) {
+        sprintf_s(buf, "#%d@%d", ref.deviceIndex, ref.value);
+    } else if (ref.deviceName.empty()) {
         sprintf_s(buf, "%d", ref.value);
     } else {
         sprintf_s(buf, "%s@%d", ref.deviceName.c_str(), ref.value);
@@ -399,6 +403,16 @@ static void UpdateCapture() {
     constexpr int kButtonDebounceFrames = 8;  // ~130ms at 60fps
     constexpr int kAxisDebounceFrames = 5;    // ~80ms at 60fps
 
+    // Helper: check if a device has a duplicate product name
+    auto hasDupe = [](int devIdx) -> bool {
+        const auto& name = DeviceManager::GetDevice(devIdx).productName;
+        for (int d = 0; d < DeviceManager::GetDeviceCount(); d++) {
+            if (d != devIdx && DeviceManager::GetDevice(d).productName == name)
+                return true;
+        }
+        return false;
+    };
+
     if (slot >= 0 && slot < 100) {
         // Axis capture: compare current state to snapshot
         constexpr long kAxisThreshold = 8000;
@@ -426,7 +440,11 @@ static void UpdateCapture() {
                         const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
                         int usageId = 0x30 + a;
                         char buf[256];
-                        sprintf_s(buf, "%s@0x%02X", info.productName.c_str(), usageId);
+                        if (hasDupe(snap.deviceIndex)) {
+                            sprintf_s(buf, "#%d@0x%02X", snap.deviceIndex, usageId);
+                        } else {
+                            sprintf_s(buf, "%s@0x%02X", info.productName.c_str(), usageId);
+                        }
 
                         s_axisBindings[slot] = buf;
                         WizLog("Axis captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
@@ -474,7 +492,11 @@ static void UpdateCapture() {
                 if (s_pendingBind.debounceButtonFrames >= kButtonDebounceFrames) {
                     const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
                     char buf[256];
-                    sprintf_s(buf, "%s@%d", info.productName.c_str(), b + 1);
+                    if (hasDupe(snap.deviceIndex)) {
+                        sprintf_s(buf, "#%d@%d", snap.deviceIndex, b + 1);
+                    } else {
+                        sprintf_s(buf, "%s@%d", info.productName.c_str(), b + 1);
+                    }
 
                     // Route to the correct binding array
                     if (slot >= 100 && slot < 200) {
@@ -668,18 +690,79 @@ void BindingWizard::Draw() {
             if (devCount == 0) {
                 ImGui::TextWrapped("No DirectInput devices detected.");
             }
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Device indices (#N) follow USB enumeration order.");
+            ImGui::Spacing();
 
             for (int d = 0; d < devCount; d++) {
                 const auto& info = DeviceManager::GetDevice(d);
                 const auto* st = DeviceManager::GetCachedState(d);
 
-                std::string header = std::to_string(d) + ": " + info.productName;
+                std::string header = "#" + std::to_string(d) + ": " + info.productName;
                 if (!info.vidpidString.empty()) header += " [" + info.vidpidString + "]";
 
                 if (ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
                     ImGui::Indent(12.0f);
                     ImGui::Text("Instance: %s", info.instanceName.c_str());
                     ImGui::Text("Axes: %d  Buttons: %d", info.axisCount, info.buttonCount);
+
+                    // Swap button for duplicate device names
+                    if (d + 1 < devCount && info.productName == DeviceManager::GetDevice(d + 1).productName) {
+                        ImGui::SameLine(400);
+                        char swapLabel[64];
+                        sprintf_s(swapLabel, "Swap #%d <-> #%d", d, d + 1);
+                        if (ImGui::SmallButton(swapLabel)) {
+                            // Swap all #d and #(d+1) references in bindings
+                            auto swapInBinding = [&](std::string& binding) {
+                                char prefA[16], prefB[16];
+                                sprintf_s(prefA, "#%d@", d);
+                                sprintf_s(prefB, "#%d@", d + 1);
+                                size_t lenA = strlen(prefA);
+                                size_t lenB = strlen(prefB);
+                                if (binding.substr(0, lenA) == prefA) {
+                                    binding = std::string(prefB) + binding.substr(lenA);
+                                } else if (binding.substr(0, lenB) == prefB) {
+                                    binding = std::string(prefA) + binding.substr(lenB);
+                                }
+                            };
+                            // Two-pass swap to avoid A→B then B→A clobbering
+                            // Pass 1: A → temp
+                            char tempPref[16];
+                            sprintf_s(tempPref, "#__SWAP__@");
+                            size_t tempLen = strlen(tempPref);
+                            char prefA[16], prefB[16];
+                            sprintf_s(prefA, "#%d@", d);
+                            sprintf_s(prefB, "#%d@", d + 1);
+                            size_t lenA = strlen(prefA);
+                            size_t lenB = strlen(prefB);
+
+                            auto doSwap = [&](std::string& binding) {
+                                if (binding.substr(0, lenA) == prefA) {
+                                    binding = std::string(tempPref) + binding.substr(lenA);
+                                } else if (binding.substr(0, lenB) == prefB) {
+                                    binding = std::string(prefA) + binding.substr(lenB);
+                                }
+                            };
+                            auto finalize = [&](std::string& binding) {
+                                if (binding.substr(0, tempLen) == tempPref) {
+                                    binding = std::string(prefB) + binding.substr(tempLen);
+                                }
+                            };
+
+                            // Collect all binding refs
+                            std::vector<std::string*> allBindings;
+                            for (auto& b : s_axisBindings) allBindings.push_back(&b);
+                            for (auto& b : s_buttonBindings) allBindings.push_back(&b);
+                            for (auto& b : s_digitalAxisBindings) allBindings.push_back(&b);
+                            for (auto& sa : s_shipActionSlots) allBindings.push_back(&sa.binding);
+                            for (auto& cb : s_customBindings) allBindings.push_back(&cb.buttonBinding);
+
+                            for (auto* bp : allBindings) doSwap(*bp);
+                            for (auto* bp : allBindings) finalize(*bp);
+
+                            SaveBindingsToINI();
+                            WizLog("Swapped device indices #" + std::to_string(d) + " <-> #" + std::to_string(d + 1));
+                        }
+                    }
 
                     if (st) {
                         ImGui::Spacing();
