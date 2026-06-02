@@ -1,8 +1,8 @@
-# AbsoluteHOTAS 2.1 Beta
+# AbsoluteHOTAS v2.2.3
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
-This build reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
+This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
 
 ## ⚠️ Required: StarfieldCustom.ini Setup
 
@@ -27,28 +27,20 @@ AbsoluteHOTAS uses **memory injection** (`SendInput`, DirectInput polling, and i
 - Hooks Direct3D12 `Present` to render the ImGui overlay — standard technique used by RivaTuner, MSI Afterburner, and SFSE itself.
 - Writes to Starfield's in-process memory to inject throttle/axis values — same approach as every SFSE plugin.
 
-**To resolve:** Add an exception for `AbsoluteHOTAS.dll` in your antivirus, or review the full source code linked on the Nexus mod page.
+**To resolve:** Add an exception for `AbsoluteHOTAS.dll` in your antivirus, or review the source code directly here on GitHub.
 
-## What's New in 2.1
+## Key Features
 
-- **Per-axis hardware calibration** — Sweep each axis to its physical limits on the Devices tab. Compensates for worn potentiometers and low-resolution ADCs (e.g., 8-bit T.Flight HOTAS X).
-- **Custom Bindings tab** — Bind any controller button to any keyboard/mouse output. Visual UI for `[ButtonExpansion]`, with a one-click "Add Menu Cluster" preset for WASD/Tab/E/Esc navigation.
-- **Toggle Wizard button** — Open/close the binding overlay from a HOTAS button instead of only via `Ctrl+Alt+B`.
-- **ButtonExpansion device-prefix fix** — Device-prefixed keys (e.g., `T.16000M@iButton5`) now parse correctly.
-- **Unbound axis hardening** — All axis reads guarded against garbage data from unbound or misconfigured axes.
-- **Race condition fix** — Resolved UI state reversion in the binding wizard during save.
-
-### What's New in 2.0
-
-- **Direct HID input** — Reads your HOTAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
-- **In-game binding wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware.
-- **Multi-device support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
-- **Per-axis settings** — Inversion toggles and sensitivity sliders per axis, configurable in-game.
-- **22 ship action bindings** — Fire weapons, boost, power management, scanner, target select, and more — all bindable to physical HOTAS buttons.
-- **Digital axis buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
-- **Live config reload** — Bindings saved from the wizard take effect immediately without restarting the game.
-- **Mouse cursor support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
-- **Silent logging** — No log file writes unless `bLogThrottle = true` in the INI (startup banner always writes).
+* **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
+* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` (or bind a controller button) to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware in real-time.
+* **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
+* **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
+* **22 Ship Action Bindings** — Map physical buttons to flight functions (boost, weapons, power management, scanner, target selection, etc.).
+* **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
+* **Digital Axis Buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
+* **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
+* **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
+* **Silent logging** — Diagnostic logging is disabled by default to minimize performance impact, and can be toggled on via `bLogThrottle = true` in the INI.
 
 ## Requirements
 
@@ -179,13 +171,6 @@ Logging is **off by default**. Only the startup banner (4 lines) is written to c
 
 Set `bLogThrottle = true` to enable full diagnostic logging. Logs rotate at 1 MB.
 
-## Migration from 1.x
-
-- **vJoy and Joystick Gremlin are no longer required.** Remove them from your setup unless you use them for other games.
-- **`iBoostButtonId` is deprecated.** Use `iFireBoostersButton` in `[ShipButtons]` instead.
-- **`bAlwaysOn` defaults to `true`.** The plugin arms automatically on load. Activate/stop buttons are optional.
-- All axis bindings default to empty. Use the in-game wizard (`Ctrl+Alt+B`) or edit the INI manually.
-
 ## Notes
 
-This is a beta build. Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bLogThrottle = true`).
+Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bLogThrottle = true`).
