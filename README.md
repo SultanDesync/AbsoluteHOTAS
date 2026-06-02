@@ -60,7 +60,7 @@ Or install via MO2 using the provided archive.
 
 1. Install the plugin files.
 2. Launch the game via SFSE.
-3. Press `Ctrl+Alt+B` to open the binding wizard.
+3. Press `Ctrl+Alt+B` to open the binding wizard (it is recommended to do this from the main menu or pause menu rather than while active in the pilot seat).
 4. Go to the **Axes & Settings** tab, click **Bind** next to each axis, and move the physical control.
 5. Go to the **Ship Actions** tab and bind buttons to ship functions (boost, weapons, power, etc.).
 6. Click **Save & Apply**. Bindings take effect immediately.
@@ -69,7 +69,7 @@ Or install via MO2 using the provided archive.
 
 ## In-Game Binding Wizard
 
-Press `Ctrl+Alt+B` to toggle the overlay (or bind a HOTAS button via the **Toggle Wizard** slot in Control Buttons). The wizard has six tabs:
+Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard from the main menu or pause menu to avoid active control conflicts, though it can also be toggled from a HOTAS button bound via the **Toggle Wizard** slot in Control Buttons). The wizard has six tabs:
 
 | Tab | Purpose |
 |-----|---------|
