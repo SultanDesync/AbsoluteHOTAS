@@ -43,7 +43,8 @@ static ID3D12DescriptorHeap*        g_srvDescHeap = nullptr;
 static ID3D12CommandAllocator**     g_cmdAllocators = nullptr;
 static ID3D12GraphicsCommandList*   g_cmdList = nullptr;
 
-// The game's command queue — captured via ExecuteCommandLists hook
+// The game's command queue — captured via CreateSwapChainForHwnd (primary) or
+// ExecuteCommandLists (fallback). Held as a non-owning reference; the game retains ownership.
 static ID3D12CommandQueue*          g_gameCommandQueue = nullptr;
 
 // Fence for GPU synchronization
@@ -68,15 +69,40 @@ static WNDPROC g_origWndProc = nullptr;
 using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 using ResizeBuffersFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags);
 using ExecuteCommandListsFn = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
+// IDXGIFactory2::CreateSwapChainForHwnd — pDevice (2nd arg) is required by D3D12 spec to be
+// the ID3D12CommandQueue that the swap chain uses for presentation. This gives us the
+// definitively correct queue at creation time, before any other graphics injector can
+// create private helper queues that would fool the heuristic ExecuteCommandLists capture.
+using CreateSwapChainForHwndFn = HRESULT(STDMETHODCALLTYPE*)(
+    IDXGIFactory2*, IUnknown*, HWND,
+    const DXGI_SWAP_CHAIN_DESC1*,
+    const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*,
+    IDXGIOutput*, IDXGISwapChain1**);
 
-static PresentFn             g_origPresent = nullptr;
-static ResizeBuffersFn       g_origResizeBuffers = nullptr;
-static ExecuteCommandListsFn g_origExecuteCommandLists = nullptr;
+static PresentFn                g_origPresent = nullptr;
+static ResizeBuffersFn          g_origResizeBuffers = nullptr;
+static ExecuteCommandListsFn    g_origExecuteCommandLists = nullptr;
+static CreateSwapChainForHwndFn g_origCreateSwapChainForHwnd = nullptr;
+
+// Re-entrancy guard: RenderOverlayFrame calls ExecuteCommandLists on the game queue to
+// submit overlay draw commands. Without this flag, HookedExecuteCommandLists would see
+// our own submission and could overwrite the captured queue or emit spurious log lines.
+static thread_local bool g_inOverlaySubmit = false;
+
+static UINT GetToggleUIMessage() {
+    static UINT msg = RegisterWindowMessageW(L"AbsoluteHOTAS_ToggleUI");
+    return msg;
+}
 
 // ============================================================================
 // WndProc Hook
 // ============================================================================
 static LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == GetToggleUIMessage()) {
+        UIHook::ToggleUI();
+        return 0;
+    }
+
     // Toggle on Ctrl+Alt+B
     if (msg == WM_KEYDOWN && wParam == 'B') {
         bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -201,15 +227,57 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
 }
 
 // ============================================================================
-// ExecuteCommandLists Hook — captures the game's command queue
+// CreateSwapChainForHwnd Hook — primary, guaranteed command queue capture
 // ============================================================================
+// IDXGIFactory2::CreateSwapChainForHwnd requires pDevice to be the specific
+// ID3D12CommandQueue used for all Present submissions on this swap chain.
+// Hooking here gives us the definitive queue at creation time, before any
+// other graphics injector (ReShade, ENB, DLSS helpers, etc.) can create
+// private DIRECT queues that would fool the ExecuteCommandLists heuristic.
+static HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
+    IDXGIFactory2* pThis,
+    IUnknown*      pDevice,
+    HWND           hWnd,
+    const DXGI_SWAP_CHAIN_DESC1*           pDesc,
+    const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+    IDXGIOutput*   pRestrictToOutput,
+    IDXGISwapChain1** ppSwapChain)
+{
+    if (!g_gameCommandQueue && pDevice) {
+        ID3D12CommandQueue* pQueue = nullptr;
+        if (SUCCEEDED(pDevice->QueryInterface(IID_PPV_ARGS(&pQueue)))) {
+            g_gameCommandQueue = pQueue;
+            // Release our QueryInterface ref — the game retains ownership; we hold a non-owning ref.
+            pQueue->Release();
+            UILog("Captured game command queue from CreateSwapChainForHwnd: 0x"
+                + std::format("{:X}", reinterpret_cast<uintptr_t>(g_gameCommandQueue)));
+        } else {
+            // pDevice was not an ID3D12CommandQueue — unusual configuration.
+            // The ExecuteCommandLists fallback will capture the queue instead.
+            UILog("WARNING: CreateSwapChainForHwnd pDevice is not an ID3D12CommandQueue "
+                  "\u2014 queue capture deferred to ExecuteCommandLists fallback.");
+        }
+    }
+    return g_origCreateSwapChainForHwnd(
+        pThis, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain);
+}
+
+// ============================================================================
+// ExecuteCommandLists Hook — fallback queue capture + re-entrancy guard
+// ============================================================================
+// Primary capture is now HookedCreateSwapChainForHwnd. This hook serves two roles:
+//   1. Fallback: catches rare edge cases where the swap chain was created before
+//      our CreateSwapChainForHwnd hook became live (very early injection scenarios).
+//   2. Re-entrancy safety: our own RenderOverlayFrame calls ExecuteCommandLists to
+//      submit the overlay command list; g_inOverlaySubmit prevents that from
+//      overwriting the captured queue or emitting spurious fallback log entries.
 static void STDMETHODCALLTYPE HookedExecuteCommandLists(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
-    // Capture the first DIRECT queue we see — that's the game's rendering queue
-    if (!g_gameCommandQueue) {
+    if (!g_inOverlaySubmit && !g_gameCommandQueue) {
         D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
         if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
             g_gameCommandQueue = pQueue;
-            UILog("Captured game command queue: 0x" + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
+            UILog("Captured game command queue from ExecuteCommandLists (fallback): 0x"
+                + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
         }
     }
     g_origExecuteCommandLists(pQueue, NumCommandLists, ppCommandLists);
@@ -369,6 +437,19 @@ static void HandleRenderException() {
     RuntimePaths::AppendLogAlways("[UIHook]",
         "D3D12 render exception caught — overlay disabled. Press Ctrl+Alt+B to reinit.");
 
+    // Restore Win32 cursor state if the overlay was open when the exception fired.
+    // ToggleUI's closing branch normally handles this, but HandleRenderException
+    // bypasses ToggleUI entirely — leaving the system cursor visible and unclipped.
+    // Win32 cursor calls are safe here: no D3D12/COM dependency, no throw risk.
+    if (g_isOpen.load()) {
+        // Hide the system cursor (mirrors ToggleUI's closing path).
+        while (ShowCursor(FALSE) >= 0) {}
+        if (g_hadClipRect) {
+            ClipCursor(&g_savedClipRect);
+            g_hadClipRect = false;
+        }
+    }
+
     g_isOpen.store(false);
     g_initialized.store(false);
 
@@ -435,7 +516,10 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
             g_cmdList->Close();
 
             ID3D12CommandList* ppCmdLists[] = { g_cmdList };
+            // Set re-entrancy flag so HookedExecuteCommandLists ignores this submission.
+            g_inOverlaySubmit = true;
             g_gameCommandQueue->ExecuteCommandLists(1, ppCmdLists);
+            g_inOverlaySubmit = false;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         HandleRenderException();
@@ -555,13 +639,22 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
 // ============================================================================
 // Vtable Discovery via Dummy Device
 // ============================================================================
-static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void** outExecuteCommandLists) {
+static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void** outExecuteCommandLists, void** outCreateSwapChainForHwnd) {
     // Create a temporary DXGI factory + device + swap chain to harvest vtable pointers
     IDXGIFactory4* factory = nullptr;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
         UILog("ERROR: Failed to create DXGI factory for vtable discovery.");
         return false;
     }
+
+    // Harvest CreateSwapChainForHwnd from the factory vtable.
+    // IDXGIFactory2::CreateSwapChainForHwnd is at vtable index 15 (SDK-verified):
+    //   IUnknown(0-2) + IDXGIObject(3-6) + IDXGIFactory(7-11) + IDXGIFactory1(12-13)
+    //   + IDXGIFactory2::IsWindowedStereoEnabled(14) + CreateSwapChainForHwnd(15)
+    // IDXGIFactory4 inherits IDXGIFactory2, so this index is stable regardless of which
+    // factory version the game uses internally.
+    void** factoryVtable = *reinterpret_cast<void***>(factory);
+    *outCreateSwapChainForHwnd = factoryVtable[15];
 
     ID3D12Device* tempDevice = nullptr;
     if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&tempDevice)))) {
@@ -642,14 +735,23 @@ bool UIHook::Install() {
     void* pPresent = nullptr;
     void* pResizeBuffers = nullptr;
     void* pExecuteCommandLists = nullptr;
+    void* pCreateSwapChainForHwnd = nullptr;
 
-    if (!GetVtablePointers(&pPresent, &pResizeBuffers, &pExecuteCommandLists)) {
+    if (!GetVtablePointers(&pPresent, &pResizeBuffers, &pExecuteCommandLists, &pCreateSwapChainForHwnd)) {
         UILog("ERROR: Vtable discovery failed. UI overlay disabled.");
         return false;
     }
 
     if (MH_Initialize() != MH_OK) {
         UILog("ERROR: MH_Initialize failed.");
+        return false;
+    }
+
+    // Primary queue capture — fires at swap chain creation, before other injectors
+    // can create private helper queues that would fool ExecuteCommandLists.
+    if (MH_CreateHook(pCreateSwapChainForHwnd, &HookedCreateSwapChainForHwnd,
+        reinterpret_cast<void**>(&g_origCreateSwapChainForHwnd)) != MH_OK) {
+        UILog("ERROR: Failed to create CreateSwapChainForHwnd hook.");
         return false;
     }
 
@@ -663,7 +765,9 @@ bool UIHook::Install() {
         return false;
     }
 
-    if (MH_CreateHook(pExecuteCommandLists, &HookedExecuteCommandLists, reinterpret_cast<void**>(&g_origExecuteCommandLists)) != MH_OK) {
+    // Fallback queue capture + re-entrancy guard (see HookedExecuteCommandLists).
+    if (MH_CreateHook(pExecuteCommandLists, &HookedExecuteCommandLists,
+        reinterpret_cast<void**>(&g_origExecuteCommandLists)) != MH_OK) {
         UILog("ERROR: Failed to create ExecuteCommandLists hook.");
         return false;
     }
@@ -713,6 +817,11 @@ void UIHook::Shutdown() {
 }
 
 void UIHook::ToggleUI() {
+    if (g_hWnd && GetCurrentThreadId() != GetWindowThreadProcessId(g_hWnd, nullptr)) {
+        PostMessageW(g_hWnd, GetToggleUIMessage(), 0, 0);
+        return;
+    }
+
     bool wasOpen = g_isOpen.load();
     bool nowOpen = !wasOpen;
     g_isOpen.store(nowOpen);
