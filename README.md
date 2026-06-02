@@ -1,3 +1,39 @@
+# ⚠️ Compatibility Diagnostic Build — v2.2.3-diag
+
+> **This is not a regular release.** This branch exists to collect diagnostic logs from users experiencing overlay crashes or CTDs. If you found this through Nexus Mods, please use the [main release](https://www.nexusmods.com/starfield/mods/) instead.
+
+## 🔬 Testing Instructions
+
+We are investigating a crash that affects some users when opening the in-game binding wizard. This build captures extra information about your graphics setup to help us identify the cause.
+
+**You do not need to be able to reproduce the crash to help — just launching and closing the game once is enough.**
+
+### Steps
+
+1. **Download** `AbsoluteHOTAS-v2.2.3-diag.zip` from the [Releases page](https://github.com/SultanDesync/AbsoluteHOTAS/releases/tag/v2.2.3-diag)
+2. **Install** by extracting the zip into your Starfield directory (or via your mod manager). Replace only `AbsoluteHOTAS.dll` — keep your existing `AbsoluteHOTAS.ini` and `StarfieldCustom.ini` settings
+3. **Launch** Starfield via SFSE as normal. Wait for the main menu to fully load
+4. *(Optional)* Try opening the binding wizard with `Ctrl+Alt+B` if you can do so without crashing
+5. **Close** the game
+6. **Share the log** — find `AbsoluteHOTAS.log` in `Data\SFSE\Plugins\` and email it to:
+
+   📧 **milkmanrsvg@gmail.com**
+
+   Subject line: `AbsoluteHOTAS Diagnostic Log — [your GPU / graphics mods if known]`
+
+### What we are looking for
+
+The log will now contain a `[Compat]` section that lists every DLL loaded into Starfield at startup, which D3D12 hooks were already installed before ours, and whether the Present hook chain is clean. Please share the **full log file**, not just a snippet.
+
+### What to include in your email
+
+- Your `AbsoluteHOTAS.log` (attached)
+- Your GPU and driver version
+- Any graphics mods you use (ReShade, ENB, DLSS injectors, etc.)
+- A brief description of when the crash occurs
+
+---
+
 # AbsoluteHOTAS v2.2.3
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
