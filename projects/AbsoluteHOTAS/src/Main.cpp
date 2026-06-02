@@ -28,7 +28,13 @@ static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
     }
 
     const auto* const record = a_exceptionInfo->ExceptionRecord;
-    if (record->ExceptionCode == 0x40010006 || record->ExceptionCode == 0x406D1388) {
+    // Skip non-crash exception codes:
+    // 0x40010006 = DBG_PRINTEXCEPTION_C (OutputDebugString)
+    // 0x406D1388 = MS_VC_EXCEPTION (SetThreadName)
+    // 0xE06D7363 = C++ throw — handled by SEH __try/__except in our render path
+    if (record->ExceptionCode == 0x40010006 ||
+        record->ExceptionCode == 0x406D1388 ||
+        record->ExceptionCode == 0xE06D7363) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
@@ -87,7 +93,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.2.1 - Direct HID + In-Game UI");
+    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.2.2 - Direct HID + In-Game UI");
     RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 

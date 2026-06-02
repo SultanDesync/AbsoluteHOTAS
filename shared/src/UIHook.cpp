@@ -23,6 +23,7 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static void UILog(const std::string& msg) {
+    // Always log UIHook messages — these are diagnostics, not per-frame spam
     RuntimePaths::AppendLogAlways("[UIHook]", msg);
 }
 
@@ -56,6 +57,8 @@ static ID3D12Resource**             g_backBuffers = nullptr;
 static D3D12_CPU_DESCRIPTOR_HANDLE* g_rtvHandles = nullptr;
 static ID3D12DescriptorHeap*        g_rtvDescHeap = nullptr;
 static DXGI_FORMAT                  g_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+static UINT                         g_lastSwapWidth = 0;
+static UINT                         g_lastSwapHeight = 0;
 
 // WndProc
 static HWND    g_hWnd = nullptr;
@@ -224,6 +227,22 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
 
     UILog("Initializing ImGui D3D12 overlay...");
 
+    // Clean up any stale ImGui context from a previous session that was
+    // abandoned by HandleRenderException (which nulls D3D12 resources
+    // without calling ImGui shutdown to avoid secondary crashes).
+    if (ImGui::GetCurrentContext()) {
+        UILog("Cleaning up stale ImGui context from previous session.");
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+    }
+
+    // Restore old WndProc if we previously hooked it (prevents double-hooking)
+    if (g_origWndProc && g_hWnd) {
+        SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
+        g_origWndProc = nullptr;
+    }
+
     // Get the D3D12 device from the swap chain
     if (FAILED(pSwapChain->GetDevice(IID_PPV_ARGS(&g_d3dDevice)))) {
         UILog("ERROR: Failed to get ID3D12Device from swap chain.");
@@ -236,6 +255,8 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
     g_hWnd = desc.OutputWindow;
     g_backBufferFormat = desc.BufferDesc.Format;
     g_numBackBuffers = desc.BufferCount;
+    g_lastSwapWidth = desc.BufferDesc.Width;
+    g_lastSwapHeight = desc.BufferDesc.Height;
 
     UILog("Swap chain: " + std::to_string(desc.BufferDesc.Width) + "x" + std::to_string(desc.BufferDesc.Height)
         + " format=" + std::to_string((int)g_backBufferFormat)
@@ -331,30 +352,58 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
 }
 
 // ============================================================================
-// Present Hook
+// RenderOverlayFrame — Exception Recovery
 // ============================================================================
-static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
-    if (!g_initialized.load(std::memory_order_relaxed)) {
-        if (g_gameCommandQueue) {
-            InitImGui(pSwapChain);
-        }
-    }
+// Separated so the __try function (RenderOverlayFrame) has zero C++ objects
+// requiring unwinding, satisfying MSVC's C2712 constraint.
+static void HandleRenderException() {
+    // CRITICAL: Do NOT call WaitForGpu, ImGui_ImplDX12_Shutdown, or any
+    // D3D12/COM methods here. The resources are likely corrupted after a
+    // display mode transition, and touching them throws a SECOND exception
+    // from inside this handler, which crashes the game.
+    //
+    // We accept a minor GPU resource leak. InitImGui will recreate everything
+    // from scratch on the next Ctrl+Alt+B press.
 
-    if (g_initialized.load(std::memory_order_relaxed) && g_isOpen.load(std::memory_order_relaxed)) {
-        // Start new ImGui frame
+    // Use AppendLogAlways so this is visible even with logging disabled
+    RuntimePaths::AppendLogAlways("[UIHook]",
+        "D3D12 render exception caught — overlay disabled. Press Ctrl+Alt+B to reinit.");
+
+    g_isOpen.store(false);
+    g_initialized.store(false);
+
+    // Null out all resource pointers WITHOUT releasing them.
+    // The OS/driver will reclaim GPU resources when the process exits or
+    // when InitImGui creates new ones (old refs get orphaned).
+    g_backBuffers = nullptr;
+    g_rtvHandles = nullptr;
+    g_rtvDescHeap = nullptr;
+    g_srvDescHeap = nullptr;
+    g_cmdList = nullptr;
+    g_cmdAllocators = nullptr;
+    g_fence = nullptr;
+    g_fenceEvent = nullptr;
+    g_d3dDevice = nullptr;
+    g_numBackBuffers = 0;
+}
+
+// ============================================================================
+// RenderOverlayFrame
+// ============================================================================
+// __try requires no C++ objects with destructors in the function scope.
+// All cleanup is delegated to HandleRenderException().
+static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
+    __try {
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        // Call user draw callback (BindingWizard)
         if (g_drawCallback) {
             g_drawCallback();
         }
 
-        // Render
         ImGui::Render();
 
-        // Get the current back buffer index
         UINT backBufferIdx = 0;
         IDXGISwapChain3* pSwapChain3 = nullptr;
         if (SUCCEEDED(pSwapChain->QueryInterface(IID_PPV_ARGS(&pSwapChain3)))) {
@@ -363,11 +412,9 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
         }
 
         if (backBufferIdx < g_numBackBuffers && g_backBuffers[backBufferIdx] && g_cmdAllocators[backBufferIdx]) {
-            // Reset per-frame command allocator and command list
             g_cmdAllocators[backBufferIdx]->Reset();
             g_cmdList->Reset(g_cmdAllocators[backBufferIdx], nullptr);
 
-            // Transition back buffer to render target
             D3D12_RESOURCE_BARRIER barrier{};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             barrier.Transition.pResource = g_backBuffers[backBufferIdx];
@@ -381,17 +428,69 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
 
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_cmdList);
 
-            // Transition back to present
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
             barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
             g_cmdList->ResourceBarrier(1, &barrier);
 
             g_cmdList->Close();
 
-            // Execute on the GAME's command queue
             ID3D12CommandList* ppCmdLists[] = { g_cmdList };
             g_gameCommandQueue->ExecuteCommandLists(1, ppCmdLists);
         }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        HandleRenderException();
+    }
+}
+
+// ============================================================================
+// Present Hook
+// ============================================================================
+static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    // Monitor swap chain state every frame — catches display mode changes that
+    // bypass our ResizeBuffers hook (e.g., ResizeBuffers1, swap chain recreation).
+    if (g_initialized.load(std::memory_order_relaxed)) {
+        DXGI_SWAP_CHAIN_DESC curDesc{};
+        if (SUCCEEDED(pSwapChain->GetDesc(&curDesc))) {
+            // Detect resolution/format/buffer count change → invalidate
+            if (curDesc.BufferCount != g_numBackBuffers ||
+                curDesc.BufferDesc.Format != g_backBufferFormat ||
+                curDesc.BufferDesc.Width != g_lastSwapWidth ||
+                curDesc.BufferDesc.Height != g_lastSwapHeight) {
+                UILog("Swap chain state changed (" +
+                    std::to_string(g_lastSwapWidth) + "x" + std::to_string(g_lastSwapHeight) +
+                    " -> " + std::to_string(curDesc.BufferDesc.Width) + "x" +
+                    std::to_string(curDesc.BufferDesc.Height) +
+                    ") — forcing overlay reinit.");
+                HandleRenderException();
+            }
+
+            // Detect HWND change → re-hook WndProc
+            if (curDesc.OutputWindow && curDesc.OutputWindow != g_hWnd) {
+                UILog("HWND changed in Present — re-hooking WndProc.");
+                if (g_origWndProc && g_hWnd) {
+                    SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
+                }
+                g_hWnd = curDesc.OutputWindow;
+                g_origWndProc = reinterpret_cast<WNDPROC>(
+                    SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(HookedWndProc)));
+            }
+        }
+    }
+
+    // Belt-and-suspenders: C++ try/catch for C++ exceptions (0xE06D7363)
+    // which MSVC /EHsc may not route to the __try/__except in RenderOverlayFrame.
+    try {
+        if (!g_initialized.load(std::memory_order_relaxed)) {
+            if (g_gameCommandQueue) {
+                InitImGui(pSwapChain);
+            }
+        }
+
+        if (g_initialized.load(std::memory_order_relaxed) && g_isOpen.load(std::memory_order_relaxed)) {
+            RenderOverlayFrame(pSwapChain);
+        }
+    } catch (...) {
+        HandleRenderException();
     }
 
     return g_origPresent(pSwapChain, SyncInterval, Flags);
@@ -401,16 +500,55 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
 // ResizeBuffers Hook
 // ============================================================================
 static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
-    UILog("ResizeBuffers called: " + std::to_string(Width) + "x" + std::to_string(Height));
+    RuntimePaths::AppendLogAlways("[UIHook]",
+        "ResizeBuffers called: " + std::to_string(Width) + "x" + std::to_string(Height));
 
-    // Wait for GPU to finish before releasing resources
-    WaitForGpu();
-    CleanupRenderTargets();
+    // Force-close the overlay — the resize invalidates all our D3D12 state.
+    // Don't try to WaitForGpu, Release, or call ImGui shutdown here:
+    // after a mode transition the fence/device may be stale and would throw.
+    g_isOpen.store(false);
 
-    HRESULT hr = g_origResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
-    if (SUCCEEDED(hr) && g_initialized.load()) {
-        CreateRenderTargets(pSwapChain);
+    if (g_initialized.load()) {
+        g_initialized.store(false);
+
+        // Abandon all resource pointers (minor leak, reclaimed on reinit or exit).
+        // This is the same approach as HandleRenderException — safe from exceptions.
+        g_backBuffers = nullptr;
+        g_rtvHandles = nullptr;
+        g_rtvDescHeap = nullptr;
+        g_srvDescHeap = nullptr;
+        g_cmdList = nullptr;
+        g_cmdAllocators = nullptr;
+        g_fence = nullptr;
+        g_fenceEvent = nullptr;
+        g_d3dDevice = nullptr;
+        g_numBackBuffers = 0;
+
+        RuntimePaths::AppendLogAlways("[UIHook]",
+            "Overlay state abandoned for resize — will reinit on next Ctrl+Alt+B.");
     }
+
+    // Call the game's original ResizeBuffers — this MUST always execute.
+    HRESULT hr = g_origResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+    // Re-hook WndProc if the window handle changed (display mode transitions
+    // can recreate the HWND, leaving our hotkey hook on the dead window).
+    if (SUCCEEDED(hr)) {
+        DXGI_SWAP_CHAIN_DESC scDesc{};
+        pSwapChain->GetDesc(&scDesc);
+        if (scDesc.OutputWindow && scDesc.OutputWindow != g_hWnd) {
+            RuntimePaths::AppendLogAlways("[UIHook]", "HWND changed after ResizeBuffers — re-hooking WndProc.");
+            if (g_origWndProc && g_hWnd) {
+                SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
+            }
+            g_hWnd = scDesc.OutputWindow;
+            g_origWndProc = reinterpret_cast<WNDPROC>(
+                SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(HookedWndProc)));
+        }
+    }
+
+    // g_initialized is now false. The next HookedPresent will call InitImGui
+    // which rebuilds everything from scratch using the new swap chain state.
     return hr;
 }
 
