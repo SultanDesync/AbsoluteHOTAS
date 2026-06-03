@@ -9,8 +9,6 @@ This build gives direct HOTAS authority for ship pitch, yaw, roll, and throttle.
 - Starfield 1.16.242
 - SFSE 0.2.20
 - Latest Starfield Address Library
-- vJoy
-- Joystick Gremlin
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 
@@ -24,21 +22,7 @@ You can configure `AbsoluteHOTAS.ini` manually, or use the optional
 [AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator)
 to select devices, record button IDs, and write the INI.
 
-Use vJoy for flight axes only:
-
-- X: yaw
-- Y: pitch
-- Z: throttle
-- Rx/Ry/Rz/Slider: roll, strafe, and reverse axes as configured
-
-Use Joystick Gremlin for shaping physical hardware into vJoy axes. For HOTAS buttons, hats, toggles, and mode switches, prefer the plugin's `[ShipButtons]` / `[ButtonExpansion]` DirectInput path when you want to avoid Steam Input or mixed-input flicker. Joystick Gremlin keyboard/mouse simulation can work, but Starfield may receive those simulated inputs inconsistently depending on focus, Steam Input, Proton routing, and UI input mode.
-
-Examples:
-
-- hat up/down/left/right -> power management keys
-- trigger/buttons -> weapon keys
-- throttle button -> boost
-- reverse/brake slider -> vJoy reverse axis
+Use the in-game Binding Wizard (`Ctrl+Alt+B`) to map your flight axes and buttons directly. The plugin reads physical HOTAS hardware natively without requiring virtual joystick drivers or external mapping software.
 
 Do not use Steam Input or Steam controller bindings for this setup. Steam controller translation can add another input layer between the HOTAS and Starfield, which makes behavior harder to diagnose and can fight the plugin.
 
@@ -46,13 +30,13 @@ Do not use Steam Input or Steam controller bindings for this setup. Steam contro
 
 ## Ship Buttons
 
-AbsoluteHOTAS can also consume HOTAS/vJoy DirectInput buttons from `[ShipButtons]` in `AbsoluteHOTAS.ini`. The optional [AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator) records the source button ID, and the plugin emits the vanilla Starfield keyboard or mouse input for that ship action. Reverse/brake is handled separately by the reverse slider memory-injection path.
+AbsoluteHOTAS can also consume HOTAS DirectInput buttons from `[ShipButtons]` in `AbsoluteHOTAS.ini`. The optional [AbsoluteHOTAS Configurator](https://github.com/SultanDesync/AbsoluteHOTAS-Configurator) records the source button ID, and the plugin emits the vanilla Starfield keyboard or mouse input for that ship action. Reverse/brake is handled separately by the reverse slider memory-injection path.
 
 Input devices are selected per input family:
 
 ```ini
 [InputDevices]
-sAxisDeviceName = vJoy
+sAxisDeviceName = VKB
 iAxisDeviceIndex = 0
 sShipButtonDeviceName = VKB
 iShipButtonDeviceIndex = 0
@@ -129,38 +113,7 @@ iThrottleBurstMs = 250
 
 Holding `S` releases throttle authority so vanilla reverse/brake behavior can take over.
 
-## HOSAS Incremental Throttle & Physics Adherence (Alpha)
 
-This release includes experimental flight modes for dual-joystick HOSAS configurations using a centering, spring-loaded axis for speed control.
-
-### Incremental Rate Throttle
-
-Rather than a direct 1:1 mapping, **Incremental Mode** treats physical displacement as a rate accelerator/decelerator. When the stick returns to center, the target speed cruise-locks where it is so Starfield's autopilot, boost decay, and landing/takeoff sequences can continue without fighting a spring-centered throttle.
-
-### Keyboard Emulation Pulse (Simple HOSAS Mode)
-
-For pilots who want a robust alternate bindings pipeline with no downstream throttle memory override, **Keyboard Emulation Pulse Mode** dynamically modulates standard `W` and `S` keyboard strokes. Pushing the stick further scales the key-press pulse frequency from a soft **230ms** down to a rapid-fire **20ms**. Because it sends standard keyboard keys, the game stays in keyboard/mouse mode while pitch, yaw, and roll can still use analog memory overrides.
-
-### Maneuver Physics Adherence
-
-Continuous throttle injection can override the game's natural speed envelope during sharp turns, making maneuvers feel wider. **Physics Adherence** automatically suspends memory injection when pitch/yaw deflection exceeds a threshold while throttle is high. This lets Starfield's native flight physics limit ship speed during turns while still allowing manual throttle feathering below the threshold.
-
-Enable these features in your `AbsoluteHOTAS.ini` under the `[Normalization]` block:
-
-```ini
-[Normalization]
-; Enable relative rate accumulation for spring-to-center sticks
-bIncrementalThrottleMode = false
-fThrottleRampRate = 0.67
-
-; Enable turn physics speed-limiting adherence
-bPhysicsAdherenceMode = false
-fPhysicsAdherenceDeflection = 0.15
-fPhysicsAdherenceThrottleThreshold = 0.50
-
-; Enable keyboard pulse emulation mode
-bIncrementalKeyboardMode = false
-```
 
 ## Logging
 
@@ -174,4 +127,4 @@ Set it to `true` only when diagnosing input behavior.
 
 ## Notes
 
-This is a beta/experimental build. Expect tuning differences between HOTAS hardware, vJoy resolution, and Joystick Gremlin profiles.
+This is a beta/experimental build. Expect tuning differences between HOTAS hardware and profiles.

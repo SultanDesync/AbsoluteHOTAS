@@ -209,6 +209,7 @@ bool DeviceManager::PollDevice(int index, DIJOYSTATE2& outState) {
     LPDIRECTINPUTDEVICE8 dev = g_openDevices[index];
     if (!dev) return false;
     
+    dev->Poll();
     HRESULT hr = dev->GetDeviceState(sizeof(DIJOYSTATE2), &outState);
     if (FAILED(hr)) {
         dev->Acquire();
@@ -231,6 +232,7 @@ void DeviceManager::PollAll() {
             continue;
         }
         
+        g_openDevices[i]->Poll();
         HRESULT hr = g_openDevices[i]->GetDeviceState(sizeof(DIJOYSTATE2), &g_cachedStates[i]);
         if (FAILED(hr)) {
             g_openDevices[i]->Acquire();

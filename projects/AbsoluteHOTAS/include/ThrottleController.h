@@ -17,16 +17,6 @@ public:
         // [General]
         bool    enabled = true;
 
-        // [Hardware] — Legacy fallback device (used when BindingRef has no device)
-        int     vJoyDeviceId = 1;         // Legacy device index fallback (formerly vJoyDeviceId)
-        std::string deviceName;           // Optional DirectInput instance/product name match
-
-        // [InputDevices] — Legacy fallback device names for bindings without explicit device
-        int     axisDeviceIndex = 0;
-        std::string axisDeviceName;
-        int     shipButtonDeviceIndex = 0;
-        std::string shipButtonDeviceName;
-
         // Per-binding axis references (DeviceName@AxisUsageId or just AxisUsageId)
         BindingRef throttleAxis;
         BindingRef pitchAxis;
@@ -64,13 +54,6 @@ public:
         float   idlePlateau = 0.05f;    // Software deadzone at the bottom (0.0-1.0)
         float   reverseDeadzone = 0.05f;
         float   reverseActivationThreshold = 0.05f;
-        bool    incrementalThrottleMode = false; // Use centering spring-loaded sticks as rate controllers
-        float   throttleRampRate = 0.67f; // Ramping sensitivity (rate per second)
-        bool    physicsAdherenceMode = false; // Release control on sharp turns to let engine physics limit speed
-        float   physicsAdherenceDeflection = 0.15f; // Pitch/yaw deflection threshold (>15%)
-        float   physicsAdherenceThrottleThreshold = 0.5f; // Throttle threshold (>50%)
-        bool    incrementalKeyboardMode = false; // Emulate W/S keys dynamically with duty cycle modulation
-
 
         // [Injection]
         int     pollRateHz = 60;          // Polling frequency

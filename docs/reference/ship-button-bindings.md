@@ -10,7 +10,7 @@ The emitted keyboard/mouse side is configured in `[ShipButtonOutputs]`. If an ou
 
 The plugin reads physical HOTAS/HOSAS buttons through DirectInput, then emits the configured Starfield action output itself. This is often more predictable than asking an external mapper to simulate keyboard/mouse input directly into Starfield.
 
-Joystick Gremlin is still useful for shaping hardware into vJoy, but Starfield can receive simulated keyboard/mouse input inconsistently depending on focus, Steam Input, Proton routing, and mixed gamepad/KBM UI state. Plugin-polled DirectInput keeps the hardware path separate from Steam Input and helps avoid input-mode flicker. The emitted `SendInput` output is still a synthetic keyboard/mouse event, so Starfield must be foreground and the selected output must match an in-game binding.
+Plugin-polled DirectInput keeps the hardware path separate from Steam Input and helps avoid input-mode flicker. The emitted `SendInput` output is still a synthetic keyboard/mouse event, so Starfield must be foreground and the selected output must match an in-game binding.
 
 Ship buttons should be treated as holds, not instant pulses. Starfield can miss very short synthetic key or mouse taps, especially across frame timing, focus, or Proton routing boundaries. AbsoluteHOTAS mirrors the physical DirectInput button duration: press sends down, release sends up. If an action is not registering reliably, hold the physical button slightly longer rather than trying to create a shorter pulse.
 

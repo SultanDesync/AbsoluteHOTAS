@@ -389,6 +389,16 @@ static void LoadButtonExpansionBindings(CSimpleIniA& ini) {
         finalRef.value = buttonId;
         finalRef.deviceIndex = -1;
 
+        // Handle #N device index prefix written by BindingWizard for duplicate devices
+        if (!deviceName.empty() && deviceName.front() == '#') {
+            char* endPtr = nullptr;
+            long idx = std::strtol(deviceName.c_str() + 1, &endPtr, 10);
+            if (endPtr != deviceName.c_str() + 1 && idx >= 0) {
+                finalRef.deviceIndex = static_cast<int>(idx);
+                finalRef.deviceName.clear();
+            }
+        }
+
         s_shipButtonBindings.push_back({
             "ButtonExpansion",
             key.pItem,
@@ -517,12 +527,6 @@ void ThrottleController::LoadConfig() {
     }
 
     s_config.enabled = ini.GetBoolValue("General", "bEnabled", true);
-    s_config.vJoyDeviceId = (int)ini.GetLongValue("Hardware", "iVJoyDeviceId", 1);
-    s_config.deviceName = ini.GetValue("Hardware", "sDeviceName", "");
-    s_config.axisDeviceName = ini.GetValue("InputDevices", "sAxisDeviceName", s_config.deviceName.c_str());
-    s_config.axisDeviceIndex = (int)ini.GetLongValue("InputDevices", "iAxisDeviceIndex", s_config.vJoyDeviceId);
-    s_config.shipButtonDeviceName = ini.GetValue("InputDevices", "sShipButtonDeviceName", s_config.axisDeviceName.c_str());
-    s_config.shipButtonDeviceIndex = (int)ini.GetLongValue("InputDevices", "iShipButtonDeviceIndex", s_config.axisDeviceIndex);
     
     s_config.throttleAxis = ParseBindingRef(ini.GetValue("Hardware", "iThrottleAxis", ""), 0x32);
     s_config.pitchAxis = ParseBindingRef(ini.GetValue("Hardware", "iPitchAxis", ""), 0x31);
@@ -558,12 +562,6 @@ void ThrottleController::LoadConfig() {
     s_config.idlePlateau = (float)ini.GetDoubleValue("Normalization", "fIdlePlateau", 0.05);
     s_config.reverseDeadzone = (float)ini.GetDoubleValue("Normalization", "fReverseDeadzone", 0.05);
     s_config.reverseActivationThreshold = (float)ini.GetDoubleValue("Normalization", "fReverseActivationThreshold", 0.05);
-    s_config.incrementalThrottleMode = ini.GetBoolValue("Normalization", "bIncrementalThrottleMode", false);
-    s_config.throttleRampRate = (float)ini.GetDoubleValue("Normalization", "fThrottleRampRate", 0.67);
-    s_config.physicsAdherenceMode = ini.GetBoolValue("Normalization", "bPhysicsAdherenceMode", false);
-    s_config.physicsAdherenceDeflection = (float)ini.GetDoubleValue("Normalization", "fPhysicsAdherenceDeflection", 0.15);
-    s_config.physicsAdherenceThrottleThreshold = (float)ini.GetDoubleValue("Normalization", "fPhysicsAdherenceThrottleThreshold", 0.5);
-    s_config.incrementalKeyboardMode = ini.GetBoolValue("Normalization", "bIncrementalKeyboardMode", false);
     
     s_config.pollRateHz = (int)ini.GetLongValue("Injection", "iPollRateHz", 120);
     s_config.throttleBurstMs = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
@@ -734,7 +732,7 @@ void ThrottleController::ControlLoop() {
     DeviceManager::LogDeviceManifest();
 
     // 1. Resolve and open all referenced devices
-    auto ResolveAndOpen = [](BindingRef& ref, int defaultIndex, const std::string& defaultName) {
+    auto ResolveAndOpen = [](BindingRef& ref) {
         if (!ref.IsValid()) return;
         
         int resolvedIndex = -1;
@@ -750,7 +748,8 @@ void ThrottleController::ControlLoop() {
         } else if (ref.HasDevice()) {
             resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
         } else {
-            resolvedIndex = DeviceManager::ResolveDevice("", defaultName, defaultIndex);
+            // If unbound device name, we can try to fall back to device 0 if it exists
+            resolvedIndex = DeviceManager::GetDeviceCount() > 0 ? 0 : -1;
         }
         
         if (resolvedIndex >= 0) {
@@ -758,33 +757,33 @@ void ThrottleController::ControlLoop() {
             DeviceManager::OpenDevice(resolvedIndex);
         } else {
             char buf[256];
-            sprintf_s(buf, "Warning: Could not resolve device for binding: %s", ref.HasDevice() ? ref.deviceName.c_str() : defaultName.c_str());
+            sprintf_s(buf, "Warning: Could not resolve device for binding: %s", ref.HasDevice() ? ref.deviceName.c_str() : "default fallback");
             CtrlLog(buf);
         }
     };
 
-    ResolveAndOpen(s_config.throttleAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.pitchAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.yawAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.rollAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.strafeLatAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.strafeVertAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.reverseAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.throttleAxis);
+    ResolveAndOpen(s_config.pitchAxis);
+    ResolveAndOpen(s_config.yawAxis);
+    ResolveAndOpen(s_config.rollAxis);
+    ResolveAndOpen(s_config.strafeLatAxis);
+    ResolveAndOpen(s_config.strafeVertAxis);
+    ResolveAndOpen(s_config.reverseAxis);
 
-    ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.toggleWizardButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.activateButton);
+    ResolveAndOpen(s_config.stopButton);
+    ResolveAndOpen(s_config.toggleWizardButton);
 
-    ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalRollRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalStrafeLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalStrafeRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalStrafeUpButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-    ResolveAndOpen(s_config.digitalStrafeDownButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+    ResolveAndOpen(s_config.digitalReverseButton);
+    ResolveAndOpen(s_config.digitalRollLeftButton);
+    ResolveAndOpen(s_config.digitalRollRightButton);
+    ResolveAndOpen(s_config.digitalStrafeLeftButton);
+    ResolveAndOpen(s_config.digitalStrafeRightButton);
+    ResolveAndOpen(s_config.digitalStrafeUpButton);
+    ResolveAndOpen(s_config.digitalStrafeDownButton);
 
     for (auto& sb : s_shipButtonBindings) {
-        ResolveAndOpen(sb.buttonRef, s_config.shipButtonDeviceIndex, s_config.shipButtonDeviceName);
+        ResolveAndOpen(sb.buttonRef);
     }
 
     // Detect Range for the primary Throttle axis
@@ -847,28 +846,28 @@ void ThrottleController::ControlLoop() {
             LoadConfig();
 
             // Re-resolve and re-open all devices for the new bindings
-            ResolveAndOpen(s_config.throttleAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.pitchAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.yawAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.rollAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.strafeLatAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.strafeVertAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.reverseAxis, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.throttleAxis);
+            ResolveAndOpen(s_config.pitchAxis);
+            ResolveAndOpen(s_config.yawAxis);
+            ResolveAndOpen(s_config.rollAxis);
+            ResolveAndOpen(s_config.strafeLatAxis);
+            ResolveAndOpen(s_config.strafeVertAxis);
+            ResolveAndOpen(s_config.reverseAxis);
 
-            ResolveAndOpen(s_config.activateButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.stopButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.toggleWizardButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.activateButton);
+            ResolveAndOpen(s_config.stopButton);
+            ResolveAndOpen(s_config.toggleWizardButton);
 
-            ResolveAndOpen(s_config.digitalReverseButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalRollLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalRollRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalStrafeLeftButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalStrafeRightButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalStrafeUpButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
-            ResolveAndOpen(s_config.digitalStrafeDownButton, s_config.axisDeviceIndex, s_config.axisDeviceName);
+            ResolveAndOpen(s_config.digitalReverseButton);
+            ResolveAndOpen(s_config.digitalRollLeftButton);
+            ResolveAndOpen(s_config.digitalRollRightButton);
+            ResolveAndOpen(s_config.digitalStrafeLeftButton);
+            ResolveAndOpen(s_config.digitalStrafeRightButton);
+            ResolveAndOpen(s_config.digitalStrafeUpButton);
+            ResolveAndOpen(s_config.digitalStrafeDownButton);
 
             for (auto& sb : s_shipButtonBindings) {
-                ResolveAndOpen(sb.buttonRef, s_config.shipButtonDeviceIndex, s_config.shipButtonDeviceName);
+                ResolveAndOpen(sb.buttonRef);
             }
 
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
@@ -1059,50 +1058,7 @@ void ThrottleController::ControlLoop() {
             } else {
                 throttle = 0.0f;
             }
-        } else if (s_config.incrementalKeyboardMode) {
-            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
 
-            static DWORD lastKbmPulseTime = 0;
-            DWORD curTime = GetTickCount();
-
-            if (std::abs(stickInput) > 0.05f) {
-                // PWM pulsing frequency: shorter delay at higher deflection.
-                // Scale from 230ms (slight push) down to 20ms (max deflection).
-                float intensity = std::abs(stickInput);
-                DWORD pulseInterval = static_cast<DWORD>(210.0f * (1.0f - intensity) + 20.0f);
-
-                if (curTime - lastKbmPulseTime > pulseInterval) {
-                    lastKbmPulseTime = curTime;
-                    uint16_t scanCode = (stickInput > 0.0f) ? 0x11 : 0x1F; // W = 0x11, S = 0x1F
-                    SendKeyboardScanCode(scanCode, false, false); // Down
-                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
-                    SendKeyboardScanCode(scanCode, false, true);  // Up
-                }
-            }
-            if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
-                throttle = SafeReadThrottle(s_activeThrottlePtr);
-            } else {
-                throttle = 0.0f;
-            }
-        } else if (s_config.incrementalThrottleMode) {
-            static float s_accumulatedThrottle = 0.0f;
-            float dt = 1.0f / (float)s_config.pollRateHz;
-
-            float stickInput = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
-            float minBound = s_config.unipolarMode ? 0.0f : -1.0f;
-
-            if (std::abs(stickInput) > 0.01f) {
-                // Stick is displaced -> Ramp the throttle target
-                s_accumulatedThrottle += stickInput * s_config.throttleRampRate * dt;
-                s_accumulatedThrottle = std::clamp(s_accumulatedThrottle, minBound, 1.0f);
-                throttle = s_accumulatedThrottle;
-            } else {
-                // Stick is centered -> Sync passively with the game's actual live throttle
-                if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
-                    s_accumulatedThrottle = SafeReadThrottle(s_activeThrottlePtr);
-                }
-                throttle = s_accumulatedThrottle;
-            }
         } else if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
             throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
         }
@@ -1256,26 +1212,7 @@ void ThrottleController::ControlLoop() {
                     strafeLatOverrideActive || rollOverrideActive,
                     strafeY,
                     strafeVertOverrideActive);
-                static bool s_lastPhysicsAdherenceActive = false;
-                bool releaseControlForPhysics = false;
-                if (s_config.physicsAdherenceMode) {
-                    bool rightStickActive = (std::abs(pitch) > s_config.physicsAdherenceDeflection ||
-                                             std::abs(yaw) > s_config.physicsAdherenceDeflection);
-                    if (rightStickActive && throttle > s_config.physicsAdherenceThrottleThreshold) {
-                        releaseControlForPhysics = true;
-                    }
-                }
-
-                if (releaseControlForPhysics != s_lastPhysicsAdherenceActive) {
-                    s_lastPhysicsAdherenceActive = releaseControlForPhysics;
-                    if (releaseControlForPhysics) {
-                        CtrlLog("[PhysicsAdherence] Right stick deflected & throttle > " + std::to_string((int)(s_config.physicsAdherenceThrottleThreshold * 100)) + "%. Releasing control for turn physics.");
-                    } else {
-                        CtrlLog("[PhysicsAdherence] Turn complete or throttle feathered. Re-engaging throttle control.");
-                    }
-                }
-
-                if (reverseKeyHeld || reverseHeld || releaseControlForPhysics || s_config.incrementalKeyboardMode) {
+                if (reverseKeyHeld || reverseHeld) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
                 } else {

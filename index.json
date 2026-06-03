@@ -1,6 +1,6 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "2.0.0-beta.1",
+  "version": "2.3.0-beta",
   "type": "Standalone SFSE Plugin",
   "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling. Features an in-game ImGui binding wizard, per-axis inversion and sensitivity, 22 configurable ship action button bindings, digital axis emulation, and live config reload — no vJoy or Joystick Gremlin required.",
   "technologies": [

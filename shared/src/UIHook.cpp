@@ -466,6 +466,9 @@ static void HandleRenderException() {
     g_fenceEvent = nullptr;
     g_d3dDevice = nullptr;
     g_numBackBuffers = 0;
+    // Clear the captured queue — it is stale after a render exception and must
+    // be recaptured before InitImGui is called again.
+    g_gameCommandQueue = nullptr;
 }
 
 // ============================================================================
@@ -581,39 +584,75 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
 }
 
 // ============================================================================
+// ResizeBuffers — SEH-safe forwarder
+// ============================================================================
+// Extracted to satisfy MSVC C2712: a function containing __try must have no
+// C++ objects with destructors in scope. Logging is delegated to the exception
+// handler to keep InvokeOrigResizeBuffers free of std::string temporaries.
+static void HandleResizeBuffersException() {
+    RuntimePaths::AppendLogAlways("[UIHook]",
+        "WARNING: ResizeBuffers threw — overlay disabled, game may continue.");
+}
+
+static HRESULT InvokeOrigResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount,
+    UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
+{
+    HRESULT hr = DXGI_ERROR_INVALID_CALL;
+    __try {
+        hr = g_origResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        HandleResizeBuffersException();
+    }
+    return hr;
+}
+
+// ============================================================================
 // ResizeBuffers Hook
 // ============================================================================
 static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
     RuntimePaths::AppendLogAlways("[UIHook]",
         "ResizeBuffers called: " + std::to_string(Width) + "x" + std::to_string(Height));
 
-    // Force-close the overlay — the resize invalidates all our D3D12 state.
-    // Don't try to WaitForGpu, Release, or call ImGui shutdown here:
-    // after a mode transition the fence/device may be stale and would throw.
+    // Force-close the overlay and clear the captured queue unconditionally.
+    // Frame Generation reconfigures the presentation pipeline on enable/disable,
+    // invalidating both our D3D12 resources and the command queue pointer.
     g_isOpen.store(false);
+    g_gameCommandQueue = nullptr;  // force fresh recapture on next Present
 
     if (g_initialized.load()) {
         g_initialized.store(false);
 
-        // Abandon all resource pointers (minor leak, reclaimed on reinit or exit).
-        // This is the same approach as HandleRenderException — safe from exceptions.
-        g_backBuffers = nullptr;
-        g_rtvHandles = nullptr;
-        g_rtvDescHeap = nullptr;
-        g_srvDescHeap = nullptr;
-        g_cmdList = nullptr;
+        // Release back buffer COM references BEFORE calling ResizeBuffers.
+        // DXGI requires all GetBuffer-acquired refs to be released first;
+        // failure returns DXGI_ERROR_INVALID_CALL. Frame Generation wrappers
+        // (especially AMD FSR3 built-in) do not handle that HRESULT defensively
+        // and crash writing through a null pointer.
+        CleanupRenderTargets();         // releases g_backBuffers[i] COM refs
+        delete[] g_backBuffers;         g_backBuffers   = nullptr;
+        delete[] g_rtvHandles;          g_rtvHandles    = nullptr;
+
+        // RTV heap — safe to release here (no pending GPU work routed through it;
+        // DXGI callers are expected to be GPU-idle before ResizeBuffers).
+        if (g_rtvDescHeap) { g_rtvDescHeap->Release(); g_rtvDescHeap = nullptr; }
+
+        // Remaining objects may have in-flight GPU work — null without release.
+        // Minor leak; reclaimed by InitImGui on reinit or by the OS at exit.
+        g_srvDescHeap   = nullptr;
+        g_cmdList       = nullptr;
         g_cmdAllocators = nullptr;
-        g_fence = nullptr;
-        g_fenceEvent = nullptr;
-        g_d3dDevice = nullptr;
+        g_fence         = nullptr;
+        g_fenceEvent    = nullptr;
+        g_d3dDevice     = nullptr;
         g_numBackBuffers = 0;
 
         RuntimePaths::AppendLogAlways("[UIHook]",
-            "Overlay state abandoned for resize — will reinit on next Ctrl+Alt+B.");
+            "Overlay state abandoned for resize — back buffers released, queue cleared.");
     }
 
-    // Call the game's original ResizeBuffers — this MUST always execute.
-    HRESULT hr = g_origResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    // Forward to the real ResizeBuffers. Back buffer refs are fully released so
+    // DXGI will accept the call. InvokeOrigResizeBuffers catches any remaining
+    // structured exceptions (GPU device lost, proxy swap chain edge cases, etc.).
+    HRESULT hr = InvokeOrigResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
 
     // Re-hook WndProc if the window handle changed (display mode transitions
     // can recreate the HWND, leaving our hotkey hook on the dead window).
@@ -631,8 +670,9 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
         }
     }
 
-    // g_initialized is now false. The next HookedPresent will call InitImGui
-    // which rebuilds everything from scratch using the new swap chain state.
+    // g_gameCommandQueue is now null. The next HookedPresent will wait for
+    // CreateSwapChainForHwnd or ExecuteCommandLists to recapture the queue,
+    // then call InitImGui to rebuild all overlay state from scratch.
     return hr;
 }
 
