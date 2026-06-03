@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.2.3
+# AbsoluteHOTAS v2.3.0-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -23,6 +23,7 @@ fThrottleAtEngineStart = 0.0314
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 * **In-Game Binding Wizard** — Press `Ctrl+Alt+B` (or bind a controller button) to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware in real-time.
+* **Frame Generation Support** — Fully compatible with Starfield's built-in Frame Generation (FSR3 Frame Gen). The overlay automatically handles swap chain resizing and reinitializes seamlessly when toggled in-game.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
 * **22 Ship Action Bindings** — Map physical buttons to flight functions (boost, weapons, power management, scanner, target selection, etc.).
@@ -69,6 +70,10 @@ Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard
 | **Ship Actions** | Bind physical buttons to 22 ship functions (boost, weapons, power management, scanner, etc.). |
 | **Digital Axes** | Bind buttons to emulate axis input for roll, strafe, and reverse. |
 | **Custom Bindings** | Free-form button → keyboard/mouse output mapping. Menu Cluster preset for WASD/Tab/E/Esc. |
+
+## Frame Generation Support
+
+Frame Generation (FSR3 Frame Gen) is fully supported. Enabling or disabling Frame Generation in-game causes the overlay to reinitialize automatically. The overlay will be available again within one or two frames of the next `Ctrl+Alt+B` press. FSR3 upscaling (without frame gen) is unaffected and has always worked normally.
 
 ## Manual Configuration
 
@@ -168,6 +173,19 @@ If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual Fil
 **To resolve:**
 1. Right-click `AbsoluteHOTAS.dll` inside your mod manager's physical mods directory, select **Properties**, check **Unblock** at the bottom of the General tab, and click **Apply** / **OK**.
 2. If the issue persists, add exceptions/exclusions in your security software for both your **Starfield game folder** and your **Mod manager's installation/mods folder**.
+
+## Troubleshooting
+
+### Wizard Crash / Overlay Doesn't Open
+If the overlay crashes or refuses to open on `Ctrl+Alt+B`, this is most likely caused by a leftover/orphaned SFSE plugin DLL from a previously uninstalled mod.
+1. Check `Data\SFSE\Plugins\` for any `.dll` files that do not belong to your currently enabled/active mods and remove them.
+2. If the issue persists: temporarily disable all mods except **AbsoluteHOTAS**, **SFSE**, and **Starfield Address Library**. Launch, open the wizard, save your bindings (which saves to the INI), and then re-enable your mods and relaunch. The plugin loads bindings automatically from the INI, so you do not need to access the wizard again in order to fly.
+
+### Logging & Diagnostic Data
+If you encounter hardware axis mapping or detection issues:
+1. Set `bLogThrottle = true` in `AbsoluteHOTAS.ini` under `[Injection]`.
+2. Re-test the issue in-game.
+3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
 ## Notes
 
