@@ -85,6 +85,7 @@ public:
         float   fAimPitchSensitivity = 1.0f;
         bool    bInvertAimYaw   = false;
         bool    bInvertAimPitch = false;
+        float   fAimSmoothing   = 0.0f;   // EMA smoothing for analog aim axes (0.0 = off, 1.0 = max)
         bool    bMirrorFlightToAim = true;  // If no aim axes bound, mirror flight stick to reticle
 
         // Digital aim buttons — 5-way directional override for aiming reticle

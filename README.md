@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.4.0
+# AbsoluteHOTAS v2.4.4
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -60,7 +60,7 @@ Or install via your mod manager using the provided archive.
 
 ## In-Game Binding Wizard
 
-Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard from the main menu or pause menu to avoid active control conflicts, though it can also be toggled from a HOTAS button bound via the **Toggle Wizard** slot in Control Buttons). The wizard has six tabs:
+Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard from the main menu or pause menu to avoid active control conflicts, though it can also be toggled from a HOTAS button bound via the **Toggle Wizard** slot in Control Buttons). The wizard has seven tabs:
 
 | Tab | Purpose |
 |-----|---------|
@@ -69,6 +69,7 @@ Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard
 | **Control Buttons** | Bind activate/stop/toggle-wizard buttons for the plugin's signal hunter. |
 | **Ship Actions** | Bind physical buttons to 22 ship functions (boost, weapons, power management, scanner, etc.). |
 | **Digital Axes** | Bind buttons to emulate axis input for roll, strafe, and reverse. |
+| **Aiming** | Bind separate aim axes or digital buttons to drive the ship reticle independently from steering. |
 | **Custom Bindings** | Free-form button → keyboard/mouse output mapping. Menu Cluster preset for WASD/Tab/E/Esc. |
 
 ## Frame Generation Support
@@ -135,6 +136,22 @@ iDetentCenter = 16384         ; Only for bUnipolarMode=false
 
 Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
 
+## Aiming
+
+The plugin can drive the ship's aiming reticle independently from steering via the source-object mouse accumulator pathway. This works regardless of controller mode and provides full analog precision.
+
+```ini
+[Aim]
+bSourceObjectAim = true       ; Master enable for aim injection
+bMirrorFlightToAim = true     ; Mirror flight stick to reticle when no aim axes bound
+iAimYawAxis =                 ; Separate aim yaw axis (DeviceName@0xNN syntax)
+iAimPitchAxis =               ; Separate aim pitch axis
+fAimSensitivity = 1.0         ; Global aim sensitivity multiplier
+fAimSmoothing = 0.0           ; EMA smoothing for low-res sensors (0=off, 0.98=max)
+```
+
+Digital aim buttons (5-way directional) can also be bound via the wizard Aiming tab to move the reticle like a virtual cursor. A toggle button can switch between independent aim and aim-driven steering at runtime.
+
 ## Tuning
 
 ```ini
@@ -144,21 +161,6 @@ iThrottleBurstMs = 250        ; Throttle authority burst duration
 bLogThrottle = false          ; Enable verbose logging
 ```
 
-## HOSAS Modes (Experimental)
-
-For dual-joystick setups with spring-to-center throttle axes:
-
-```ini
-[Normalization]
-bIncrementalThrottleMode = false    ; Rate-based throttle accumulation
-fThrottleRampRate = 0.67
-
-bPhysicsAdherenceMode = false       ; Suspend injection during hard turns
-fPhysicsAdherenceDeflection = 0.15
-fPhysicsAdherenceThrottleThreshold = 0.50
-
-bIncrementalKeyboardMode = false    ; Pure keyboard pulse emulation (zero UI flicker)
-```
 
 ## Logging
 

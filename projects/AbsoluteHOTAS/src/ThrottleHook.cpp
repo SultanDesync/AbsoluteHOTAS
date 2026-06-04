@@ -6,6 +6,9 @@
 #include <string>
 #include <cstring>
 #include <vector>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 
 // ---- Static member definitions ----
 std::atomic<uintptr_t> ThrottleHook::s_basePtr{ 0 };
@@ -802,17 +805,38 @@ void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
     uintptr_t src = g_capturedSourceR13;
     if (!src) return;
 
+    // Time-based blending: compute dt since last call to produce smooth
+    // motion regardless of poll rate vs game frame rate mismatch.
+    static auto s_lastAimTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::chrono::duration<float>(now - s_lastAimTime).count();
+    dt = std::clamp(dt, 0.0001f, 0.1f); // survive hitches
+    s_lastAimTime = now;
+
+    // Chase rate: how fast we blend toward the target. Higher = snappier.
+    // At 60.0f, we reach ~95% of target in ~50ms which is perceptually instant
+    // but spread across multiple game frames to avoid single-frame spikes.
+    constexpr float kChaseRate = 60.0f;
+    float alpha = 1.0f - std::exp(-kChaseRate * dt);
+
     // Write directly to the source object mouse accumulator lanes.
     // +0x4C = yaw mouse accumulator, +0x50 = pitch mouse accumulator (scale: -200.0..+200.0).
     // These work regardless of controller mode, unlike the gamepad input lanes (+0x44/+0x48).
+    // Uses exponential chase blending to interpolate smoothly and avoid frame-skip judder.
     // Guarded with SEH to survive stale pointers between reacquire cycles.
     __try {
-        float yawBitsFloat  = 0.0f;
-        float pitchBitsFloat = 0.0f;
-        memcpy(&yawBitsFloat,  const_cast<const uint32_t*>(&g_sourceAimYawBits),  4);
-        memcpy(&pitchBitsFloat, const_cast<const uint32_t*>(&g_sourceAimPitchBits), 4);
-        *(float*)(src + 0x4C) = yawBitsFloat;
-        *(float*)(src + 0x50) = pitchBitsFloat;
+        float curYaw   = *(volatile float*)(src + 0x4C);
+        float curPitch = *(volatile float*)(src + 0x50);
+
+        float newYaw   = curYaw   + alpha * (yaw   - curYaw);
+        float newPitch = curPitch + alpha * (pitch - curPitch);
+
+        // Clamp to safe accumulator range
+        newYaw   = std::clamp(newYaw,   -400.0f, 400.0f);
+        newPitch = std::clamp(newPitch, -400.0f, 400.0f);
+
+        *(float*)(src + 0x4C) = newYaw;
+        *(float*)(src + 0x50) = newPitch;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -912,7 +936,7 @@ bool ThrottleHook::Install() {
                 uintptr_t offset = (textStart + i) - moduleBase;
                 if (offset < 0x12B0000 || offset > 0x12C0000) continue;
 
-                // --- RELAXED 6DOF SCANNER (Beta 1.6) ---
+                // --- RELAXED 6DOF SCANNER ---
                 // Throttle (Offset 68) still requires the +6C companion for safety.
                 // Pitch/Yaw/Roll/Strafe (58, 5C, 60, 64) are hooked on-sight within our target range.
                 bool isThrottle = (pat.name.find("-68") != std::string::npos);

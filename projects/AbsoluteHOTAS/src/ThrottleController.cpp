@@ -63,18 +63,46 @@ static void CtrlLog(const std::string& msg) {
     RawCtrlLog(msg.c_str());
 }
 
-static void VerboseCtrlLog(const std::string& msg) {
-    if (g_verboseLog) {
-        CtrlLog(msg);
-    }
-}
-
 static std::string LowerAscii(std::string_view value) {
     std::string lowered(value);
     std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
     return lowered;
+}
+
+// ---- POV (HAT) Switch Support ----
+// Virtual buttons 129-144 map to the 4 POV switches x 4 directions.
+// POV 0: Up=129, Right=130, Down=131, Left=132
+// POV 1: Up=133, Right=134, Down=135, Left=136
+// POV 2: Up=137, Right=138, Down=139, Left=140
+// POV 3: Up=141, Right=142, Down=143, Left=144
+static bool IsPovButtonPressed(const DIJOYSTATE2* state, int virtualButton) {
+    if (!state || virtualButton < 129 || virtualButton > 144) return false;
+    int povIndex = (virtualButton - 129) / 4;   // 0-3
+    int direction = (virtualButton - 129) % 4;  // 0=Up, 1=Right, 2=Down, 3=Left
+    DWORD pov = state->rgdwPOV[povIndex];
+    if (LOWORD(pov) == 0xFFFF) return false; // POV centered (not pressed)
+    // POV values are in hundredths of degrees: 0=Up, 9000=Right, 18000=Down, 27000=Left
+    // Allow ±4500 tolerance for diagonal detection
+    static constexpr DWORD kDirAngles[4] = { 0, 9000, 18000, 27000 };
+    DWORD target = kDirAngles[direction];
+    DWORD diff = (pov > target) ? (pov - target) : (target - pov);
+    if (diff > 18000) diff = 36000 - diff; // wrap-around
+    return diff <= 4500;
+}
+
+static bool IsButtonPressedStatic(const BindingRef& ref) {
+    if (ref.value < 1) return false;
+    const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
+    if (!st) return false;
+    if (ref.value <= 128) {
+        return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
+    }
+    if (ref.value <= 144) {
+        return IsPovButtonPressed(st, ref.value);
+    }
+    return false;
 }
 
 enum class ShipOutputKind {
@@ -342,7 +370,7 @@ static int ParseExpansionButtonKey(std::string_view key) {
     const std::string number(numberText);
     char* end = nullptr;
     const long parsed = std::strtol(number.c_str(), &end, 10);
-    if (end == number.c_str() || *end != '\0' || parsed < 1 || parsed > 128) {
+    if (end == number.c_str() || *end != '\0' || parsed < 1 || parsed > 144) {
         return -1;
     }
 
@@ -379,8 +407,8 @@ static void LoadButtonExpansionBindings(CSimpleIniA& ini) {
         }
 
         int buttonId = ParseExpansionButtonKey(std::string(svKey).c_str());
-        if (buttonId < 1 || buttonId > 128) {
-            CtrlLog("Warning: [ButtonExpansion] key '" + std::string(key.pItem) + "' is not iButton1..iButton128; ignoring.");
+        if (buttonId < 1 || buttonId > 144) {
+            CtrlLog("Warning: [ButtonExpansion] key '" + std::string(key.pItem) + "' is not iButton1..iButton144; ignoring.");
             continue;
         }
 
@@ -467,8 +495,8 @@ static void LoadShipButtonBindings(CSimpleIniA& ini) {
             false
         };
 
-        if (binding.buttonRef.value > 128) {
-            CtrlLog("Warning: [ShipButtons] " + std::string(def.sourceIniKey) + " is outside DirectInput's 1-128 button range; disabling.");
+        if (binding.buttonRef.value > 144) {
+            CtrlLog("Warning: [ShipButtons] " + std::string(def.sourceIniKey) + " is outside 1-144 range (128 buttons + 16 POV); disabling.");
             binding.buttonRef.value = -1;
         }
 
@@ -486,14 +514,7 @@ static void UpdateShipButtonBindings() {
 
     for (size_t i = 0; i < s_shipButtonBindings.size(); ++i) {
         auto& binding = s_shipButtonBindings[i];
-        bool pressed = false;
-
-        if (binding.buttonRef.value > 0 && binding.buttonRef.value <= 128) {
-            const DIJOYSTATE2* state = DeviceManager::GetCachedState(binding.buttonRef.deviceIndex);
-            if (state) {
-                pressed = ((state->rgbButtons[binding.buttonRef.value - 1] & 0x80) != 0);
-            }
-        }
+        bool pressed = IsButtonPressedStatic(binding.buttonRef);
         
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
@@ -570,11 +591,11 @@ void ThrottleController::LoadConfig() {
     s_config.idlePlateau = (float)ini.GetDoubleValue("Normalization", "fIdlePlateau", 0.05);
     s_config.reverseDeadzone = (float)ini.GetDoubleValue("Normalization", "fReverseDeadzone", 0.05);
     s_config.reverseActivationThreshold = (float)ini.GetDoubleValue("Normalization", "fReverseActivationThreshold", 0.05);
+    s_config.reverseAxisEnabled = ini.GetBoolValue("Normalization", "bReverseAxisEnabled", true);
     
     s_config.pollRateHz = (int)ini.GetLongValue("Injection", "iPollRateHz", 120);
     s_config.throttleBurstMs = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled = ini.GetBoolValue("Injection", "bRollEnabled", true);
-    s_config.reverseAxisEnabled = ini.GetBoolValue("Injection", "bReverseAxisEnabled", true);
     s_config.logThrottle = ini.GetBoolValue("Injection", "bLogThrottle", false);
     g_verboseLog = s_config.logThrottle;
 
@@ -600,6 +621,7 @@ void ThrottleController::LoadConfig() {
     s_config.fAimPitchSensitivity = (float)ini.GetDoubleValue("Aim", "fAimPitchSensitivity", 1.0);
     s_config.bInvertAimYaw     = ini.GetBoolValue("Aim", "bInvertAimYaw", false);
     s_config.bInvertAimPitch   = ini.GetBoolValue("Aim", "bInvertAimPitch", false);
+    s_config.fAimSmoothing     = std::clamp((float)ini.GetDoubleValue("Aim", "fAimSmoothing", 0.0), 0.0f, 1.0f);
     s_config.bMirrorFlightToAim = ini.GetBoolValue("Aim", "bMirrorFlightToAim", true);
     s_config.digitalAimLeftButton  = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimLeftButton", nullptr), -1);
     s_config.digitalAimRightButton = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimRightButton", nullptr), -1);
@@ -892,9 +914,16 @@ void ThrottleController::ControlLoop() {
     float lastInjectedHardwareValue = -999.0f;
     int candCount = 0;
     bool wasPiloting = false;
+    auto lastLoopTime = std::chrono::steady_clock::now();
 
     while (s_running) {
         iter++;
+
+        // Compute actual delta time for frame-rate-independent logic
+        auto nowTime = std::chrono::steady_clock::now();
+        float dt = std::chrono::duration<float>(nowTime - lastLoopTime).count();
+        dt = std::clamp(dt, 0.0001f, 0.1f); // Clamp to [0.1ms, 100ms] to survive hitches
+        lastLoopTime = nowTime;
 
         // Hot-reload: if BindingWizard (or anything) requested a config reload,
         // re-parse the INI and re-resolve/re-open all devices on the loop thread.
@@ -980,13 +1009,7 @@ void ThrottleController::ControlLoop() {
         bool reverseKeyHeld = (GetAsyncKeyState('S') & 0x8000) != 0;
 
         auto IsButtonPressed = [](const BindingRef& ref) -> bool {
-            if (ref.value > 0 && ref.value <= 128) {
-                const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-                if (st) {
-                    return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
-                }
-            }
-            return false;
+            return IsButtonPressedStatic(ref);
         };
 
         bool curActivate = IsButtonPressed(s_config.activateButton);
@@ -1191,7 +1214,7 @@ void ThrottleController::ControlLoop() {
             // Periodic clear to flush noise if we haven't locked in 5 seconds
             if (iter % (s_config.pollRateHz * 5) == 0) {
                 ThrottleHook::ClearCandidates();
-                VerboseCtrlLog("[SignalHunter] Periodic buffer flush (Noise reduction).");
+                CtrlLog("[SignalHunter] Periodic buffer flush (Noise reduction).");
             }
 
             for (int i = 0; i < candCount && i < 2048; i++) {
@@ -1273,7 +1296,15 @@ void ThrottleController::ControlLoop() {
                 bool strafeVertOverrideActive = std::abs(strafeY) > 0.05f;
                 float lateral = strafeLatOverrideActive ? strafeX : roll;
                 bool sourceAimActive = s_config.bSourceObjectAim && ThrottleHook::IsSourcePtrValid();
+                // "Separate aim input" = any aim input method that independently drives
+                // the reticle.  This includes bound analog aim axes AND digital aim buttons.
+                // When true, the flight stick keeps direct cluster authority for ship steering.
+                bool hasDigitalAimButtons = s_config.digitalAimLeftButton.IsValid()
+                                         || s_config.digitalAimRightButton.IsValid()
+                                         || s_config.digitalAimUpButton.IsValid()
+                                         || s_config.digitalAimDownButton.IsValid();
                 bool hasSeparateAimAxes = s_config.aimYawAxis.IsValid() || s_config.aimPitchAxis.IsValid();
+                bool hasSeparateAimInput = hasSeparateAimAxes || hasDigitalAimButtons;
 
                 // Toggle aim mode button: edge-detected toggle between independent and aim-driven
                 {
@@ -1287,14 +1318,15 @@ void ThrottleController::ControlLoop() {
                                              : "[Aim] Toggled to: Independent Aim & Steer");
                     }
                     s_toggleAimModePrev = curToggleAimMode;
-                    // Override: when toggled, treat as if no separate aim axes
-                    if (s_aimModeOverride) hasSeparateAimAxes = false;
+                    // Override: when toggled, treat as if no separate aim input
+                    if (s_aimModeOverride) hasSeparateAimInput = false;
                 }
 
-                // Only suppress cluster gates when source aim is active WITHOUT separate axes
+                // Only suppress cluster gates when source aim is active WITHOUT separate input
                 // (i.e., aim-driven steering where engine derives steering from mouse accumulators).
-                // With separate aim axes, the flight stick keeps direct cluster authority.
-                bool suppressClusterForAim = sourceAimActive && !hasSeparateAimAxes;
+                // With separate aim input (analog axes OR digital buttons), the flight stick keeps
+                // direct cluster authority.
+                bool suppressClusterForAim = sourceAimActive && !hasSeparateAimInput;
                 ThrottleHook::SetRotationalOverride(
                     lateral,
                     yaw,
@@ -1329,40 +1361,88 @@ void ThrottleController::ControlLoop() {
                     if (ThrottleHook::IsSourcePtrValid()) {
                         float aimYaw, aimPitch;
 
-                        if (hasSeparateAimAxes) {
-                            // Separated aiming: poll dedicated aim axes with per-axis sensitivity
-                            aimYaw   = NormBipolar(s_config.aimYawAxis,
+                        if (hasSeparateAimInput && hasSeparateAimAxes) {
+                            // Poll the aim axes — this is the TARGET position
+                            float targetYaw   = NormBipolar(s_config.aimYawAxis,
                                                    s_config.fAimYawSensitivity,
                                                    s_config.bInvertAimYaw);
-                            aimPitch = NormBipolar(s_config.aimPitchAxis,
+                            float targetPitch = NormBipolar(s_config.aimPitchAxis,
                                                    s_config.fAimPitchSensitivity,
                                                    s_config.bInvertAimPitch);
-                        } else if (s_config.bMirrorFlightToAim) {
-                            // Mirror mode: use flight stick axes for aiming
+                            aimYaw   = targetYaw;
+                            aimPitch = targetPitch;
+
+                            // EMA smoothing for low-resolution analog aim sensors
+                            if (s_config.fAimSmoothing > 0.001f) {
+                                static float s_smoothYaw   = 0.0f;
+                                static float s_smoothPitch = 0.0f;
+                                float smoothPow = std::pow(s_config.fAimSmoothing, dt * 60.0f);
+                                s_smoothYaw   = s_smoothYaw   * smoothPow + aimYaw   * (1.0f - smoothPow);
+                                s_smoothPitch = s_smoothPitch * smoothPow + aimPitch * (1.0f - smoothPow);
+                                aimYaw   = s_smoothYaw;
+                                aimPitch = s_smoothPitch;
+                            }
+                        } else if (!hasSeparateAimInput && s_config.bMirrorFlightToAim) {
+                            // Aim-driven steering: flight stick mirrors to reticle
                             aimYaw   = yaw   * s_config.fAimSensitivity;
                             aimPitch = pitch * s_config.fAimSensitivity;
                         } else {
-                            // No aim input: lock reticle at center
+                            // Digital-only aim or no aim input: start at center.
+                            // Digital accumulators (below) will override with actual position.
                             aimYaw   = 0.0f;
                             aimPitch = 0.0f;
                         }
 
-                        // Digital aim override: 5-way directional buttons
+                        // Digital aim: accumulator-style virtual cursor.
+                        // Only active in independent aim mode (hasSeparateAimInput).
+                        // When digital buttons are the aim method, the accumulators
+                        // ALWAYS drive the reticle — even at (0,0) which means "center",
+                        // not "defer to flight stick".
                         bool digitalAimActive = false;
-                        if (IsButtonPressed(s_config.digitalAimCenterButton)) {
-                            // Center overrides everything
-                            aimYaw   = 0.0f;
-                            aimPitch = 0.0f;
-                            digitalAimActive = true;
-                        } else {
-                            float dAimY = 0.0f, dAimP = 0.0f;
-                            if (IsButtonPressed(s_config.digitalAimLeftButton))  dAimY -= s_config.fDigitalAimValue;
-                            if (IsButtonPressed(s_config.digitalAimRightButton)) dAimY += s_config.fDigitalAimValue;
-                            if (IsButtonPressed(s_config.digitalAimUpButton))    dAimP -= s_config.fDigitalAimValue;
-                            if (IsButtonPressed(s_config.digitalAimDownButton))  dAimP += s_config.fDigitalAimValue;
-                            if (dAimY != 0.0f || dAimP != 0.0f) {
-                                aimYaw   = dAimY;
-                                aimPitch = dAimP;
+                        {
+                            static float s_digitalAimYaw   = 0.0f;
+                            static float s_digitalAimPitch = 0.0f;
+
+                            if (!hasSeparateAimInput) {
+                                // Aim-driven steering mode: reset accumulators so there's
+                                // no stale position when toggling back to independent.
+                                s_digitalAimYaw   = 0.0f;
+                                s_digitalAimPitch = 0.0f;
+                            } else if (IsButtonPressed(s_config.digitalAimCenterButton)) {
+                                // Center resets the accumulated position
+                                s_digitalAimYaw   = 0.0f;
+                                s_digitalAimPitch = 0.0f;
+                            } else {
+                                // Accumulate while direction buttons are held
+                                float dY = 0.0f, dP = 0.0f;
+                                if (IsButtonPressed(s_config.digitalAimLeftButton))  dY -= 1.0f;
+                                if (IsButtonPressed(s_config.digitalAimRightButton)) dY += 1.0f;
+                                if (IsButtonPressed(s_config.digitalAimUpButton))    dP -= 1.0f;
+                                if (IsButtonPressed(s_config.digitalAimDownButton))  dP += 1.0f;
+
+                                // Normalize diagonal so it doesn't travel faster
+                                float dMag = std::sqrt(dY * dY + dP * dP);
+                                if (dMag > 1.0f) {
+                                    dY /= dMag;
+                                    dP /= dMag;
+                                }
+
+                                // Integrate: position += direction * speed * dt
+                                s_digitalAimYaw   += dY * s_config.fDigitalAimValue * dt;
+                                s_digitalAimPitch += dP * s_config.fDigitalAimValue * dt;
+
+                                // Clamp accumulated position to [-1, +1]
+                                s_digitalAimYaw   = std::clamp(s_digitalAimYaw,   -1.0f, 1.0f);
+                                s_digitalAimPitch = std::clamp(s_digitalAimPitch, -1.0f, 1.0f);
+                            }
+
+                            // When digital buttons are the active aim method, always apply
+                            // (even at 0,0 — that means "reticle at center", not "no input").
+                            // When analog aim axes are the primary, digital overrides only
+                            // when the accumulator has been displaced from center.
+                            if (hasSeparateAimInput && hasDigitalAimButtons) {
+                                aimYaw   = s_digitalAimYaw;
+                                aimPitch = s_digitalAimPitch;
                                 digitalAimActive = true;
                             }
                         }
@@ -1433,7 +1513,7 @@ void ThrottleController::ControlLoop() {
                          s_throttleBurstFrames--;
                      }
 
-                     // --- 6DOF TELEMETRY (Beta 1.8) ---
+                     // --- 6DOF TELEMETRY ---
                      static float lP=0, lY=0, lR=0;
                      static uint64_t lastLogIter = 0;
                     if (s_config.logThrottle && iter > lastLogIter + 30) { // Log at most ~4Hz

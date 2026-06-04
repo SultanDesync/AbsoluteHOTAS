@@ -33,8 +33,6 @@ public:
 
     // Open/close
     static LPDIRECTINPUTDEVICE8 OpenDevice(int index);
-    static LPDIRECTINPUTDEVICE8 OpenByVidPid(const std::string& vidpid);
-    static LPDIRECTINPUTDEVICE8 OpenByName(const std::string& name);
     static void CloseDevice(int index);
 
     // Resolution: find best match given VID:PID, name, index (priority order)

@@ -52,17 +52,35 @@ static long GetAxisFromState(const DIJOYSTATE2* st, int usageId) {
 }
 
 // ============================================================================
+// POV direction helper (shared with capture logic)
+// ============================================================================
+static bool IsPovDirectionActive(DWORD pov, int direction) {
+    if (LOWORD(pov) == 0xFFFF) return false; // centered
+    static constexpr DWORD kDirAngles[4] = { 0, 9000, 18000, 27000 };
+    DWORD target = kDirAngles[direction];
+    DWORD diff = (pov > target) ? (pov - target) : (target - pov);
+    if (diff > 18000) diff = 36000 - diff;
+    return diff <= 4500;
+}
+
+static const char* PovDirectionName(int direction) {
+    static const char* names[4] = { "Up", "Right", "Down", "Left" };
+    return (direction >= 0 && direction < 4) ? names[direction] : "?";
+}
+
+// ============================================================================
 // Binding Capture State
 // ============================================================================
 struct PendingBind {
     bool active = false;
     std::string targetLabel;
     int targetConfigSlot = -1;
-    // Snapshot of all axes AND buttons at the moment capture started
+    // Snapshot of all axes, buttons, and POV switches at the moment capture started
     struct DeviceSnapshot {
         int deviceIndex;
         long axes[8];
         BYTE buttons[128];
+        DWORD povs[4];
     };
     std::vector<DeviceSnapshot> snapshots;
 
@@ -162,6 +180,7 @@ static std::string s_aimAxisBindings[2];
 static bool        s_aimAxisInvert[2];
 static float       s_aimAxisSensitivity[2];
 static float       s_aimSensitivity = 1.0f;
+static float       s_aimSmoothing = 0.0f;
 static bool        s_mirrorFlightToAim = true;
 static bool        s_sourceObjectAim = true;
 
@@ -189,16 +208,23 @@ static long        s_detentDeadzone = 500;
 static bool        s_calibratingCenter = false;
 
 // ============================================================================
-// Per-axis calibration state
+// Full-device calibration state — tracks all 8 axes simultaneously
 // ============================================================================
-struct CalibrationState {
+struct DeviceCalibState {
     bool  active = false;
     int   deviceIndex = -1;
-    int   usageId = -1;
-    long  observedMin = LONG_MAX;
-    long  observedMax = LONG_MIN;
+    long  observedMin[8];
+    long  observedMax[8];
+    void Reset() {
+        active = false;
+        deviceIndex = -1;
+        for (int i = 0; i < 8; i++) {
+            observedMin[i] = LONG_MAX;
+            observedMax[i] = LONG_MIN;
+        }
+    }
 };
-static CalibrationState s_calib;
+static DeviceCalibState s_devCalib;
 
 // Stored calibration results: key = (deviceIndex << 8) | usageId, value = {min, max}
 static std::unordered_map<int, std::pair<long, long>> s_calibData;
@@ -351,6 +377,7 @@ static void LoadCurrentBindings() {
     s_aimAxisSensitivity[0] = cfg.fAimYawSensitivity;
     s_aimAxisSensitivity[1] = cfg.fAimPitchSensitivity;
     s_aimSensitivity        = cfg.fAimSensitivity;
+    s_aimSmoothing          = cfg.fAimSmoothing;
     s_mirrorFlightToAim     = cfg.bMirrorFlightToAim;
     s_sourceObjectAim       = cfg.bSourceObjectAim;
 
@@ -433,6 +460,7 @@ static void TakeSnapshots() {
             snap.axes[a] = GetAxisFromState(st, 0x30 + a);
         }
         memcpy(snap.buttons, st->rgbButtons, 128);
+        memcpy(snap.povs, st->rgdwPOV, sizeof(snap.povs));
         s_pendingBind.snapshots.push_back(snap);
     }
 }
@@ -545,6 +573,32 @@ static void UpdateCapture() {
             const auto* st = DeviceManager::GetCachedState(snap.deviceIndex);
             if (!st) continue;
 
+            // Helper lambda to commit a captured button binding string
+            auto CommitButton = [&](const char* buf) {
+                if (slot >= 100 && slot < 200) {
+                    s_buttonBindings[slot - 100] = buf;
+                } else if (slot >= 200 && slot < 300) {
+                    int idx = slot - 200;
+                    if (idx < (int)s_shipActionSlots.size()) {
+                        s_shipActionSlots[idx].binding = buf;
+                    }
+                } else if (slot >= 300 && slot < 400) {
+                    s_digitalAxisBindings[slot - 300] = buf;
+                } else if (slot >= 700 && slot < 705) {
+                    s_digitalAimBindings[slot - 700] = buf;
+                } else if (slot == 705) {
+                    s_toggleAimModeBinding = buf;
+                } else if (slot >= 400 && slot < 600) {
+                    int idx = slot - 400;
+                    if (idx < (int)s_customBindings.size()) {
+                        s_customBindings[idx].buttonBinding = buf;
+                    }
+                }
+                WizLog("Button captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
+                s_pendingBind.active = false;
+            };
+
+            // --- Physical buttons (1-128) ---
             for (int b = 0; b < 128; b++) {
                 bool nowPressed = (st->rgbButtons[b] & 0x80) != 0;
                 bool wasPressed = (snap.buttons[b] & 0x80) != 0;
@@ -577,31 +631,46 @@ static void UpdateCapture() {
                     } else {
                         sprintf_s(buf, "%s@%d", info.productName.c_str(), b + 1);
                     }
+                    CommitButton(buf);
+                    return;
+                }
+            }
 
-                    // Route to the correct binding array
-                    if (slot >= 100 && slot < 200) {
-                        s_buttonBindings[slot - 100] = buf;
-                    } else if (slot >= 200 && slot < 300) {
-                        int idx = slot - 200;
-                        if (idx < (int)s_shipActionSlots.size()) {
-                            s_shipActionSlots[idx].binding = buf;
+            // --- POV / HAT switches (virtual buttons 129-144) ---
+            for (int p = 0; p < 4; p++) {
+                for (int dir = 0; dir < 4; dir++) {
+                    int virtualBtn = 129 + p * 4 + dir; // 129-144
+                    bool nowActive = IsPovDirectionActive(st->rgdwPOV[p], dir);
+                    bool wasActive = IsPovDirectionActive(snap.povs[p], dir);
+
+                    if (!nowActive || wasActive) {
+                        if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
+                            s_pendingBind.debounceButtonIndex == virtualBtn && !nowActive) {
+                            s_pendingBind.debounceButtonFrames = 0;
                         }
-                    } else if (slot >= 300 && slot < 400) {
-                        s_digitalAxisBindings[slot - 300] = buf;
-                    } else if (slot >= 700 && slot < 705) {
-                        s_digitalAimBindings[slot - 700] = buf;
-                    } else if (slot == 705) {
-                        s_toggleAimModeBinding = buf;
-                    } else if (slot >= 400 && slot < 600) {
-                        int idx = slot - 400;
-                        if (idx < (int)s_customBindings.size()) {
-                            s_customBindings[idx].buttonBinding = buf;
-                        }
+                        continue;
                     }
 
-                    WizLog("Button captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
-                    s_pendingBind.active = false;
-                    return;
+                    if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
+                        s_pendingBind.debounceButtonIndex == virtualBtn) {
+                        s_pendingBind.debounceButtonFrames++;
+                    } else {
+                        s_pendingBind.debounceDeviceIndex = snap.deviceIndex;
+                        s_pendingBind.debounceButtonIndex = virtualBtn;
+                        s_pendingBind.debounceButtonFrames = 1;
+                    }
+
+                    if (s_pendingBind.debounceButtonFrames >= kButtonDebounceFrames) {
+                        const auto& info = DeviceManager::GetDevice(snap.deviceIndex);
+                        char buf[256];
+                        if (hasDupe(snap.deviceIndex)) {
+                            sprintf_s(buf, "#%d@%d", snap.deviceIndex, virtualBtn);
+                        } else {
+                            sprintf_s(buf, "%s@%d", info.productName.c_str(), virtualBtn);
+                        }
+                        CommitButton(buf);
+                        return;
+                    }
                 }
             }
         }
@@ -707,6 +776,12 @@ static void SaveBindingsToINI() {
         sprintf_s(sensStr, "%.2f", s_aimAxisSensitivity[i]);
         ini.SetValue("Aim", kAimAxisSlots[i].sensitivityKey, sensStr);
     }
+    {
+        char smoothStr[32];
+        sprintf_s(smoothStr, "%.2f", s_aimSmoothing);
+        ini.SetValue("Aim", "fAimSmoothing", smoothStr);
+    }
+
 
     // Digital aim buttons ([Aim] section)
     for (int i = 0; i < kNumDigitalAimSlots; i++) {
@@ -767,6 +842,26 @@ static void SaveBindingsToINI() {
 }
 
 // ============================================================================
+// Helper: annotate POV virtual button IDs (129-144) with human-readable labels
+// ============================================================================
+static std::string FormatBindingDisplay(const std::string& binding) {
+    if (binding == "(unbound)") return binding;
+    // Find the button number after the last '@', or the whole string if no '@'
+    auto atPos = binding.rfind('@');
+    std::string numPart = (atPos != std::string::npos) ? binding.substr(atPos + 1) : binding;
+    char* endPtr = nullptr;
+    long btnId = std::strtol(numPart.c_str(), &endPtr, 10);
+    if (endPtr != numPart.c_str() && *endPtr == '\0' && btnId >= 129 && btnId <= 144) {
+        int povIndex = (int)(btnId - 129) / 4;
+        int direction = (int)(btnId - 129) % 4;
+        char label[256];
+        sprintf_s(label, "%s (POV%d-%s)", binding.c_str(), povIndex + 1, PovDirectionName(direction));
+        return label;
+    }
+    return binding;
+}
+
+// ============================================================================
 // Helper: draw a binding row with Bind/Clear buttons
 // ============================================================================
 static void DrawBindingRow(const char* label, std::string& binding, int captureSlot, bool isAxis) {
@@ -775,10 +870,11 @@ static void DrawBindingRow(const char* label, std::string& binding, int captureS
         ImGui::SameLine(180);
     }
 
+    std::string displayStr = FormatBindingDisplay(binding);
     ImVec4 color = (binding == "(unbound)")
         ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f)
         : ImVec4(0.4f, 1.0f, 0.6f, 1.0f);
-    ImGui::TextColored(color, "%s", binding.c_str());
+    ImGui::TextColored(color, "%s", displayStr.c_str());
     ImGui::SameLine(500);
 
     bool isCapturing = s_pendingBind.active && s_pendingBind.targetConfigSlot == captureSlot;
@@ -826,7 +922,7 @@ void BindingWizard::Draw() {
     // ---- Tab bar ----
     if (ImGui::BeginTabBar("WizardTabs")) {
 
-        // ==== TAB 1: Live Device Monitor ====
+        // ==== TAB 1: Device Summary ====
         if (ImGui::BeginTabItem("Devices")) {
             ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Connected HID Devices");
             ImGui::Separator();
@@ -840,7 +936,6 @@ void BindingWizard::Draw() {
 
             for (int d = 0; d < devCount; d++) {
                 const auto& info = DeviceManager::GetDevice(d);
-                const auto* st = DeviceManager::GetCachedState(d);
 
                 std::string header = "#" + std::to_string(d) + ": " + info.productName;
                 if (!info.vidpidString.empty()) header += " [" + info.vidpidString + "]";
@@ -856,29 +951,13 @@ void BindingWizard::Draw() {
                         char swapLabel[64];
                         sprintf_s(swapLabel, "Swap #%d <-> #%d", d, d + 1);
                         if (ImGui::SmallButton(swapLabel)) {
-                            // Swap all #d and #(d+1) references in bindings
-                            auto swapInBinding = [&](std::string& binding) {
-                                char prefA[16], prefB[16];
-                                sprintf_s(prefA, "#%d@", d);
-                                sprintf_s(prefB, "#%d@", d + 1);
-                                size_t lenA = strlen(prefA);
-                                size_t lenB = strlen(prefB);
-                                if (binding.substr(0, lenA) == prefA) {
-                                    binding = std::string(prefB) + binding.substr(lenA);
-                                } else if (binding.substr(0, lenB) == prefB) {
-                                    binding = std::string(prefA) + binding.substr(lenB);
-                                }
-                            };
-                            // Two-pass swap to avoid A→B then B→A clobbering
-                            // Pass 1: A → temp
-                            char tempPref[16];
-                            sprintf_s(tempPref, "#__SWAP__@");
-                            size_t tempLen = strlen(tempPref);
-                            char prefA[16], prefB[16];
+                            char prefA[16], prefB[16], tempPref[16];
                             sprintf_s(prefA, "#%d@", d);
                             sprintf_s(prefB, "#%d@", d + 1);
+                            sprintf_s(tempPref, "#__SWAP__@");
                             size_t lenA = strlen(prefA);
                             size_t lenB = strlen(prefB);
+                            size_t tempLen = strlen(tempPref);
 
                             auto doSwap = [&](std::string& binding) {
                                 if (binding.substr(0, lenA) == prefA) {
@@ -893,13 +972,14 @@ void BindingWizard::Draw() {
                                 }
                             };
 
-                            // Collect all binding refs
                             std::vector<std::string*> allBindings;
                             for (auto& b : s_axisBindings) allBindings.push_back(&b);
                             for (auto& b : s_buttonBindings) allBindings.push_back(&b);
                             for (auto& b : s_digitalAxisBindings) allBindings.push_back(&b);
                             for (auto& sa : s_shipActionSlots) allBindings.push_back(&sa.binding);
                             for (auto& cb : s_customBindings) allBindings.push_back(&cb.buttonBinding);
+                            for (auto& b : s_aimAxisBindings) allBindings.push_back(&b);
+                            for (auto& b : s_digitalAimBindings) allBindings.push_back(&b);
 
                             for (auto* bp : allBindings) doSwap(*bp);
                             for (auto* bp : allBindings) finalize(*bp);
@@ -909,93 +989,101 @@ void BindingWizard::Draw() {
                         }
                     }
 
-                    if (st) {
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "Live Axis Values:");
+                    // Full-device calibration
+                    bool isCalibThisDevice = s_devCalib.active && s_devCalib.deviceIndex == d;
 
-                        for (int a = 0; a < 8; a++) {
-                            int usageId = 0x30 + a;
-                            long val = GetAxisFromState(st, usageId);
-                            int calibKey = (d << 8) | usageId;
-
-                            // Normalize using calibrated range if available
-                            float normalized;
-                            auto calibIt = s_calibData.find(calibKey);
-                            if (calibIt != s_calibData.end()) {
-                                long cmin = calibIt->second.first;
-                                long cmax = calibIt->second.second;
-                                long crange = cmax - cmin;
-                                normalized = (crange > 0) ? std::clamp((float)(val - cmin) / (float)crange, 0.0f, 1.0f) : 0.0f;
-                            } else {
-                                normalized = static_cast<float>(val) / 65535.0f;
+                    if (isCalibThisDevice) {
+                        // Poll this device and update all 8 axes min/max
+                        const auto* st = DeviceManager::GetCachedState(d);
+                        if (st) {
+                            for (int a = 0; a < 8; a++) {
+                                long val = GetAxisFromState(st, 0x30 + a);
+                                if (val < s_devCalib.observedMin[a]) s_devCalib.observedMin[a] = val;
+                                if (val > s_devCalib.observedMax[a]) s_devCalib.observedMax[a] = val;
                             }
+                        }
 
-                            char label[64];
-                            sprintf_s(label, "0x%02X (%s)", usageId, AxisName(usageId));
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f),
+                            "Move ALL axes to their full extremes, then click Done.");
 
-                            ImGui::PushID(d * 100 + a);
-                            ImGui::ProgressBar(normalized, ImVec2(200, 0), "");
-                            ImGui::SameLine();
-                            ImGui::Text("%-14s %6ld", label, val);
+                        // Show which axes have moved (live feedback)
+                        constexpr long kGhostThreshold = 5000;
+                        int activeCount = 0;
+                        for (int a = 0; a < 8; a++) {
+                            long range = s_devCalib.observedMax[a] - s_devCalib.observedMin[a];
+                            if (range > kGhostThreshold) activeCount++;
+                        }
+                        ImGui::Text("Detected %d active axes", activeCount);
 
-                            // Calibration controls
-                            bool isCalibrating = s_calib.active && s_calib.deviceIndex == d && s_calib.usageId == usageId;
-                            if (isCalibrating) {
-                                // Update observed range
-                                if (val < s_calib.observedMin) s_calib.observedMin = val;
-                                if (val > s_calib.observedMax) s_calib.observedMax = val;
-
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Done")) {
-                                    if (s_calib.observedMax > s_calib.observedMin) {
-                                        s_calibData[calibKey] = { s_calib.observedMin, s_calib.observedMax };
-                                        char logBuf[128];
-                                        sprintf_s(logBuf, "Calibrated dev=%d axis=0x%02X: [%ld, %ld]", d, usageId, s_calib.observedMin, s_calib.observedMax);
-                                        WizLog(logBuf);
-                                    }
-                                    s_calib = {};
+                        if (ImGui::Button("Done##devCalib")) {
+                            int saved = 0;
+                            for (int a = 0; a < 8; a++) {
+                                long range = s_devCalib.observedMax[a] - s_devCalib.observedMin[a];
+                                if (range > kGhostThreshold) {
+                                    int calibKey = (d << 8) | (0x30 + a);
+                                    s_calibData[calibKey] = { s_devCalib.observedMin[a], s_devCalib.observedMax[a] };
+                                    saved++;
                                 }
-                                ImGui::SameLine();
-                                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f),
-                                    "Sweep axis... Min:%ld Max:%ld", s_calib.observedMin, s_calib.observedMax);
-                            } else {
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("Calibrate")) {
-                                    s_calib = {};
-                                    s_calib.active = true;
-                                    s_calib.deviceIndex = d;
-                                    s_calib.usageId = usageId;
-                                    s_calib.observedMin = val;
-                                    s_calib.observedMax = val;
-                                }
+                            }
+                            char logBuf[128];
+                            sprintf_s(logBuf, "Calibrated device #%d: %d axes saved", d, saved);
+                            WizLog(logBuf);
+                            s_devCalib.Reset();
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Cancel##devCalib")) {
+                            s_devCalib.Reset();
+                        }
+                    } else {
+                        // Show existing calibration data (text only, no polling)
+                        bool hasCalib = false;
+                        for (int a = 0; a < 8; a++) {
+                            int calibKey = (d << 8) | (0x30 + a);
+                            if (s_calibData.count(calibKey)) { hasCalib = true; break; }
+                        }
+
+                        if (hasCalib) {
+                            ImGui::Spacing();
+                            ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "Calibration:");
+                            for (int a = 0; a < 8; a++) {
+                                int calibKey = (d << 8) | (0x30 + a);
+                                auto calibIt = s_calibData.find(calibKey);
                                 if (calibIt != s_calibData.end()) {
-                                    ImGui::SameLine();
-                                    if (ImGui::SmallButton("Clear")) {
-                                        s_calibData.erase(calibIt);
-                                        WizLog("Cleared calibration for dev=" + std::to_string(d) + " axis=0x" + std::to_string(usageId));
-                                    }
-                                    ImGui::SameLine();
-                                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "[%ld-%ld]",
+                                    ImGui::Text("  0x%02X (%s): [%ld - %ld]", 0x30 + a, AxisName(0x30 + a),
                                         calibIt->second.first, calibIt->second.second);
                                 }
                             }
-
+                            ImGui::PushID(d * 1000 + 998);
+                            if (ImGui::SmallButton("Clear All##calib")) {
+                                for (int a = 0; a < 8; a++) {
+                                    s_calibData.erase((d << 8) | (0x30 + a));
+                                }
+                                WizLog("Cleared all calibration for device #" + std::to_string(d));
+                            }
                             ImGui::PopID();
                         }
 
-                        // Active buttons
-                        ImGui::Spacing();
-                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Active Buttons:");
-                        std::string pressed;
-                        for (int b = 0; b < 128; b++) {
-                            if (st->rgbButtons[b] & 0x80) {
-                                if (!pressed.empty()) pressed += ", ";
-                                pressed += std::to_string(b + 1);
+                        // Start calibration button
+                        if (!s_devCalib.active) {
+                            ImGui::Spacing();
+                            ImGui::PushID(d * 1000 + 999);
+                            if (ImGui::SmallButton("Calibrate Device")) {
+                                s_devCalib.Reset();
+                                s_devCalib.active = true;
+                                s_devCalib.deviceIndex = d;
+                                // Seed with current values so ghost axes stay near zero range
+                                const auto* st = DeviceManager::GetCachedState(d);
+                                if (st) {
+                                    for (int a = 0; a < 8; a++) {
+                                        long val = GetAxisFromState(st, 0x30 + a);
+                                        s_devCalib.observedMin[a] = val;
+                                        s_devCalib.observedMax[a] = val;
+                                    }
+                                }
                             }
+                            ImGui::PopID();
                         }
-                        ImGui::TextWrapped("%s", pressed.empty() ? "(none)" : pressed.c_str());
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Device not open/polling.");
                     }
 
                     ImGui::Unindent(12.0f);
@@ -1079,17 +1167,25 @@ void BindingWizard::Draw() {
                                     colActive, 3.0f);
                             }
 
-                            // Resolve throttle device from wizard's local binding (works before Save)
-                            BindingRef tRef = ParseBindingRef(s_axisBindings[0].c_str(), -1);
-                            int tDevIdx = tRef.deviceIndex;
-                            int tUsage = tRef.value;
-                            if (tDevIdx < 0 && tRef.IsValid() && tUsage > 0) {
-                                if (tRef.HasDevice()) {
-                                    tDevIdx = DeviceManager::ResolveByName(tRef.deviceName);
-                                } else if (DeviceManager::GetDeviceCount() > 0) {
-                                    tDevIdx = 0;
+                            // Resolve throttle device (cached — only re-resolve when binding changes)
+                            static std::string s_lastThrottleBinding;
+                            static int s_cachedThrottleDevIdx = -1;
+                            static int s_cachedThrottleUsage = -1;
+                            if (s_axisBindings[0] != s_lastThrottleBinding) {
+                                s_lastThrottleBinding = s_axisBindings[0];
+                                BindingRef tRef = ParseBindingRef(s_axisBindings[0].c_str(), -1);
+                                s_cachedThrottleDevIdx = tRef.deviceIndex;
+                                s_cachedThrottleUsage = tRef.value;
+                                if (s_cachedThrottleDevIdx < 0 && tRef.IsValid() && s_cachedThrottleUsage > 0) {
+                                    if (tRef.HasDevice()) {
+                                        s_cachedThrottleDevIdx = DeviceManager::ResolveByName(tRef.deviceName);
+                                    } else if (DeviceManager::GetDeviceCount() > 0) {
+                                        s_cachedThrottleDevIdx = 0;
+                                    }
                                 }
                             }
+                            int tDevIdx = s_cachedThrottleDevIdx;
+                            int tUsage = s_cachedThrottleUsage;
 
                             // Normalization helper: raw value → [0,1] using calibration or 0-65535
                             auto NormThrottleRaw = [&](long rawVal) -> float {
@@ -1449,6 +1545,17 @@ void BindingWizard::Draw() {
                     ImGui::PopID();
                 }
 
+                // Aim smoothing slider (applies to all analog aim axes)
+                ImGui::Spacing();
+                ImGui::Indent(180);
+                ImGui::PushItemWidth(120);
+                ImGui::SliderFloat("Smoothing", &s_aimSmoothing, 0.0f, 0.98f, "%.2f");
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Low-res sensor filter (0=off)");
+
+                ImGui::Unindent(180);
+
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
@@ -1456,8 +1563,8 @@ void BindingWizard::Draw() {
                 // Digital aim override (5-way)
                 ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Digital Aim Override (5-Way)");
                 ImGui::TextWrapped(
-                    "Bind buttons to snap the aiming reticle to fixed positions. "
-                    "Useful for hat switches. Center snaps back to (0,0).");
+                    "Bind buttons to move the aiming reticle like a virtual cursor. "
+                    "Hold a direction to accumulate position. Release to hold. Center resets to (0,0).");
                 ImGui::Spacing();
 
                 for (int i = 0; i < kNumDigitalAimSlots; i++) {
@@ -1468,10 +1575,10 @@ void BindingWizard::Draw() {
 
                 ImGui::Spacing();
                 ImGui::PushItemWidth(120);
-                ImGui::SliderFloat("Aim Value", &s_digitalAimValue, 0.1f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Aim Speed", &s_digitalAimValue, 0.1f, 3.0f, "%.2f");
                 ImGui::PopItemWidth();
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Deflection amount when pressed");
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Travel speed per second");
 
                 ImGui::Spacing();
                 ImGui::Separator();
