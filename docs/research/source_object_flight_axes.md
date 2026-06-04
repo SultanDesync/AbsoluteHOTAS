@@ -321,3 +321,46 @@ SnapshotVirtualKeys=105,57,33
 ```
 
 With `ClusterAnchor=0`, the probe installs pass-through capture hooks and logs both source and cluster maps. With `ClusterAnchor` set, it runs passively and logs downstream cluster addresses only.
+
+## Ship Velocity State (Reverse Gate)
+
+Date: 2026-06-04
+
+### Discovery
+
+Cheat Engine integer-match search on the HUD speedometer value found a static module global tracking instantaneous ship speed:
+
+| Field | Location | Type | Notes |
+| --- | --- | --- | --- |
+| Ship velocity (HUD-rate) | `Starfield.exe + 0x5E75644` | Integer / float (unconfirmed) | Tracks the HUD speed readout; may be rounded from a physics float |
+
+### Address Relationship
+
+The velocity global sits in the same static data segment as the source object, approximately **7.6 KB before** it:
+
+```
+Starfield.exe + 0x5E75644  ← velocity (static global)
+                  ...
+                  ~7644 bytes gap
+                  ...
+Starfield.exe + ~0x5E77420 ← source object base (R13, static global)
+```
+
+Session-validated addresses (2026-06-04):
+- Source object: `srcPtr = 0x7FF7A6179420`
+- Velocity: `0x241B45DAC38` (heap integer, HUD-facing) and `Starfield.exe + 0x5E75644` (static)
+- Both the static velocity and the source object are module-relative addresses, readable as `GetModuleHandle(NULL) + offset`
+
+### Caveat
+
+The value found by integer search matches the HUD speedometer display. It may be a render-rate cached integer derived from a higher-precision physics float nearby. For the reverse-gate use case (detecting zero velocity), integer precision is sufficient. A future CE write breakpoint on this address should reveal the physics source float and its update path.
+
+### Intended Use
+
+This velocity state enables the reverse-gate logic for dual-stick / self-centering throttle modes:
+
+- **HOTAS position > 0**: Chase-blend `cluster+0x68` toward target. No velocity awareness needed.
+- **HOTAS position = 0**: Write `0.0f`, let engine coast/decelerate.
+- **HOTAS position < 0**: Watch velocity. While velocity > 0, hold throttle at `0.0f` (deceleration). When velocity ≈ 0, begin writing negative throttle proportional to reverse deflection.
+
+This eliminates the need for the current `SendInput`-based `S`-key simulation for reverse and enables analog reverse control through the existing `cluster+0x68` / `+0x6C` write path.

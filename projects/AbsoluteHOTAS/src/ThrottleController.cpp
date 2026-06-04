@@ -665,6 +665,19 @@ void ThrottleController::LoadConfig() {
         }
     }
 
+    // [DualStick] — Self-centering throttle accumulator mode
+    s_config.bAccumulatorThrottle = ini.GetBoolValue("DualStick", "bAccumulatorThrottle", false);
+    s_config.fAccumulatorRate = std::clamp((float)ini.GetDoubleValue("DualStick", "fAccumulatorRate", 1.0), 0.1f, 10.0f);
+    s_config.fAccumulatorDecay = std::clamp((float)ini.GetDoubleValue("DualStick", "fAccumulatorDecay", 0.0), 0.0f, 20.0f);
+    s_config.fReverseGateVelocity = std::clamp((float)ini.GetDoubleValue("DualStick", "fReverseGateVelocity", 5.0), 0.0f, 100.0f);
+    if (s_config.bAccumulatorThrottle) {
+        char dsBuf[256];
+        snprintf(dsBuf, sizeof(dsBuf),
+            "[DualStick] Accumulator mode ON: rate=%.2f decay=%.2f reverseGate=%.1f m/s",
+            s_config.fAccumulatorRate, s_config.fAccumulatorDecay, s_config.fReverseGateVelocity);
+        RuntimePaths::AppendLogAlways("[Controller]", dsBuf);
+    }
+
     CtrlLog("Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.");
 }
 
@@ -734,6 +747,25 @@ static float SafeReadFloat(uintptr_t addr) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
 }
 
+// Static module offset for ship velocity (HUD-rate cached).
+// Discovered via CE integer-match on speedometer display (2026-06-04).
+// Must be re-validated per game version.
+static constexpr uintptr_t kVelocityModuleOffset = 0x5E75644;
+
+static float ReadShipVelocity() {
+    static uintptr_t s_velocityAddr = 0;
+    if (!s_velocityAddr) {
+        uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
+        if (moduleBase) s_velocityAddr = moduleBase + kVelocityModuleOffset;
+    }
+    if (!s_velocityAddr) return -1.0f;
+    __try {
+        return *(volatile float*)(s_velocityAddr);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1.0f;
+    }
+}
+
 #pragma warning(pop)
 
 // ---- Global Discovery State ----
@@ -754,6 +786,7 @@ static float s_lastInjectedThrottle = -999.0f;
 static int s_handoverGraceFrames = 0;
 static int s_throttleBurstFrames = 0;
 static float s_throttleBurstValue = 0.0f;
+static float s_accumulatorThrottle = 0.0f;  // Accumulated throttle target for dual-stick mode
 
 static void DisarmFlightControlState() {
     g_discoveryArmed = false;
@@ -766,6 +799,7 @@ static void DisarmFlightControlState() {
     s_handoverGraceFrames = 0;
     s_throttleBurstFrames = 0;
     s_throttleBurstValue = 0.0f;
+    s_accumulatorThrottle = 0.0f;
     ReleaseAllShipButtonOutputs();
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
@@ -1142,7 +1176,12 @@ void ThrottleController::ControlLoop() {
         };
 
         float throttle = 0.0f;
-        if (reverseHeld) {
+        if (s_config.bAccumulatorThrottle) {
+            // Accumulator mode: use bipolar normalization with detent center/deadzone
+            if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
+                throttle = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
+            }
+        } else if (reverseHeld) {
             if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
                 throttle = SafeReadThrottle(s_activeThrottlePtr);
             } else {
@@ -1487,7 +1526,93 @@ void ThrottleController::ControlLoop() {
                     }
                 }
 
-                if (reverseKeyHeld || reverseHeld) {
+                if (s_config.bAccumulatorThrottle) {
+                     // --- ACCUMULATOR THROTTLE MODE (Dual-Stick / Self-Centering) ---
+                     // Stick deflection is a RATE input:
+                     //   Forward  → accumulate throttle upward, proportional to deflection
+                     //   Backward → reduce throttle toward 0, then hold S key for reverse
+                     //   Neutral  → HOLD current throttle value (no decay)
+                     float stickDeflection = throttle; // [-1.0, +1.0] bipolar
+                     constexpr float kDeadzone = 0.05f;
+                     bool wantReverse = false;
+
+                     if (stickDeflection > kDeadzone) {
+                         // Forward: accumulate upward
+                         s_accumulatorThrottle += stickDeflection * s_config.fAccumulatorRate * dt;
+                         s_accumulatorThrottle = std::clamp(s_accumulatorThrottle, 0.0f, 1.0f);
+                     } else if (stickDeflection < -kDeadzone) {
+                         // Backward: reduce throttle toward 0
+                         if (s_accumulatorThrottle > 0.0f) {
+                             s_accumulatorThrottle += stickDeflection * s_config.fAccumulatorRate * dt;
+                             if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
+                         } else {
+                             // Throttle at 0 and stick still back → send S for reverse/brake
+                             s_accumulatorThrottle = 0.0f;
+                             wantReverse = true;
+                         }
+                     } else {
+                         // Neutral: HOLD current throttle value (optional decay if configured)
+                         if (s_config.fAccumulatorDecay > 0.0f) {
+                             if (s_accumulatorThrottle > 0.0f) {
+                                 s_accumulatorThrottle -= s_config.fAccumulatorDecay * dt;
+                                 if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
+                             }
+                         }
+                         // else: decay=0 → hold at current value
+                     }
+
+                     // Drive the S-key output for reverse braking
+                     SetOutputHeld(ReverseOutput, OwnerDigitalReverse, wantReverse);
+
+                     float targetThrottle = std::max(s_accumulatorThrottle, 0.0f);
+                     s_lastInjectedThrottle = targetThrottle;
+                     SafeInjectThrottle(s_activeThrottlePtr, targetThrottle);
+
+                     // --- VELOCITY DIAGNOSTICS (only when logging is enabled) ---
+                     if (s_config.logThrottle) {
+                         static bool s_velStartupLogged = false;
+                         static uint64_t s_velLogIter = 0;
+                         float vel = ReadShipVelocity();
+
+                         if (!s_velStartupLogged) {
+                             s_velStartupLogged = true;
+                             uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
+                             char velBuf[256];
+                             snprintf(velBuf, sizeof(velBuf),
+                                 "[DualStick] Velocity monitor online: addr=0x%llX (base=0x%llX + 0x%X) rawVal=%.4f",
+                                 (unsigned long long)(moduleBase + kVelocityModuleOffset),
+                                 (unsigned long long)moduleBase,
+                                 (unsigned)kVelocityModuleOffset,
+                                 vel);
+                             RuntimePaths::AppendLogAlways("[Controller]", velBuf);
+                         }
+
+                         // Periodic velocity log (~every 2 seconds)
+                         if (iter > s_velLogIter + (uint64_t)(s_config.pollRateHz * 2)) {
+                             s_velLogIter = iter;
+                             char velBuf[256];
+                             snprintf(velBuf, sizeof(velBuf),
+                                 "[DualStick] vel=%.2f accum=%+.3f stick=%+.3f gate=%.1f %s",
+                                 vel, s_accumulatorThrottle, stickDeflection,
+                                 s_config.fReverseGateVelocity,
+                                 (vel >= 0.0f && vel <= s_config.fReverseGateVelocity) ? "GATE_OPEN" : "GATE_CLOSED");
+                             RuntimePaths::AppendLogAlways("[Controller]", velBuf);
+                         }
+                     }
+
+                     // --- 6DOF TELEMETRY ---
+                     static float lP=0, lY=0, lR=0;
+                     static uint64_t lastLogIter = 0;
+                     if (s_config.logThrottle && iter > lastLogIter + 30) {
+                         if (std::abs(pitch - lP) > 0.05f || std::abs(yaw - lY) > 0.05f || std::abs(roll - lR) > 0.05f || std::abs(stickDeflection) > 0.05f) {
+                             float vel = ReadShipVelocity();
+                             char tel[256];
+                             sprintf_s(tel, "[Telemetry] Vector: P%+.3f Y%+.3f R%+.3f | Accum%+.3f Stick%+.3f Vel%.0f", pitch, yaw, roll, targetThrottle, stickDeflection, vel);
+                             CtrlLog(tel);
+                             lP=pitch; lY=yaw; lR=roll; lastLogIter = iter;
+                         }
+                     }
+                } else if (reverseKeyHeld || reverseHeld) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
                 } else {

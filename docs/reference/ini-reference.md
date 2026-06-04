@@ -286,3 +286,19 @@ Bind buttons to move the reticle like a virtual cursor. Hold a direction to accu
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `iToggleAimModeButton` | int | `-1` | Toggle between Independent Aim and Aim-Driven Steering at runtime. Only useful when aim axes are bound. |
+
+---
+
+## [DualStick]
+
+Self-centering throttle accumulator mode for dual-stick and self-centering throttle setups. When enabled, the throttle axis is treated as a **rate input** (deflection controls how fast throttle ramps) rather than an absolute position.
+
+Reverse throttle requires velocity awareness: the ship must reach near-zero speed before negative throttle values are applied. This prevents fighting the engine's forward momentum with direct negative writes.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bAccumulatorThrottle` | bool | `false` | Enable rate-based throttle accumulation. When `true`, the throttle axis drives accumulation rate rather than absolute position. |
+| `fAccumulatorRate` | float | `1.0` | Throttle units per second at full stick deflection. At `1.0`, full forward stick reaches max throttle in 1 second. Range: `0.1`–`10.0`. |
+| `fAccumulatorDecay` | float | `2.0` | Throttle units per second of decay when the stick is centered. At `2.0`, throttle drops from `1.0` to `0.0` in 0.5 seconds. Range: `0.0`–`20.0`. Set to `0.0` to disable decay (throttle holds its position). |
+| `fReverseGateVelocity` | float | `5.0` | Ship velocity (m/s, HUD-displayed) below which reverse throttle is allowed. While velocity exceeds this, backward stick writes `0.0` to decelerate instead of writing negative throttle. Range: `0.0`–`100.0`. |
+

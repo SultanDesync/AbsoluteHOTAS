@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.4.4
+# AbsoluteHOTAS v2.4.5-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 

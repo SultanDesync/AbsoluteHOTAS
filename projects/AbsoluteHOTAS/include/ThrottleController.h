@@ -114,6 +114,12 @@ public:
         // Key = (deviceIndex << 8) | usageId.  Value = {min, max}.
         // When present, these replace hardware-reported DIPROP_RANGE values.
         std::unordered_map<int, std::pair<long, long>> axisCalibration;
+
+        // [DualStick] — Self-centering throttle accumulator mode
+        bool    bAccumulatorThrottle = false;  // Treat throttle axis as rate input, not absolute position
+        float   fAccumulatorRate = 1.0f;       // Throttle units/second at full deflection
+        float   fAccumulatorDecay = 0.0f;      // Throttle units/second decay toward 0 at neutral (0 = hold)
+        float   fReverseGateVelocity = 5.0f;   // Velocity (m/s) below which reverse throttle is allowed
     };
 
     static bool Initialize();
