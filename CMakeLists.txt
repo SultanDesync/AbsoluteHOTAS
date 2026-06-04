@@ -115,6 +115,9 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy
     ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini
     ${PACKAGE_PLUGIN_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy
+    ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS_SteamDeck.ini
+    ${PACKAGE_PLUGIN_DIR}
 )
 
 set(RELEASE_ARCHIVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/releases")
