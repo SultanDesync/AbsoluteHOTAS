@@ -65,6 +65,7 @@ DeviceName@0xNN    — Bind to axis 0xNN on the named device
 | `fYawSensitivity` | float | `1.0` | Yaw gain multiplier |
 | `fRollSensitivity` | float | `1.0` | Roll gain multiplier |
 | `fStrafeSensitivity` | float | `1.0` | Strafe gain multiplier |
+| `fThrottleSensitivity` | float | `1.0` | Throttle gain multiplier (scales both unipolar and accumulator paths) |
 
 ### Saturation (Output Capping)
 
@@ -79,6 +80,19 @@ Caps the maximum output of each axis. At `0.80`, output is limited to 80% of ful
 | `fStrafeSaturation` | `1.0` |
 | `fStrafeVertSaturation` | `1.0` |
 | `fReverseSaturation` | `1.0` |
+
+### Per-Axis Deadzones
+
+Center deadzone for bipolar axes. After normalizing to [-1.0, +1.0], deflections within `±deadzone` read as zero. The remaining range is remapped to full scale. Range: `0.0` to `0.5`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `fThrottleDeadzone` | float | `0.0` | Throttle axis center deadzone (also used as accumulator minimum). Accumulator mode enforces a 5% floor. |
+| `fPitchDeadzone` | float | `0.0` | Pitch axis center deadzone |
+| `fYawDeadzone` | float | `0.0` | Yaw axis center deadzone |
+| `fRollDeadzone` | float | `0.0` | Roll axis center deadzone |
+| `fStrafeDeadzone` | float | `0.05` | Lateral strafe deadzone. Default 5% prevents accidental actuation on HOSAS left-stick X-axis. |
+| `fStrafeVertDeadzone` | float | `0.05` | Vertical strafe deadzone |
 
 ---
 

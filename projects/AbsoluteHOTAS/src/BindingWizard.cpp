@@ -104,16 +104,17 @@ struct AxisSlot {
     const char* invertIniKey;     // May be nullptr
     const char* sensitivityKey;   // May be nullptr
     const char* saturationKey;    // May be nullptr
+    const char* deadzoneKey;      // May be nullptr
 };
 
 static const AxisSlot kAxisSlots[] = {
-    {"Throttle",         "iThrottleAxis",    "bInvertThrottle",    nullptr,               "fThrottleSaturation"},
-    {"Pitch",            "iPitchAxis",       "bInvertPitch",       "fPitchSensitivity",   "fPitchSaturation"},
-    {"Yaw",              "iYawAxis",         "bInvertYaw",         "fYawSensitivity",     "fYawSaturation"},
-    {"Roll",             "iRollAxis",        "bInvertRoll",        "fRollSensitivity",    "fRollSaturation"},
-    {"Strafe Lateral",   "iStrafeLatAxis",   "bInvertStrafeLat",   "fStrafeSensitivity",  "fStrafeSaturation"},
-    {"Strafe Vertical",  "iStrafeVertAxis",  "bInvertStrafeVert",  nullptr,               "fStrafeVertSaturation"},
-    {"Reverse",          "iReverseAxis",     "bInvertReverse",     "fReverseSensitivity", "fReverseSaturation"},
+    {"Throttle",         "iThrottleAxis",    "bInvertThrottle",    "fThrottleSensitivity","fThrottleSaturation",  "fThrottleDeadzone"},
+    {"Pitch",            "iPitchAxis",       "bInvertPitch",       "fPitchSensitivity",   "fPitchSaturation",    "fPitchDeadzone"},
+    {"Yaw",              "iYawAxis",         "bInvertYaw",         "fYawSensitivity",     "fYawSaturation",      "fYawDeadzone"},
+    {"Roll",             "iRollAxis",        "bInvertRoll",        "fRollSensitivity",    "fRollSaturation",     "fRollDeadzone"},
+    {"Strafe Lateral",   "iStrafeLatAxis",   "bInvertStrafeLat",   "fStrafeSensitivity",  "fStrafeSaturation",   "fStrafeDeadzone"},
+    {"Strafe Vertical",  "iStrafeVertAxis",  "bInvertStrafeVert",  nullptr,               "fStrafeVertSaturation","fStrafeVertDeadzone"},
+    {"Reverse",          "iReverseAxis",     "bInvertReverse",     "fReverseSensitivity", "fReverseSaturation",  nullptr},
 };
 static constexpr int kNumAxisSlots = sizeof(kAxisSlots) / sizeof(kAxisSlots[0]);
 
@@ -158,11 +159,19 @@ static std::string s_axisBindings[kNumAxisSlots];
 static bool        s_axisInvert[kNumAxisSlots];
 static float       s_axisSensitivity[kNumAxisSlots];  // 0 = n/a
 static float       s_axisSaturation[kNumAxisSlots];   // 1.0 = full range
+static float       s_axisDeadzone[kNumAxisSlots];     // per-axis deadzone (0.0 = none)
 static std::string s_buttonBindings[kNumButtonSlots];
 static std::string s_digitalAxisBindings[kNumDigitalAxisSlots];
 static float       s_digitalRollValue = 1.0f;
 static float       s_digitalStrafeValue = 1.0f;
 static bool        s_bindingsLoaded = false;
+
+// DualStick accumulator mode state (maps to [DualStick] INI section)
+static bool        s_accumulatorThrottle = false;
+static float       s_accumulatorRate = 1.0f;
+static float       s_accumulatorDecay = 0.0f;
+static float       s_reverseGateVelocity = 5.0f;
+static bool        s_symmetricalThrottleDz = true;
 
 // Aim axis slots (saved to [Aim] section, capture range 600-699)
 struct AimAxisSlot {
@@ -323,7 +332,7 @@ static void LoadCurrentBindings() {
     s_axisInvert[5] = cfg.bInvertStrafeVert;
     s_axisInvert[6] = cfg.bInvertReverse;
 
-    s_axisSensitivity[0] = 0.0f; // Throttle has no sensitivity
+    s_axisSensitivity[0] = cfg.fThrottleSensitivity;
     s_axisSensitivity[1] = cfg.fPitchSensitivity;
     s_axisSensitivity[2] = cfg.fYawSensitivity;
     s_axisSensitivity[3] = cfg.fRollSensitivity;
@@ -338,6 +347,22 @@ static void LoadCurrentBindings() {
     s_axisSaturation[4] = cfg.fStrafeSaturation;
     s_axisSaturation[5] = cfg.fStrafeVertSaturation;
     s_axisSaturation[6] = cfg.fReverseSaturation;
+
+    s_axisDeadzone[0] = cfg.fThrottleDeadzone;
+    s_axisDeadzone[1] = cfg.fPitchDeadzone;
+    s_axisDeadzone[2] = cfg.fYawDeadzone;
+    s_axisDeadzone[3] = cfg.fRollDeadzone;
+    s_axisDeadzone[4] = cfg.fStrafeDeadzone;
+    s_axisDeadzone[5] = cfg.fStrafeVertDeadzone;
+    s_axisDeadzone[6] = 0.0f; // Reverse has no deadzone
+
+    // DualStick accumulator mode
+    s_accumulatorThrottle = cfg.bAccumulatorThrottle;
+    s_accumulatorRate = cfg.fAccumulatorRate;
+    s_accumulatorDecay = cfg.fAccumulatorDecay;
+    s_reverseGateVelocity = cfg.fReverseGateVelocity;
+    // Symmetry detection: if idle plateau ≈ (1 - saturation), start in symmetrical mode
+    s_symmetricalThrottleDz = (std::abs(cfg.idlePlateau - (1.0f - cfg.fThrottleSaturation)) < 0.01f);
 
     // Throttle calibration
     s_idlePlateau = cfg.idlePlateau;
@@ -708,6 +733,11 @@ static void SaveBindingsToINI() {
             sprintf_s(satStr, "%.2f", s_axisSaturation[i]);
             ini.SetValue("Hardware", kAxisSlots[i].saturationKey, satStr);
         }
+        if (kAxisSlots[i].deadzoneKey) {
+            char dzStr[32];
+            sprintf_s(dzStr, "%.2f", s_axisDeadzone[i]);
+            ini.SetValue("Hardware", kAxisSlots[i].deadzoneKey, dzStr);
+        }
     }
 
     // Throttle calibration ([Normalization] section)
@@ -802,6 +832,18 @@ static void SaveBindingsToINI() {
         ini.SetValue("Aim", "iToggleAimModeButton", "-1");
     }
 
+    // DualStick accumulator mode ([DualStick] section)
+    ini.SetBoolValue("DualStick", "bAccumulatorThrottle", s_accumulatorThrottle);
+    {
+        char rateStr[32], decayStr[32], gateStr[32];
+        sprintf_s(rateStr, "%.1f", s_accumulatorRate);
+        sprintf_s(decayStr, "%.1f", s_accumulatorDecay);
+        sprintf_s(gateStr, "%.1f", s_reverseGateVelocity);
+        ini.SetValue("DualStick", "fAccumulatorRate", rateStr);
+        ini.SetValue("DualStick", "fAccumulatorDecay", decayStr);
+        ini.SetValue("DualStick", "fReverseGateVelocity", gateStr);
+    }
+
     // Write calibration data
     ini.Delete("Calibration", nullptr); // Clear entire section
     for (const auto& [key, range] : s_calibData) {
@@ -879,7 +921,13 @@ static void DrawBindingRow(const char* label, std::string& binding, int captureS
 
     bool isCapturing = s_pendingBind.active && s_pendingBind.targetConfigSlot == captureSlot;
     if (isCapturing) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.2f, 1.0f), isAxis ? ">> Move axis... <<" : ">> Press button... <<");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.2f, 1.0f), isAxis ? ">> Move axis..." : ">> Press button...");
+        ImGui::SameLine();
+        ImGui::PushID(captureSlot + 90000);
+        if (ImGui::SmallButton("Cancel")) {
+            s_pendingBind.active = false;
+        }
+        ImGui::PopID();
     } else {
         ImGui::PushID(captureSlot);
         if (ImGui::SmallButton("Bind")) {
@@ -1279,6 +1327,14 @@ void BindingWizard::Draw() {
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Bottom dead zone");
 
+                        // Symmetrical throttle deadzone checkbox
+                        ImGui::Checkbox("Symmetrical Deadzones", &s_symmetricalThrottleDz);
+                        if (s_symmetricalThrottleDz) {
+                            s_axisSaturation[0] = 1.0f - s_idlePlateau;
+                            ImGui::SameLine();
+                            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "(Sat locked to %.0f%%)", s_axisSaturation[0] * 100.0f);
+                        }
+
                         // Set Center button + live readout
                         if (s_calibratingCenter) {
                             if (ImGui::Button("Done##center")) {
@@ -1306,7 +1362,64 @@ void BindingWizard::Draw() {
                         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Around center (%ld raw)", s_detentDeadzone);
 
                         ImGui::Unindent(180);
+
+                        // --- DualStick / Accumulator Mode Panel ---
+                        ImGui::Spacing();
+                        ImGui::Indent(20);
+                        bool accOpen = ImGui::CollapsingHeader("Dual-Stick / Accumulator Mode", ImGuiTreeNodeFlags_None);
+                        if (accOpen) {
+                            ImGui::Indent(12);
+
+                            ImGui::Checkbox("Enable Accumulator Throttle", &s_accumulatorThrottle);
+                            if (s_accumulatorThrottle) {
+                                ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Rate)");
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f),
+                                    "Stick deflection controls throttle speed, not position.");
+
+                                ImGui::Spacing();
+                                ImGui::PushItemWidth(180);
+                                ImGui::SliderFloat("Ramp Rate##accRate", &s_accumulatorRate, 0.1f, 5.0f, "%.1f units/s");
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At full deflection");
+
+                                ImGui::SliderFloat("Decay Rate##accDecay", &s_accumulatorDecay, 0.0f, 3.0f, "%.1f units/s");
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At neutral (0=hold)");
+
+                                ImGui::SliderFloat("Rev. Gate##accGate", &s_reverseGateVelocity, 0.0f, 50.0f, "%.0f m/s");
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Reverse below this speed");
+                                ImGui::PopItemWidth();
+
+                                ImGui::Spacing();
+                                ImGui::TextWrapped(
+                                    "Push forward to accelerate. Pull back to decelerate; "
+                                    "at zero throttle, pulling further triggers reverse braking.");
+                            }
+
+                            ImGui::Unindent(12);
+                        }
+                        ImGui::Unindent(20);
                     }
+                }
+
+                // Per-axis deadzone slider (below saturation)
+                if (kAxisSlots[i].deadzoneKey) {
+                    ImGui::Indent(180);
+                    ImGui::PushItemWidth(120);
+                    char dzLabel[32];
+                    sprintf_s(dzLabel, "Deadzone##axdz%d", i);
+                    float dzPct = s_axisDeadzone[i] * 100.0f;
+                    if (ImGui::SliderFloat(dzLabel, &dzPct, 0.0f, 50.0f, "%.0f%%")) {
+                        s_axisDeadzone[i] = std::clamp(dzPct / 100.0f, 0.0f, 0.50f);
+                    }
+                    ImGui::PopItemWidth();
+                    if (s_axisDeadzone[i] > 0.001f) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Center dead zone");
+                    }
+                    ImGui::Unindent(180);
                 }
 
                 ImGui::PopID();
@@ -1605,16 +1718,7 @@ void BindingWizard::Draw() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Cancel capture button
-    if (s_pendingBind.active) {
-        if (ImGui::Button("Cancel Capture")) {
-            s_pendingBind.active = false;
-            ResetDebounce();
-            WizLog("Capture cancelled by user.");
-        }
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.2f, 1.0f), "Waiting for input: %s", s_pendingBind.targetLabel.c_str());
-    }
+    // (Inline cancel buttons are now on each binding row)
 
     // Save button
     ImGui::Spacing();

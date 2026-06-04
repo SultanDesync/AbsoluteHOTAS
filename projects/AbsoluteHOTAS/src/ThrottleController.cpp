@@ -562,6 +562,7 @@ void ThrottleController::LoadConfig() {
     s_config.fRollSensitivity = (float)ini.GetDoubleValue("Hardware", "fRollSensitivity", 1.0);
     s_config.fStrafeSensitivity = (float)ini.GetDoubleValue("Hardware", "fStrafeSensitivity", 1.0);
     s_config.fReverseSensitivity = (float)ini.GetDoubleValue("Hardware", "fReverseSensitivity", 1.0);
+    s_config.fThrottleSensitivity = (float)ini.GetDoubleValue("Hardware", "fThrottleSensitivity", 1.0);
 
     s_config.fThrottleSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fThrottleSaturation", 1.0), 0.05f, 1.0f);
     s_config.fPitchSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fPitchSaturation", 1.0), 0.05f, 1.0f);
@@ -578,6 +579,14 @@ void ThrottleController::LoadConfig() {
     s_config.bInvertStrafeLat = ini.GetBoolValue("Hardware", "bInvertStrafeLat", false);
     s_config.bInvertStrafeVert = ini.GetBoolValue("Hardware", "bInvertStrafeVert", false);
     s_config.bInvertReverse = ini.GetBoolValue("Hardware", "bInvertReverse", false);
+
+    // Per-axis deadzones
+    s_config.fThrottleDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fThrottleDeadzone", 0.0), 0.0f, 0.5f);
+    s_config.fPitchDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fPitchDeadzone", 0.0), 0.0f, 0.5f);
+    s_config.fYawDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fYawDeadzone", 0.0), 0.0f, 0.5f);
+    s_config.fRollDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fRollDeadzone", 0.0), 0.0f, 0.5f);
+    s_config.fStrafeDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeDeadzone", 0.05), 0.0f, 0.5f);
+    s_config.fStrafeVertDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeVertDeadzone", 0.05), 0.0f, 0.5f);
 
     s_config.activateButton = ParseBindingRef(ini.GetValue("Buttons", "iActivateButtonId", ""), -1);
     s_config.stopButton = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId", ""), -1);
@@ -1180,6 +1189,7 @@ void ThrottleController::ControlLoop() {
             // Accumulator mode: use bipolar normalization with detent center/deadzone
             if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
                 throttle = NormalizeBipolarRate(GetRawAxis(s_config.throttleAxis));
+                throttle = std::clamp(throttle * s_config.fThrottleSensitivity, -1.0f, 1.0f);
             }
         } else if (reverseHeld) {
             if (s_activeThrottlePtr && IsThrottlePlausible(s_activeThrottlePtr)) {
@@ -1190,6 +1200,7 @@ void ThrottleController::ControlLoop() {
 
         } else if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
             throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
+            throttle = std::clamp(throttle * s_config.fThrottleSensitivity, 0.0f, 1.0f);
         }
         // else: throttle axis unbound — leave throttle at 0 (no injection)
         
@@ -1225,15 +1236,15 @@ void ThrottleController::ControlLoop() {
             return sign * ((std::abs(value) - dz) / (1.0f - dz));
         };
 
-        float pitch = NormBipolar(s_config.pitchAxis, s_config.fPitchSensitivity, s_config.bInvertPitch, s_config.fPitchSaturation);
-        float yaw   = NormBipolar(s_config.yawAxis,   s_config.fYawSensitivity,   s_config.bInvertYaw,   s_config.fYawSaturation);
-        float roll  = NormBipolar(s_config.rollAxis,  s_config.fRollSensitivity,  s_config.bInvertRoll,  s_config.fRollSaturation);
+        float pitch = ApplyDeadzone(NormBipolar(s_config.pitchAxis, s_config.fPitchSensitivity, s_config.bInvertPitch, s_config.fPitchSaturation), s_config.fPitchDeadzone);
+        float yaw   = ApplyDeadzone(NormBipolar(s_config.yawAxis,   s_config.fYawSensitivity,   s_config.bInvertYaw,   s_config.fYawSaturation), s_config.fYawDeadzone);
+        float roll  = ApplyDeadzone(NormBipolar(s_config.rollAxis,  s_config.fRollSensitivity,  s_config.bInvertRoll,  s_config.fRollSaturation), s_config.fRollDeadzone);
         if (IsButtonPressed(s_config.digitalRollLeftButton)) roll -= s_config.digitalRollValue;
         if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
         roll = std::clamp(roll, -1.0f, 1.0f);
 
-        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat, s_config.fStrafeSaturation), 0.05f);
-        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert, s_config.fStrafeVertSaturation), 0.05f);
+        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat, s_config.fStrafeSaturation), s_config.fStrafeDeadzone);
+        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert, s_config.fStrafeVertSaturation), s_config.fStrafeVertDeadzone);
         if (IsButtonPressed(s_config.digitalStrafeLeftButton)) strafeX -= s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeRightButton)) strafeX += s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeUpButton)) strafeY += s_config.digitalStrafeValue;
@@ -1533,7 +1544,7 @@ void ThrottleController::ControlLoop() {
                      //   Backward → reduce throttle toward 0, then hold S key for reverse
                      //   Neutral  → HOLD current throttle value (no decay)
                      float stickDeflection = throttle; // [-1.0, +1.0] bipolar
-                     constexpr float kDeadzone = 0.05f;
+                     const float kDeadzone = std::max(s_config.fThrottleDeadzone, 0.05f); // Min 5% for accumulator stability
                      bool wantReverse = false;
 
                      if (stickDeflection > kDeadzone) {

@@ -31,6 +31,7 @@ public:
         float   fRollSensitivity = 1.0f;
         float   fStrafeSensitivity = 1.0f;
         float   fReverseSensitivity = 1.0f;
+        float   fThrottleSensitivity = 1.0f;
 
         float   fThrottleSaturation = 1.0f;
         float   fPitchSaturation = 1.0f;
@@ -62,6 +63,14 @@ public:
         float   idlePlateau = 0.05f;    // Software deadzone at the bottom (0.0-1.0)
         float   reverseDeadzone = 0.05f;
         float   reverseActivationThreshold = 0.05f;
+
+        // Per-axis deadzones (applied after normalization, before injection)
+        float   fThrottleDeadzone = 0.0f;
+        float   fPitchDeadzone = 0.0f;
+        float   fYawDeadzone = 0.0f;
+        float   fRollDeadzone = 0.0f;
+        float   fStrafeDeadzone = 0.05f;      // 5% default to prevent accidental HOSAS lateral actuation
+        float   fStrafeVertDeadzone = 0.05f;
 
         // [Injection]
         int     pollRateHz = 60;          // Polling frequency

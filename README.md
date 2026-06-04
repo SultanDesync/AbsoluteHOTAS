@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.4.5-beta
+# AbsoluteHOTAS v2.5-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -135,6 +135,52 @@ iDetentCenter = 16384         ; Only for bUnipolarMode=false
 ```
 
 Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
+
+## Dual-Stick / HOSAS Accumulator Mode
+
+For HOSAS (Hands On Throttle And Stick) or dual-joystick setups where the left stick's Y-axis (or another axis) self-centers, a traditional absolute throttle mapping is difficult to use. To address this, AbsoluteHOTAS provides a **Velocity-Aware Throttle Accumulator** mode.
+
+In this mode, the throttle stick behaves as a **rate-of-change controller** rather than mapping directly to absolute throttle percentage:
+* **Push Forward**: Accumulates/ramps up throttle.
+* **Release to Center (Neutral)**: Throttle decays back to zero (the decay rate is customizable, or can be set to zero to "hold" the current throttle setting).
+* **Pull Backward**: Decelerates the ship toward 0% throttle, then triggers reverse thrusters once the ship slows down.
+
+### Basic Logic & Reverse Gate
+
+To handle reverse thrust smoothly in Starfield's flight model, the accumulator uses a **Velocity Gate**:
+1. **At Speed**: Pulling back on the stick acts as a brake, reducing absolute throttle to zero to let the ship decelerate.
+2. **Below the Gate**: Once the ship's current velocity drops below the configurable **Reverse Gate Velocity** (default `5.0` m/s on the HUD), pulling back on the stick activates the game's backward/reverse thrusters.
+3. This prevents fighting the engine's forward momentum with direct negative values, resulting in smooth transitions.
+
+### How to Bind and Configure
+
+#### Option A: In-Game Binding Wizard (Recommended)
+1. Press `Ctrl+Alt+B` to open the wizard.
+2. Go to the **Axes & Settings** tab.
+3. Under **Flight Axes**, find **Throttle** and click **Bind**. Move your self-centering joystick axis (e.g., Left Stick Y-axis).
+4. Scroll down to the **Dual-Stick / Accumulator Mode** collapsible panel under throttle calibration and click to expand it.
+5. Check **Enable Accumulator Mode**.
+6. Set the parameters to your preference:
+   * **Ramp Rate**: How fast the throttle ramps up when the stick is fully deflected forward (in throttle units per second).
+   * **Decay Rate**: How fast the throttle decays back to zero when you release the stick. Set to `0.0` to disable decay and lock your current throttle setting when the stick centers.
+   * **Reverse Gate Velocity**: The HUD speed threshold below which backward stick deflection engages reverse thrusters.
+7. Click **Save & Apply**.
+
+#### Option B: Manual INI Configuration
+Edit `AbsoluteHOTAS.ini` and configure the following sections:
+
+```ini
+[Hardware]
+iThrottleAxis = Left Stick@0x31  ; Map throttle to self-centering axis
+fThrottleSensitivity = 1.0       ; Scales rate input sensitivity
+fThrottleDeadzone = 0.05         ; Center deadzone (minimum floor is 5%)
+
+[DualStick]
+bAccumulatorThrottle = true      ; Enable the accumulator
+fAccumulatorRate = 1.0           ; Seconds to reach 100% (1.0 = 1 sec)
+fAccumulatorDecay = 2.0          ; Decay speed on center (2.0 = 0.5 sec to 0%)
+fReverseGateVelocity = 5.0       ; Engage reverse under this HUD speed (m/s)
+```
 
 ## Aiming
 
