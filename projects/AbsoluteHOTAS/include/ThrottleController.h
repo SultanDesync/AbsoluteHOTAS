@@ -32,6 +32,14 @@ public:
         float   fStrafeSensitivity = 1.0f;
         float   fReverseSensitivity = 1.0f;
 
+        float   fThrottleSaturation = 1.0f;
+        float   fPitchSaturation = 1.0f;
+        float   fYawSaturation = 1.0f;
+        float   fRollSaturation = 1.0f;
+        float   fStrafeSaturation = 1.0f;
+        float   fStrafeVertSaturation = 1.0f;
+        float   fReverseSaturation = 1.0f;
+
         bool    bInvertPitch = true;
         bool    bInvertThrottle = false;
         bool    bInvertYaw = false;
@@ -47,7 +55,7 @@ public:
         bool    alwaysOn = true;          // Auto-arm discovery when the standalone controller starts
 
         // [Normalization]
-        long    detentCenter = 16384;   // Raw axis value at physical detent center
+        long    detentCenter = 32768;   // Raw axis value at physical detent center
         long    detentDeadzone = 500;   // Deadzone around detent (raw units)
         bool    reverseEnabled = false; // Axis reverse is disabled for the beta; use keyboard S.
         bool    unipolarMode = true;    // If true, maps whole axis (min-max) to 0.0-1.0 range (linear)
@@ -64,6 +72,31 @@ public:
         bool    logThrottle = false;    // Log throttle values to file
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
+
+        // [Aim] - Experimental source-object reticle injection
+        bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle
+        float   fAimSensitivity   = 1.0f;   // Scale applied to pitch/yaw before writing source obj (mirror/legacy mode only)
+
+        // Separated aiming axes — if bound, these drive the reticle independently
+        // from the flight stick. If unbound, behavior depends on bMirrorFlightToAim.
+        BindingRef aimYawAxis;              // HID usage for aiming yaw (e.g., Rx on throttle)
+        BindingRef aimPitchAxis;            // HID usage for aiming pitch (e.g., Ry on throttle)
+        float   fAimYawSensitivity   = 1.0f;
+        float   fAimPitchSensitivity = 1.0f;
+        bool    bInvertAimYaw   = false;
+        bool    bInvertAimPitch = false;
+        bool    bMirrorFlightToAim = true;  // If no aim axes bound, mirror flight stick to reticle
+
+        // Digital aim buttons — 5-way directional override for aiming reticle
+        BindingRef digitalAimLeftButton;
+        BindingRef digitalAimRightButton;
+        BindingRef digitalAimUpButton;
+        BindingRef digitalAimDownButton;
+        BindingRef digitalAimCenterButton;  // Snaps reticle to center (0,0)
+        float   fDigitalAimValue = 1.0f;    // Deflection value when digital aim is active
+
+        // Toggle button: switches between aim-driven steering and independent aim at runtime
+        BindingRef toggleAimModeButton;
 
         // [DigitalAxes] — Per-binding button references
         BindingRef digitalReverseButton;

@@ -41,6 +41,12 @@ static uintptr_t g_manualGateAddress[MAX_MANUAL_CAMERA_GATES] = {};
 static uintptr_t g_manualGateOffset[MAX_MANUAL_CAMERA_GATES] = {};
 static int g_manualGateCount = 0;
 
+// ---- Experimental: source-object aim injection ----
+static volatile uint8_t  g_sourceAimEnabled  = 0;
+static volatile uint32_t g_sourceAimYawBits  = 0;
+static volatile uint32_t g_sourceAimPitchBits = 0;
+
+
 // ---- Hook Registry for Persistent Silencing ----
 struct HookRecord {
     uintptr_t targetAddr;
@@ -714,7 +720,7 @@ bool ThrottleHook::IsSilenceEnabled() {
     return g_silenceEnabled;
 }
 
-void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled) {
+void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled, bool yawEnabled, bool pitchEnabled) {
     g_rollBits = FloatToBits(lateral);
     g_vertStrafeBits = FloatToBits(vertical);
     g_yawBits = FloatToBits(yaw);
@@ -722,8 +728,8 @@ void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, 
     g_rotOverrideEnabled = enabled ? 1 : 0;
     g_rollOverrideEnabled = (enabled && lateralEnabled) ? 1 : 0;
     g_vertStrafeOverrideEnabled = (enabled && verticalEnabled) ? 1 : 0;
-    g_yawOverrideEnabled = enabled ? 1 : 0;
-    g_pitchOverrideEnabled = enabled ? 1 : 0;
+    g_yawOverrideEnabled = (enabled && yawEnabled) ? 1 : 0;
+    g_pitchOverrideEnabled = (enabled && pitchEnabled) ? 1 : 0;
 }
 
 void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool enabled) {
@@ -783,6 +789,35 @@ void ThrottleHook::SetManualGateOverride(int index, float value, bool enabled) {
 
     g_manualGateBits[index] = FloatToBits(value);
     g_manualGateActive[index] = 1;
+}
+
+// ---- Experimental: source-object aim injection ----
+void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
+    g_sourceAimYawBits   = FloatToBits(yaw);
+    g_sourceAimPitchBits = FloatToBits(pitch);
+    g_sourceAimEnabled   = enabled ? 1 : 0;
+
+    if (!enabled) return;
+
+    uintptr_t src = g_capturedSourceR13;
+    if (!src) return;
+
+    // Write directly to the source object mouse accumulator lanes.
+    // +0x4C = yaw mouse accumulator, +0x50 = pitch mouse accumulator (scale: -200.0..+200.0).
+    // These work regardless of controller mode, unlike the gamepad input lanes (+0x44/+0x48).
+    // Guarded with SEH to survive stale pointers between reacquire cycles.
+    __try {
+        float yawBitsFloat  = 0.0f;
+        float pitchBitsFloat = 0.0f;
+        memcpy(&yawBitsFloat,  const_cast<const uint32_t*>(&g_sourceAimYawBits),  4);
+        memcpy(&pitchBitsFloat, const_cast<const uint32_t*>(&g_sourceAimPitchBits), 4);
+        *(float*)(src + 0x4C) = yawBitsFloat;
+        *(float*)(src + 0x50) = pitchBitsFloat;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+bool ThrottleHook::IsSourcePtrValid() {
+    return g_capturedSourceR13 != 0;
 }
 
 static bool HasCompanion6C(uintptr_t addr, uintptr_t textStart, size_t textSize) {

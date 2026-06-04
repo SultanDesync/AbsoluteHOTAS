@@ -85,16 +85,17 @@ struct AxisSlot {
     const char* iniKey;
     const char* invertIniKey;     // May be nullptr
     const char* sensitivityKey;   // May be nullptr
+    const char* saturationKey;    // May be nullptr
 };
 
 static const AxisSlot kAxisSlots[] = {
-    {"Throttle",         "iThrottleAxis",    "bInvertThrottle",    nullptr},
-    {"Pitch",            "iPitchAxis",       "bInvertPitch",       "fPitchSensitivity"},
-    {"Yaw",              "iYawAxis",         "bInvertYaw",         "fYawSensitivity"},
-    {"Roll",             "iRollAxis",        "bInvertRoll",        "fRollSensitivity"},
-    {"Strafe Lateral",   "iStrafeLatAxis",   "bInvertStrafeLat",   "fStrafeSensitivity"},
-    {"Strafe Vertical",  "iStrafeVertAxis",  "bInvertStrafeVert",  nullptr},
-    {"Reverse",          "iReverseAxis",     "bInvertReverse",     "fReverseSensitivity"},
+    {"Throttle",         "iThrottleAxis",    "bInvertThrottle",    nullptr,               "fThrottleSaturation"},
+    {"Pitch",            "iPitchAxis",       "bInvertPitch",       "fPitchSensitivity",   "fPitchSaturation"},
+    {"Yaw",              "iYawAxis",         "bInvertYaw",         "fYawSensitivity",     "fYawSaturation"},
+    {"Roll",             "iRollAxis",        "bInvertRoll",        "fRollSensitivity",    "fRollSaturation"},
+    {"Strafe Lateral",   "iStrafeLatAxis",   "bInvertStrafeLat",   "fStrafeSensitivity",  "fStrafeSaturation"},
+    {"Strafe Vertical",  "iStrafeVertAxis",  "bInvertStrafeVert",  nullptr,               "fStrafeVertSaturation"},
+    {"Reverse",          "iReverseAxis",     "bInvertReverse",     "fReverseSensitivity", "fReverseSaturation"},
 };
 static constexpr int kNumAxisSlots = sizeof(kAxisSlots) / sizeof(kAxisSlots[0]);
 
@@ -135,15 +136,57 @@ static const DigitalAxisSlot kDigitalAxisSlots[] = {
 };
 static constexpr int kNumDigitalAxisSlots = sizeof(kDigitalAxisSlots) / sizeof(kDigitalAxisSlots[0]);
 
-// Resolved binding strings for each category
 static std::string s_axisBindings[kNumAxisSlots];
 static bool        s_axisInvert[kNumAxisSlots];
 static float       s_axisSensitivity[kNumAxisSlots];  // 0 = n/a
+static float       s_axisSaturation[kNumAxisSlots];   // 1.0 = full range
 static std::string s_buttonBindings[kNumButtonSlots];
 static std::string s_digitalAxisBindings[kNumDigitalAxisSlots];
 static float       s_digitalRollValue = 1.0f;
 static float       s_digitalStrafeValue = 1.0f;
 static bool        s_bindingsLoaded = false;
+
+// Aim axis slots (saved to [Aim] section, capture range 600-699)
+struct AimAxisSlot {
+    const char* label;
+    const char* iniKey;
+    const char* invertIniKey;
+    const char* sensitivityKey;
+};
+static const AimAxisSlot kAimAxisSlots[] = {
+    {"Aim Yaw",   "iAimYawAxis",   "bInvertAimYaw",   "fAimYawSensitivity"},
+    {"Aim Pitch", "iAimPitchAxis", "bInvertAimPitch",  "fAimPitchSensitivity"},
+};
+static constexpr int kNumAimAxisSlots = 2;
+static std::string s_aimAxisBindings[2];
+static bool        s_aimAxisInvert[2];
+static float       s_aimAxisSensitivity[2];
+static float       s_aimSensitivity = 1.0f;
+static bool        s_mirrorFlightToAim = true;
+static bool        s_sourceObjectAim = true;
+
+// Digital aim button slots (capture range 700-704, toggle = 705)
+struct DigitalAimSlot {
+    const char* label;
+    const char* iniKey;
+};
+static const DigitalAimSlot kDigitalAimSlots[] = {
+    {"Aim Left",   "iDigitalAimLeftButton"},
+    {"Aim Right",  "iDigitalAimRightButton"},
+    {"Aim Up",     "iDigitalAimUpButton"},
+    {"Aim Down",   "iDigitalAimDownButton"},
+    {"Aim Center", "iDigitalAimCenterButton"},
+};
+static constexpr int kNumDigitalAimSlots = 5;
+static std::string s_digitalAimBindings[5];
+static float       s_digitalAimValue = 1.0f;
+static std::string s_toggleAimModeBinding;
+
+// Throttle calibration state (maps to [Normalization] INI section)
+static float       s_idlePlateau = 0.05f;
+static long        s_detentCenter = 32768;
+static long        s_detentDeadzone = 500;
+static bool        s_calibratingCenter = false;
 
 // ============================================================================
 // Per-axis calibration state
@@ -262,8 +305,22 @@ static void LoadCurrentBindings() {
     s_axisSensitivity[5] = 0.0f; // Strafe vert has no sensitivity
     s_axisSensitivity[6] = cfg.fReverseSensitivity;
 
+    s_axisSaturation[0] = cfg.fThrottleSaturation;
+    s_axisSaturation[1] = cfg.fPitchSaturation;
+    s_axisSaturation[2] = cfg.fYawSaturation;
+    s_axisSaturation[3] = cfg.fRollSaturation;
+    s_axisSaturation[4] = cfg.fStrafeSaturation;
+    s_axisSaturation[5] = cfg.fStrafeVertSaturation;
+    s_axisSaturation[6] = cfg.fReverseSaturation;
+
+    // Throttle calibration
+    s_idlePlateau = cfg.idlePlateau;
+    s_detentCenter = cfg.detentCenter;
+    s_detentDeadzone = cfg.detentDeadzone;
+
     s_buttonBindings[0] = FormatButtonRef(cfg.activateButton);
     s_buttonBindings[1] = FormatButtonRef(cfg.stopButton);
+    s_buttonBindings[2] = FormatButtonRef(cfg.toggleWizardButton);
 
     // Ship actions
     auto shipActions = ThrottleController::GetShipActionBindings();
@@ -285,6 +342,26 @@ static void LoadCurrentBindings() {
     s_digitalAxisBindings[5] = FormatButtonRef(cfg.digitalStrafeUpButton);
     s_digitalAxisBindings[6] = FormatButtonRef(cfg.digitalStrafeDownButton);
     s_digitalRollValue = cfg.digitalRollValue;
+
+    // Aim settings
+    s_aimAxisBindings[0]    = FormatRef(cfg.aimYawAxis);
+    s_aimAxisBindings[1]    = FormatRef(cfg.aimPitchAxis);
+    s_aimAxisInvert[0]      = cfg.bInvertAimYaw;
+    s_aimAxisInvert[1]      = cfg.bInvertAimPitch;
+    s_aimAxisSensitivity[0] = cfg.fAimYawSensitivity;
+    s_aimAxisSensitivity[1] = cfg.fAimPitchSensitivity;
+    s_aimSensitivity        = cfg.fAimSensitivity;
+    s_mirrorFlightToAim     = cfg.bMirrorFlightToAim;
+    s_sourceObjectAim       = cfg.bSourceObjectAim;
+
+    // Digital aim buttons
+    s_digitalAimBindings[0] = FormatButtonRef(cfg.digitalAimLeftButton);
+    s_digitalAimBindings[1] = FormatButtonRef(cfg.digitalAimRightButton);
+    s_digitalAimBindings[2] = FormatButtonRef(cfg.digitalAimUpButton);
+    s_digitalAimBindings[3] = FormatButtonRef(cfg.digitalAimDownButton);
+    s_digitalAimBindings[4] = FormatButtonRef(cfg.digitalAimCenterButton);
+    s_digitalAimValue       = cfg.fDigitalAimValue;
+    s_toggleAimModeBinding  = FormatButtonRef(cfg.toggleAimModeButton);
     s_digitalStrafeValue = cfg.digitalStrafeValue;
 
     // Load calibration data from config
@@ -413,7 +490,7 @@ static void UpdateCapture() {
         return false;
     };
 
-    if (slot >= 0 && slot < 100) {
+    if ((slot >= 0 && slot < 100) || (slot >= 600 && slot < 700)) {
         // Axis capture: compare current state to snapshot
         constexpr long kAxisThreshold = 8000;
 
@@ -446,7 +523,10 @@ static void UpdateCapture() {
                             sprintf_s(buf, "%s@0x%02X", info.productName.c_str(), usageId);
                         }
 
-                        s_axisBindings[slot] = buf;
+                        if (slot >= 600)
+                            s_aimAxisBindings[slot - 600] = buf;
+                        else
+                            s_axisBindings[slot] = buf;
                         WizLog("Axis captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
                         s_pendingBind.active = false;
                         return;
@@ -508,6 +588,10 @@ static void UpdateCapture() {
                         }
                     } else if (slot >= 300 && slot < 400) {
                         s_digitalAxisBindings[slot - 300] = buf;
+                    } else if (slot >= 700 && slot < 705) {
+                        s_digitalAimBindings[slot - 700] = buf;
+                    } else if (slot == 705) {
+                        s_toggleAimModeBinding = buf;
                     } else if (slot >= 400 && slot < 600) {
                         int idx = slot - 400;
                         if (idx < (int)s_customBindings.size()) {
@@ -550,6 +634,26 @@ static void SaveBindingsToINI() {
             sprintf_s(sensStr, "%.2f", s_axisSensitivity[i]);
             ini.SetValue("Hardware", kAxisSlots[i].sensitivityKey, sensStr);
         }
+        if (kAxisSlots[i].saturationKey) {
+            char satStr[32];
+            sprintf_s(satStr, "%.2f", s_axisSaturation[i]);
+            ini.SetValue("Hardware", kAxisSlots[i].saturationKey, satStr);
+        }
+    }
+
+    // Throttle calibration ([Normalization] section)
+    {
+        char plateauStr[32];
+        sprintf_s(plateauStr, "%.2f", s_idlePlateau);
+        ini.SetValue("Normalization", "fIdlePlateau", plateauStr);
+
+        char centerStr[32];
+        sprintf_s(centerStr, "%ld", s_detentCenter);
+        ini.SetValue("Normalization", "iDetentCenter", centerStr);
+
+        char dzStr[32];
+        sprintf_s(dzStr, "%ld", s_detentDeadzone);
+        ini.SetValue("Normalization", "iDetentDeadzone", dzStr);
     }
 
     // Control buttons
@@ -583,6 +687,45 @@ static void SaveBindingsToINI() {
     sprintf_s(strafeStr, "%.2f", s_digitalStrafeValue);
     ini.SetValue("DigitalAxes", "fDigitalRollValue", rollStr);
     ini.SetValue("DigitalAxes", "fDigitalStrafeValue", strafeStr);
+
+    // Aim settings ([Aim] section)
+    ini.SetBoolValue("Aim", "bSourceObjectAim", s_sourceObjectAim);
+    {
+        char aimSensStr[32];
+        sprintf_s(aimSensStr, "%.2f", s_aimSensitivity);
+        ini.SetValue("Aim", "fAimSensitivity", aimSensStr);
+    }
+    ini.SetBoolValue("Aim", "bMirrorFlightToAim", s_mirrorFlightToAim);
+    for (int i = 0; i < kNumAimAxisSlots; i++) {
+        if (s_aimAxisBindings[i] != "(unbound)") {
+            ini.SetValue("Aim", kAimAxisSlots[i].iniKey, s_aimAxisBindings[i].c_str());
+        } else {
+            ini.SetValue("Aim", kAimAxisSlots[i].iniKey, "");
+        }
+        ini.SetBoolValue("Aim", kAimAxisSlots[i].invertIniKey, s_aimAxisInvert[i]);
+        char sensStr[32];
+        sprintf_s(sensStr, "%.2f", s_aimAxisSensitivity[i]);
+        ini.SetValue("Aim", kAimAxisSlots[i].sensitivityKey, sensStr);
+    }
+
+    // Digital aim buttons ([Aim] section)
+    for (int i = 0; i < kNumDigitalAimSlots; i++) {
+        if (s_digitalAimBindings[i] != "(unbound)") {
+            ini.SetValue("Aim", kDigitalAimSlots[i].iniKey, s_digitalAimBindings[i].c_str());
+        } else {
+            ini.SetValue("Aim", kDigitalAimSlots[i].iniKey, "-1");
+        }
+    }
+    {
+        char dAimStr[32];
+        sprintf_s(dAimStr, "%.2f", s_digitalAimValue);
+        ini.SetValue("Aim", "fDigitalAimValue", dAimStr);
+    }
+    if (s_toggleAimModeBinding != "(unbound)") {
+        ini.SetValue("Aim", "iToggleAimModeButton", s_toggleAimModeBinding.c_str());
+    } else {
+        ini.SetValue("Aim", "iToggleAimModeButton", "-1");
+    }
 
     // Write calibration data
     ini.Delete("Calibration", nullptr); // Clear entire section
@@ -627,8 +770,10 @@ static void SaveBindingsToINI() {
 // Helper: draw a binding row with Bind/Clear buttons
 // ============================================================================
 static void DrawBindingRow(const char* label, std::string& binding, int captureSlot, bool isAxis) {
-    ImGui::Text("%-22s", label);
-    ImGui::SameLine(180);
+    if (label[0] != '\0') {
+        ImGui::Text("%-22s", label);
+        ImGui::SameLine(180);
+    }
 
     ImVec4 color = (binding == "(unbound)")
         ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f)
@@ -863,18 +1008,25 @@ void BindingWizard::Draw() {
         if (ImGui::BeginTabItem("Axes & Settings")) {
             ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Flight Axis Assignments");
             ImGui::TextWrapped("Click 'Bind' then move the physical axis you want to assign.");
+            ImGui::SameLine(500);
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), ">> Save & Apply to commit changes");
             ImGui::Separator();
             ImGui::Spacing();
-
-            // Header row
-            ImGui::Text("%-22s %-32s %-8s %-12s", "Axis", "Binding", "Invert", "Sensitivity");
-            ImGui::Separator();
 
             for (int i = 0; i < kNumAxisSlots; i++) {
                 ImGui::PushID(i);
 
-                // Binding + Bind/Clear
-                DrawBindingRow(kAxisSlots[i].label, s_axisBindings[i], i, true);
+                // Axis group header: colored label + thin separator
+                if (i > 0) {
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                }
+                ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", kAxisSlots[i].label);
+                ImGui::SameLine(180);
+
+                // Binding + Bind/Clear (inline with axis label)
+                DrawBindingRow("", s_axisBindings[i], i, true);
 
                 // Inversion checkbox on same line
                 if (kAxisSlots[i].invertIniKey) {
@@ -889,6 +1041,176 @@ void BindingWizard::Draw() {
                     ImGui::SliderFloat("Sens", &s_axisSensitivity[i], 0.1f, 3.0f, "%.2f");
                     ImGui::PopItemWidth();
                     ImGui::Unindent(180);
+                }
+
+                // Saturation slider + visual actuation range graph
+                if (kAxisSlots[i].saturationKey) {
+                    ImGui::Indent(180);
+                    ImGui::PushItemWidth(120);
+                    ImGui::SliderFloat("Sat", &s_axisSaturation[i], 0.05f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                    s_axisSaturation[i] = std::clamp(s_axisSaturation[i], 0.05f, 1.0f);
+                    ImGui::PopItemWidth();
+
+                    // Visual actuation range graph
+                    ImGui::SameLine();
+                    {
+                        float barWidth = 200.0f;
+                        float barHeight = 14.0f;
+                        float sat = s_axisSaturation[i];
+                        ImVec2 pos = ImGui::GetCursorScreenPos();
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+                        ImU32 colDead = IM_COL32(80, 30, 30, 200);
+                        ImU32 colActive = IM_COL32(50, 200, 80, 220);
+
+                        // Background: dead zone color (entire bar)
+                        dl->AddRectFilled(pos, ImVec2(pos.x + barWidth, pos.y + barHeight), colDead, 3.0f);
+
+                        bool isThrottle = (i == 0);
+                        if (isThrottle) {
+                            // Throttle (unipolar): red on both ends
+                            // Left dead = idle plateau, right dead = saturation cap
+                            float idleEnd = s_idlePlateau * barWidth;
+                            float satEnd = sat * barWidth;
+                            if (satEnd > idleEnd) {
+                                dl->AddRectFilled(
+                                    ImVec2(pos.x + idleEnd, pos.y),
+                                    ImVec2(pos.x + satEnd, pos.y + barHeight),
+                                    colActive, 3.0f);
+                            }
+
+                            // Resolve throttle device from wizard's local binding (works before Save)
+                            BindingRef tRef = ParseBindingRef(s_axisBindings[0].c_str(), -1);
+                            int tDevIdx = tRef.deviceIndex;
+                            int tUsage = tRef.value;
+                            if (tDevIdx < 0 && tRef.IsValid() && tUsage > 0) {
+                                if (tRef.HasDevice()) {
+                                    tDevIdx = DeviceManager::ResolveByName(tRef.deviceName);
+                                } else if (DeviceManager::GetDeviceCount() > 0) {
+                                    tDevIdx = 0;
+                                }
+                            }
+
+                            // Normalization helper: raw value → [0,1] using calibration or 0-65535
+                            auto NormThrottleRaw = [&](long rawVal) -> float {
+                                if (tDevIdx >= 0) {
+                                    int calibKey = (tDevIdx << 8) | tUsage;
+                                    auto calibIt = s_calibData.find(calibKey);
+                                    if (calibIt != s_calibData.end()) {
+                                        long cmin = calibIt->second.first;
+                                        long cmax = calibIt->second.second;
+                                        long crange = cmax - cmin;
+                                        if (crange > 0) return std::clamp((float)(rawVal - cmin) / (float)crange, 0.0f, 1.0f);
+                                    }
+                                }
+                                return std::clamp(rawVal / 65535.0f, 0.0f, 1.0f);
+                            };
+
+                            // Center marker (cyan line)
+                            float centerNorm = NormThrottleRaw(s_detentCenter);
+                            float centerX = centerNorm * barWidth;
+                            dl->AddLine(
+                                ImVec2(pos.x + centerX, pos.y),
+                                ImVec2(pos.x + centerX, pos.y + barHeight),
+                                IM_COL32(80, 220, 240, 220), 2.0f);
+
+                            // Deadzone around center (orange shading)
+                            float dzNorm = (float)s_detentDeadzone / 65535.0f;
+                            if (tDevIdx >= 0) {
+                                int calibKey = (tDevIdx << 8) | tUsage;
+                                auto calibIt = s_calibData.find(calibKey);
+                                if (calibIt != s_calibData.end()) {
+                                    long crange = calibIt->second.second - calibIt->second.first;
+                                    if (crange > 0) dzNorm = (float)s_detentDeadzone / (float)crange;
+                                }
+                            }
+                            if (dzNorm > 0.001f) {
+                                float dzLeft = std::max(0.0f, centerNorm - dzNorm) * barWidth;
+                                float dzRight = std::min(1.0f, centerNorm + dzNorm) * barWidth;
+                                dl->AddRectFilled(
+                                    ImVec2(pos.x + dzLeft, pos.y),
+                                    ImVec2(pos.x + dzRight, pos.y + barHeight),
+                                    IM_COL32(200, 100, 30, 140), 0.0f);
+                            }
+
+                            // Live axis position (yellow marker)
+                            if (tDevIdx >= 0) {
+                                const auto* st = DeviceManager::GetCachedState(tDevIdx);
+                                if (st) {
+                                    long rawVal = GetAxisFromState(st, tUsage);
+                                    float liveNorm = NormThrottleRaw(rawVal);
+                                    float liveX = liveNorm * barWidth;
+                                    dl->AddLine(
+                                        ImVec2(pos.x + liveX, pos.y - 1),
+                                        ImVec2(pos.x + liveX, pos.y + barHeight + 1),
+                                        IM_COL32(255, 220, 50, 255), 2.0f);
+
+                                    // "Set Center" capture: update detent to current position
+                                    if (s_calibratingCenter) {
+                                        s_detentCenter = rawVal;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Bipolar axes: red on both ends (saturation dead zones)
+                            float cappedEdge = ((1.0f - sat) / 2.0f) * barWidth;
+                            dl->AddRectFilled(
+                                ImVec2(pos.x + cappedEdge, pos.y),
+                                ImVec2(pos.x + barWidth - cappedEdge, pos.y + barHeight),
+                                colActive, 3.0f);
+                        }
+
+                        // Border
+                        dl->AddRect(pos, ImVec2(pos.x + barWidth, pos.y + barHeight), IM_COL32(120, 120, 120, 180), 3.0f);
+                        ImGui::Dummy(ImVec2(barWidth, barHeight));
+
+                        // Percentage label
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "%.0f%%", sat * 100.0f);
+                    }
+
+                    ImGui::Unindent(180);
+
+                    // Throttle-specific calibration controls
+                    if (i == 0) {
+                        ImGui::Indent(180);
+
+                        // Idle plateau slider
+                        ImGui::PushItemWidth(120);
+                        ImGui::SliderFloat("Idle Zone", &s_idlePlateau, 0.0f, 0.20f, "%.2f");
+                        s_idlePlateau = std::clamp(s_idlePlateau, 0.0f, 0.20f);
+                        ImGui::PopItemWidth();
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Bottom dead zone");
+
+                        // Set Center button + live readout
+                        if (s_calibratingCenter) {
+                            if (ImGui::Button("Done##center")) {
+                                s_calibratingCenter = false;
+                                WizLog("Center set to: " + std::to_string(s_detentCenter));
+                            }
+                            ImGui::SameLine();
+                            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), "Move throttle to center... %ld", s_detentCenter);
+                        } else {
+                            if (ImGui::Button("Set Center")) {
+                                s_calibratingCenter = true;
+                            }
+                            ImGui::SameLine();
+                            ImGui::Text("Center: %ld", s_detentCenter);
+                        }
+
+                        // Deadzone slider (raw units, but show as percentage)
+                        ImGui::PushItemWidth(120);
+                        float dzPct = (float)s_detentDeadzone / 65535.0f * 100.0f;
+                        if (ImGui::SliderFloat("Deadzone", &dzPct, 0.0f, 10.0f, "%.1f%%")) {
+                            s_detentDeadzone = (long)(dzPct / 100.0f * 65535.0f);
+                        }
+                        ImGui::PopItemWidth();
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Around center (%ld raw)", s_detentDeadzone);
+
+                        ImGui::Unindent(180);
+                    }
                 }
 
                 ImGui::PopID();
@@ -1035,6 +1357,135 @@ void BindingWizard::Draw() {
 
             if (s_customBindings.empty()) {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No custom bindings. Click 'Add Binding' or 'Add Menu Cluster' to get started.");
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // ==== TAB 7: Aiming ====
+        if (ImGui::BeginTabItem("Aiming")) {
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Aiming System");
+            ImGui::TextWrapped(
+                "Controls how the aiming reticle and ship steering interact. "
+                "Enable the aim system, then choose a mode below.");
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // Master enable
+            ImGui::Checkbox("Enable Aim System", &s_sourceObjectAim);
+            if (!s_sourceObjectAim) {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                    "Aim system disabled. Ship steering uses cluster gates only (legacy mode).");
+            }
+
+            if (s_sourceObjectAim) {
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Mode determination: if aim axes are bound → independent, else → aim-driven steering
+                bool hasAimAxes = (s_aimAxisBindings[0] != "(unbound)") || (s_aimAxisBindings[1] != "(unbound)");
+
+                // Mode header
+                if (hasAimAxes) {
+                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.6f, 1.0f), "Mode: Independent Aim & Steer");
+                    ImGui::TextWrapped(
+                        "The flight stick controls ship rotation directly. "
+                        "The bound aim axes below independently drive the weapon reticle. "
+                        "Clear aim axes to switch to Aim-Driven Steering.");
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Mode: Aim-Driven Steering");
+                    ImGui::TextWrapped(
+                        "The flight stick drives both the aiming reticle and ship steering "
+                        "through the mouse accumulator pathway. Bind aim axes below to "
+                        "switch to Independent Aim & Steer.");
+
+                    // Mirror sensitivity (only relevant in aim-driven steering mode)
+                    ImGui::Spacing();
+                    ImGui::PushItemWidth(120);
+                    ImGui::SliderFloat("Steering Sensitivity", &s_aimSensitivity, 0.1f, 3.0f, "%.2f");
+                    ImGui::PopItemWidth();
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Scales flight stick input to reticle/steering");
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Aim axis bindings
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Aim Axis Bindings");
+                ImGui::TextWrapped(
+                    "Bind a second analog input (e.g., throttle thumbstick) to independently "
+                    "drive the aiming reticle.");
+                ImGui::Spacing();
+
+                for (int i = 0; i < kNumAimAxisSlots; i++) {
+                    ImGui::PushID(6000 + i);
+
+                    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", kAimAxisSlots[i].label);
+                    ImGui::SameLine(180);
+
+                    // Binding row (uses slot 600+i)
+                    DrawBindingRow("", s_aimAxisBindings[i], 600 + i, true);
+
+                    // Inversion checkbox
+                    ImGui::SameLine(640);
+                    ImGui::Checkbox("Inv", &s_aimAxisInvert[i]);
+
+                    // Sensitivity slider
+                    ImGui::Indent(180);
+                    ImGui::PushItemWidth(120);
+                    ImGui::SliderFloat("Sens", &s_aimAxisSensitivity[i], 0.1f, 3.0f, "%.2f");
+                    ImGui::PopItemWidth();
+                    ImGui::Unindent(180);
+
+                    if (i < kNumAimAxisSlots - 1) {
+                        ImGui::Spacing();
+                        ImGui::Separator();
+                        ImGui::Spacing();
+                    }
+
+                    ImGui::PopID();
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Digital aim override (5-way)
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Digital Aim Override (5-Way)");
+                ImGui::TextWrapped(
+                    "Bind buttons to snap the aiming reticle to fixed positions. "
+                    "Useful for hat switches. Center snaps back to (0,0).");
+                ImGui::Spacing();
+
+                for (int i = 0; i < kNumDigitalAimSlots; i++) {
+                    ImGui::PushID(7000 + i);
+                    DrawBindingRow(kDigitalAimSlots[i].label, s_digitalAimBindings[i], 700 + i, false);
+                    ImGui::PopID();
+                }
+
+                ImGui::Spacing();
+                ImGui::PushItemWidth(120);
+                ImGui::SliderFloat("Aim Value", &s_digitalAimValue, 0.1f, 1.0f, "%.2f");
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Deflection amount when pressed");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Toggle aim mode button
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Aim Mode Toggle");
+                ImGui::TextWrapped(
+                    "Bind a button to toggle between Aim-Driven Steering and "
+                    "Independent Aim at runtime. Only useful when aim axes are bound.");
+                ImGui::Spacing();
+                ImGui::PushID(7005);
+                DrawBindingRow("Toggle Mode", s_toggleAimModeBinding, 705, false);
+                ImGui::PopID();
             }
 
             ImGui::EndTabItem();

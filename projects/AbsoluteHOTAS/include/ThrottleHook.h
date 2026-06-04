@@ -32,12 +32,21 @@ public:
     static bool IsSilenceEnabled();
 
     // Engine-timed rotational gates for the validated +58/+60/+64 writer block.
-    static void SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled = true, float vertical = 0.0f, bool verticalEnabled = false);
+    static void SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled = true, float vertical = 0.0f, bool verticalEnabled = false, bool yawEnabled = true, bool pitchEnabled = true);
     static void SetManualLaneOverride(uintptr_t offset, float value, bool enabled);
     static int GetManualGateCount();
     static uintptr_t GetManualGateAddress(int index);
     static uintptr_t GetManualGateOffset(int index);
     static void SetManualGateOverride(int index, float value, bool enabled);
+
+    // Drive the aiming reticle via source-object mouse accumulator writes.
+    // yaw/pitch are pre-scaled values in [-200.0, +200.0] (mouse accumulator range).
+    // When enabled, the values are written to g_capturedSourceR13+0x4C (yaw)
+    // and g_capturedSourceR13+0x50 (pitch) each poll iteration, feeding the
+    // game's mouse-driven aiming pipeline which drives the reticle independently
+    // of controller mode state.
+    static void SetSourceObjectAim(float yaw, float pitch, bool enabled);
+    static bool IsSourcePtrValid();
 
 private:
     static std::atomic<uintptr_t> s_basePtr;

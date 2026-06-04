@@ -542,6 +542,14 @@ void ThrottleController::LoadConfig() {
     s_config.fStrafeSensitivity = (float)ini.GetDoubleValue("Hardware", "fStrafeSensitivity", 1.0);
     s_config.fReverseSensitivity = (float)ini.GetDoubleValue("Hardware", "fReverseSensitivity", 1.0);
 
+    s_config.fThrottleSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fThrottleSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fPitchSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fPitchSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fYawSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fYawSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fRollSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fRollSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fStrafeSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fStrafeVertSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeVertSaturation", 1.0), 0.05f, 1.0f);
+    s_config.fReverseSaturation = std::clamp((float)ini.GetDoubleValue("Hardware", "fReverseSaturation", 1.0), 0.05f, 1.0f);
+
     s_config.bInvertPitch = ini.GetBoolValue("Hardware", "bInvertPitch", true);
     s_config.bInvertThrottle = ini.GetBoolValue("Hardware", "bInvertThrottle", false);
     s_config.bInvertYaw = ini.GetBoolValue("Hardware", "bInvertYaw", false);
@@ -555,7 +563,7 @@ void ThrottleController::LoadConfig() {
     s_config.toggleWizardButton = ParseBindingRef(ini.GetValue("Buttons", "iToggleWizardButton", ""), -1);
     s_config.alwaysOn = ini.GetBoolValue("Buttons", "bAlwaysOn", true);
     
-    s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 16384);
+    s_config.detentCenter = ini.GetLongValue("Normalization", "iDetentCenter", 32768);
     s_config.detentDeadzone = ini.GetLongValue("Normalization", "iDetentDeadzone", 500);
     s_config.reverseEnabled = ini.GetBoolValue("Normalization", "bReverseEnabled", false);
     s_config.unipolarMode = ini.GetBoolValue("Normalization", "bUnipolarMode", true);
@@ -582,6 +590,36 @@ void ThrottleController::LoadConfig() {
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
     LoadShipButtonBindings(ini);
+
+    // [Aim] - Experimental source-object reticle injection
+    s_config.bSourceObjectAim  = ini.GetBoolValue("Aim", "bSourceObjectAim", false);
+    s_config.fAimSensitivity   = (float)ini.GetDoubleValue("Aim", "fAimSensitivity", 1.0);
+    s_config.aimYawAxis        = ParseBindingRef(ini.GetValue("Aim", "iAimYawAxis", nullptr), -1);
+    s_config.aimPitchAxis      = ParseBindingRef(ini.GetValue("Aim", "iAimPitchAxis", nullptr), -1);
+    s_config.fAimYawSensitivity   = (float)ini.GetDoubleValue("Aim", "fAimYawSensitivity", 1.0);
+    s_config.fAimPitchSensitivity = (float)ini.GetDoubleValue("Aim", "fAimPitchSensitivity", 1.0);
+    s_config.bInvertAimYaw     = ini.GetBoolValue("Aim", "bInvertAimYaw", false);
+    s_config.bInvertAimPitch   = ini.GetBoolValue("Aim", "bInvertAimPitch", false);
+    s_config.bMirrorFlightToAim = ini.GetBoolValue("Aim", "bMirrorFlightToAim", true);
+    s_config.digitalAimLeftButton  = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimLeftButton", nullptr), -1);
+    s_config.digitalAimRightButton = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimRightButton", nullptr), -1);
+    s_config.digitalAimUpButton    = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimUpButton", nullptr), -1);
+    s_config.digitalAimDownButton  = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimDownButton", nullptr), -1);
+    s_config.digitalAimCenterButton = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimCenterButton", nullptr), -1);
+    s_config.fDigitalAimValue = (float)ini.GetDoubleValue("Aim", "fDigitalAimValue", 1.0);
+    s_config.toggleAimModeButton = ParseBindingRef(ini.GetValue("Aim", "iToggleAimModeButton", nullptr), -1);
+    {
+        char aimMsg[256];
+        snprintf(aimMsg, sizeof(aimMsg),
+            "[Aim] bSourceObjectAim=%s fAimSensitivity=%.2f aimYaw=%d aimPitch=%d mirror=%s",
+            s_config.bSourceObjectAim ? "true" : "false",
+            s_config.fAimSensitivity,
+            s_config.aimYawAxis.value,
+            s_config.aimPitchAxis.value,
+            s_config.bMirrorFlightToAim ? "true" : "false");
+        RuntimePaths::AppendLogAlways("[Controller]", aimMsg);
+    }
+
 
     // Load per-axis calibration overrides from [Calibration]
     s_config.axisCalibration.clear();
@@ -627,7 +665,10 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
         if (norm < s_config.idlePlateau) return 0.0f;
         
         // Scale the remaining range [idlePlateau, 1.0] -> [0.0, 1.0]
-        return (norm - s_config.idlePlateau) / (1.0f - s_config.idlePlateau);
+        float result = (norm - s_config.idlePlateau) / (1.0f - s_config.idlePlateau);
+
+        // Apply throttle saturation: rescale so full output is reached at saturation % of deflection
+        return std::clamp(result / s_config.fThrottleSaturation, 0.0f, 1.0f);
     }
 
     if (rawValue >= center - deadzone && rawValue <= center + deadzone) return 0.0f;
@@ -666,6 +707,11 @@ static float SafeReadThrottle(uintptr_t basePtr) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
 }
 
+static float SafeReadFloat(uintptr_t addr) {
+    __try { return *(volatile float*)(addr); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
+}
+
 #pragma warning(pop)
 
 // ---- Global Discovery State ----
@@ -700,9 +746,11 @@ static void DisarmFlightControlState() {
     s_throttleBurstValue = 0.0f;
     ReleaseAllShipButtonOutputs();
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
+    ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
     ThrottleHook::SetCaptureEnabled(false);
     ThrottleHook::ClearCandidates();
+
 }
 
 static void ArmDiscoveryForReacquire(const char* reason) {
@@ -769,6 +817,8 @@ void ThrottleController::ControlLoop() {
     ResolveAndOpen(s_config.strafeLatAxis);
     ResolveAndOpen(s_config.strafeVertAxis);
     ResolveAndOpen(s_config.reverseAxis);
+    ResolveAndOpen(s_config.aimYawAxis);
+    ResolveAndOpen(s_config.aimPitchAxis);
 
     ResolveAndOpen(s_config.activateButton);
     ResolveAndOpen(s_config.stopButton);
@@ -781,6 +831,13 @@ void ThrottleController::ControlLoop() {
     ResolveAndOpen(s_config.digitalStrafeRightButton);
     ResolveAndOpen(s_config.digitalStrafeUpButton);
     ResolveAndOpen(s_config.digitalStrafeDownButton);
+
+    ResolveAndOpen(s_config.digitalAimLeftButton);
+    ResolveAndOpen(s_config.digitalAimRightButton);
+    ResolveAndOpen(s_config.digitalAimUpButton);
+    ResolveAndOpen(s_config.digitalAimDownButton);
+    ResolveAndOpen(s_config.digitalAimCenterButton);
+    ResolveAndOpen(s_config.toggleAimModeButton);
 
     for (auto& sb : s_shipButtonBindings) {
         ResolveAndOpen(sb.buttonRef);
@@ -853,6 +910,8 @@ void ThrottleController::ControlLoop() {
             ResolveAndOpen(s_config.strafeLatAxis);
             ResolveAndOpen(s_config.strafeVertAxis);
             ResolveAndOpen(s_config.reverseAxis);
+            ResolveAndOpen(s_config.aimYawAxis);
+            ResolveAndOpen(s_config.aimPitchAxis);
 
             ResolveAndOpen(s_config.activateButton);
             ResolveAndOpen(s_config.stopButton);
@@ -865,6 +924,13 @@ void ThrottleController::ControlLoop() {
             ResolveAndOpen(s_config.digitalStrafeRightButton);
             ResolveAndOpen(s_config.digitalStrafeUpButton);
             ResolveAndOpen(s_config.digitalStrafeDownButton);
+
+            ResolveAndOpen(s_config.digitalAimLeftButton);
+            ResolveAndOpen(s_config.digitalAimRightButton);
+            ResolveAndOpen(s_config.digitalAimUpButton);
+            ResolveAndOpen(s_config.digitalAimDownButton);
+            ResolveAndOpen(s_config.digitalAimCenterButton);
+            ResolveAndOpen(s_config.toggleAimModeButton);
 
             for (auto& sb : s_shipButtonBindings) {
                 ResolveAndOpen(sb.buttonRef);
@@ -1019,6 +1085,7 @@ void ThrottleController::ControlLoop() {
                 value = s_config.bInvertReverse ? (1.0f - value) : value;
                 value = std::clamp(value * s_config.fReverseSensitivity, 0.0f, 1.0f);
                 value = ApplyUnipolarDeadzone(value, s_config.reverseDeadzone);
+                value = std::clamp(value / s_config.fReverseSaturation, 0.0f, 1.0f);
             }
 
             return std::clamp(value, 0.0f, 1.0f);
@@ -1064,7 +1131,7 @@ void ThrottleController::ControlLoop() {
         }
         // else: throttle axis unbound — leave throttle at 0 (no injection)
         
-        auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert) {
+        auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert, float saturation = 1.0f) {
             if (!ref.IsValid() || ref.value <= 0) return 0.0f; // Unbound = neutral
             float raw = (float)GetRawAxis(ref);
             float aMin = 0.0f, aMax = 65535.0f;
@@ -1085,7 +1152,8 @@ void ThrottleController::ControlLoop() {
             float val = (raw - center) / halfRange;
             val *= sens;
             val = invert ? -val : val;
-            return std::clamp(val, -1.0f, 1.0f);
+            float sat = std::clamp(saturation, 0.05f, 1.0f);
+            return std::clamp(val / sat, -1.0f, 1.0f);
         };
 
         auto ApplyDeadzone = [](float value, float deadzone) {
@@ -1095,15 +1163,15 @@ void ThrottleController::ControlLoop() {
             return sign * ((std::abs(value) - dz) / (1.0f - dz));
         };
 
-        float pitch = NormBipolar(s_config.pitchAxis, s_config.fPitchSensitivity, s_config.bInvertPitch);
-        float yaw   = NormBipolar(s_config.yawAxis,   s_config.fYawSensitivity,   s_config.bInvertYaw);
-        float roll  = NormBipolar(s_config.rollAxis,  s_config.fRollSensitivity,  s_config.bInvertRoll);
+        float pitch = NormBipolar(s_config.pitchAxis, s_config.fPitchSensitivity, s_config.bInvertPitch, s_config.fPitchSaturation);
+        float yaw   = NormBipolar(s_config.yawAxis,   s_config.fYawSensitivity,   s_config.bInvertYaw,   s_config.fYawSaturation);
+        float roll  = NormBipolar(s_config.rollAxis,  s_config.fRollSensitivity,  s_config.bInvertRoll,  s_config.fRollSaturation);
         if (IsButtonPressed(s_config.digitalRollLeftButton)) roll -= s_config.digitalRollValue;
         if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
         roll = std::clamp(roll, -1.0f, 1.0f);
 
-        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat), 0.05f);
-        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert), 0.05f);
+        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeLat, s_config.fStrafeSaturation), 0.05f);
+        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert, s_config.fStrafeVertSaturation), 0.05f);
         if (IsButtonPressed(s_config.digitalStrafeLeftButton)) strafeX -= s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeRightButton)) strafeX += s_config.digitalStrafeValue;
         if (IsButtonPressed(s_config.digitalStrafeUpButton)) strafeY += s_config.digitalStrafeValue;
@@ -1204,6 +1272,29 @@ void ThrottleController::ControlLoop() {
                 bool strafeLatOverrideActive = std::abs(strafeX) > 0.05f;
                 bool strafeVertOverrideActive = std::abs(strafeY) > 0.05f;
                 float lateral = strafeLatOverrideActive ? strafeX : roll;
+                bool sourceAimActive = s_config.bSourceObjectAim && ThrottleHook::IsSourcePtrValid();
+                bool hasSeparateAimAxes = s_config.aimYawAxis.IsValid() || s_config.aimPitchAxis.IsValid();
+
+                // Toggle aim mode button: edge-detected toggle between independent and aim-driven
+                {
+                    static bool s_aimModeOverride = false; // true = force aim-driven even with axes bound
+                    static bool s_toggleAimModePrev = false;
+                    bool curToggleAimMode = IsButtonPressed(s_config.toggleAimModeButton);
+                    if (curToggleAimMode && !s_toggleAimModePrev) {
+                        s_aimModeOverride = !s_aimModeOverride;
+                        RuntimePaths::AppendLogAlways("[Controller]",
+                            s_aimModeOverride ? "[Aim] Toggled to: Aim-Driven Steering"
+                                             : "[Aim] Toggled to: Independent Aim & Steer");
+                    }
+                    s_toggleAimModePrev = curToggleAimMode;
+                    // Override: when toggled, treat as if no separate aim axes
+                    if (s_aimModeOverride) hasSeparateAimAxes = false;
+                }
+
+                // Only suppress cluster gates when source aim is active WITHOUT separate axes
+                // (i.e., aim-driven steering where engine derives steering from mouse accumulators).
+                // With separate aim axes, the flight stick keeps direct cluster authority.
+                bool suppressClusterForAim = sourceAimActive && !hasSeparateAimAxes;
                 ThrottleHook::SetRotationalOverride(
                     lateral,
                     yaw,
@@ -1211,7 +1302,111 @@ void ThrottleController::ControlLoop() {
                     true,
                     strafeLatOverrideActive || rollOverrideActive,
                     strafeY,
-                    strafeVertOverrideActive);
+                    strafeVertOverrideActive,
+                    !suppressClusterForAim,   // yawEnabled: re-enabled with separate aim axes
+                    !suppressClusterForAim);  // pitchEnabled: re-enabled with separate aim axes
+
+                // Source-object reticle injection: drive the aiming reticle by writing
+                // aim axes scaled to mouse accumulator range into source+0x4C (yaw) /
+                // source+0x50 (pitch), range [-200.0, +200.0]. The mouse accumulator
+                // pathway works regardless of controller mode state, unlike the gamepad
+                // input lanes (+0x44/+0x48). If the source pointer is not yet valid
+                // or the feature is disabled, this is a no-op.
+                if (s_config.bSourceObjectAim) {
+                    static bool s_aimDiagLogged = false;
+                    if (!s_aimDiagLogged) {
+                        s_aimDiagLogged = true;
+                        char diagMsg[256];
+                        snprintf(diagMsg, sizeof(diagMsg),
+                            "[Aim] first fire: srcPtrValid=%s srcPtr=0x%llX writeAddr4C=0x%llX writeAddr50=0x%llX separateAxes=%s",
+                            ThrottleHook::IsSourcePtrValid() ? "YES" : "NO",
+                            (unsigned long long)ThrottleHook::GetSourceBasePtr(),
+                            (unsigned long long)(ThrottleHook::GetSourceBasePtr() + 0x4C),
+                            (unsigned long long)(ThrottleHook::GetSourceBasePtr() + 0x50),
+                            hasSeparateAimAxes ? "YES" : "NO");
+                        RuntimePaths::AppendLogAlways("[Controller]", diagMsg);
+                    }
+                    if (ThrottleHook::IsSourcePtrValid()) {
+                        float aimYaw, aimPitch;
+
+                        if (hasSeparateAimAxes) {
+                            // Separated aiming: poll dedicated aim axes with per-axis sensitivity
+                            aimYaw   = NormBipolar(s_config.aimYawAxis,
+                                                   s_config.fAimYawSensitivity,
+                                                   s_config.bInvertAimYaw);
+                            aimPitch = NormBipolar(s_config.aimPitchAxis,
+                                                   s_config.fAimPitchSensitivity,
+                                                   s_config.bInvertAimPitch);
+                        } else if (s_config.bMirrorFlightToAim) {
+                            // Mirror mode: use flight stick axes for aiming
+                            aimYaw   = yaw   * s_config.fAimSensitivity;
+                            aimPitch = pitch * s_config.fAimSensitivity;
+                        } else {
+                            // No aim input: lock reticle at center
+                            aimYaw   = 0.0f;
+                            aimPitch = 0.0f;
+                        }
+
+                        // Digital aim override: 5-way directional buttons
+                        bool digitalAimActive = false;
+                        if (IsButtonPressed(s_config.digitalAimCenterButton)) {
+                            // Center overrides everything
+                            aimYaw   = 0.0f;
+                            aimPitch = 0.0f;
+                            digitalAimActive = true;
+                        } else {
+                            float dAimY = 0.0f, dAimP = 0.0f;
+                            if (IsButtonPressed(s_config.digitalAimLeftButton))  dAimY -= s_config.fDigitalAimValue;
+                            if (IsButtonPressed(s_config.digitalAimRightButton)) dAimY += s_config.fDigitalAimValue;
+                            if (IsButtonPressed(s_config.digitalAimUpButton))    dAimP -= s_config.fDigitalAimValue;
+                            if (IsButtonPressed(s_config.digitalAimDownButton))  dAimP += s_config.fDigitalAimValue;
+                            if (dAimY != 0.0f || dAimP != 0.0f) {
+                                aimYaw   = dAimY;
+                                aimPitch = dAimP;
+                                digitalAimActive = true;
+                            }
+                        }
+
+                        // Circular normalization: clamp vector magnitude to 1.0 before
+                        // scaling to the mouse accumulator range. Without this, diagonal
+                        // deflection produces magnitude √2 ≈ 1.414 which exceeds the
+                        // game's circular limit and causes snap-back at the corners.
+                        {
+                            float mag = std::sqrt(aimYaw * aimYaw + aimPitch * aimPitch);
+                            if (mag > 1.0f) {
+                                aimYaw   /= mag;
+                                aimPitch /= mag;
+                            }
+                        }
+
+                        // Scale to mouse accumulator range [-200.0, +200.0]
+                        aimYaw   *= 200.0f;
+                        aimPitch *= 200.0f;
+
+                        ThrottleHook::SetSourceObjectAim(aimYaw, aimPitch, true);
+
+                        // Periodic diagnostics (only when bLogThrottle is enabled)
+                        if (s_config.logThrottle) {
+                            static uint64_t s_aimLogCounter = 0;
+                            if (++s_aimLogCounter % (s_config.pollRateHz * 2) == 1) {
+                                uintptr_t src = ThrottleHook::GetSourceBasePtr();
+                                float rb4C = SafeReadFloat(src + 0x4C);
+                                float rb50 = SafeReadFloat(src + 0x50);
+                                float rb54 = SafeReadFloat(src + 0x54);
+                                float rb58 = SafeReadFloat(src + 0x58);
+                                char diagBuf[256];
+                                snprintf(diagBuf, sizeof(diagBuf),
+                                    "[Aim] mode=%s wrote Y=%.3f P=%.3f | readback +4C=%.3f +50=%.3f +54=%.3f +58=%.3f",
+                                    hasSeparateAimAxes ? "separate" : (s_config.bMirrorFlightToAim ? "mirror" : "center"),
+                                    aimYaw, aimPitch, rb4C, rb50, rb54, rb58);
+                                RuntimePaths::AppendLogAlways("[Controller]", diagBuf);
+                            }
+                        }
+                    } else {
+                        ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, true);
+                    }
+                }
+
                 if (reverseKeyHeld || reverseHeld) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
