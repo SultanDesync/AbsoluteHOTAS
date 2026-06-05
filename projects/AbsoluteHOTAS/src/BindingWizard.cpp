@@ -210,6 +210,13 @@ static std::string s_digitalAimBindings[5];
 static float       s_digitalAimValue = 1.0f;
 static std::string s_toggleAimModeBinding;
 
+// HOSAM (Hands On Stick And Mouse) mode state (maps to [Aim] INI section)
+static bool        s_hosamMode = false;
+static bool        s_alignmentAssist = false;
+static float       s_alignmentRadius = 15.0f;
+static int         s_alignmentIdleMs = 80;
+static float       s_alignmentDecayRate = 4.0f;
+
 // Throttle calibration state (maps to [Normalization] INI section)
 static float       s_idlePlateau = 0.05f;
 static long        s_detentCenter = 32768;
@@ -363,6 +370,13 @@ static void LoadCurrentBindings() {
     s_reverseGateVelocity = cfg.fReverseGateVelocity;
     // Symmetry detection: if idle plateau ≈ (1 - saturation), start in symmetrical mode
     s_symmetricalThrottleDz = (std::abs(cfg.idlePlateau - (1.0f - cfg.fThrottleSaturation)) < 0.01f);
+
+    // HOSAM mode
+    s_hosamMode = cfg.bHOSAMMode;
+    s_alignmentAssist = cfg.bAlignmentAssist;
+    s_alignmentRadius = cfg.fAlignmentRadius;
+    s_alignmentIdleMs = cfg.iAlignmentIdleMs;
+    s_alignmentDecayRate = cfg.fAlignmentDecayRate;
 
     // Throttle calibration
     s_idlePlateau = cfg.idlePlateau;
@@ -842,6 +856,20 @@ static void SaveBindingsToINI() {
         ini.SetValue("DualStick", "fAccumulatorRate", rateStr);
         ini.SetValue("DualStick", "fAccumulatorDecay", decayStr);
         ini.SetValue("DualStick", "fReverseGateVelocity", gateStr);
+    }
+
+    // HOSAM mode ([Aim] section — appended to existing aim writes)
+    ini.SetBoolValue("Aim", "bHOSAMMode", s_hosamMode);
+    ini.SetBoolValue("Aim", "bAlignmentAssist", s_alignmentAssist);
+    {
+        char radStr[32], decayStr2[32];
+        sprintf_s(radStr, "%.1f", s_alignmentRadius);
+        sprintf_s(decayStr2, "%.1f", s_alignmentDecayRate);
+        ini.SetValue("Aim", "fAlignmentRadius", radStr);
+        char idleStr[32];
+        sprintf_s(idleStr, "%d", s_alignmentIdleMs);
+        ini.SetValue("Aim", "iAlignmentIdleMs", idleStr);
+        ini.SetValue("Aim", "fAlignmentDecayRate", decayStr2);
     }
 
     // Write calibration data
@@ -1396,6 +1424,53 @@ void BindingWizard::Draw() {
                                 ImGui::TextWrapped(
                                     "Push forward to accelerate. Pull back to decelerate; "
                                     "at zero throttle, pulling further triggers reverse braking.");
+                            }
+
+                            ImGui::Unindent(12);
+                        }
+                        ImGui::Unindent(20);
+
+                        // --- HOSAM (Hands On Stick And Mouse) Mode Panel ---
+                        ImGui::Spacing();
+                        ImGui::Indent(20);
+                        bool hosamOpen = ImGui::CollapsingHeader("HOSAM Mode (Stick + Mouse)", ImGuiTreeNodeFlags_None);
+                        if (hosamOpen) {
+                            ImGui::Indent(12);
+
+                            ImGui::Checkbox("Enable HOSAM Mode", &s_hosamMode);
+                            if (s_hosamMode) {
+                                ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Active)");
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f),
+                                    "Mouse drives steering. Pitch/Yaw axes released to native mouse.");
+
+                                ImGui::Spacing();
+                                ImGui::Checkbox("Alignment Assist", &s_alignmentAssist);
+                                if (s_alignmentAssist) {
+                                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f),
+                                        "Gently centers steering when mouse is idle near center.");
+
+                                    ImGui::PushItemWidth(180);
+                                    ImGui::SliderFloat("Radius##alignRad", &s_alignmentRadius, 1.0f, 100.0f, "%.0f units");
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "of 200 max");
+
+                                    int idleMs = s_alignmentIdleMs;
+                                    if (ImGui::SliderInt("Idle Time##alignIdle", &idleMs, 10, 500, "%d ms")) {
+                                        s_alignmentIdleMs = idleMs;
+                                    }
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Before decay starts");
+
+                                    ImGui::SliderFloat("Decay Speed##alignDecay", &s_alignmentDecayRate, 0.5f, 20.0f, "%.1f");
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Higher = faster snap");
+                                    ImGui::PopItemWidth();
+                                }
+                            } else {
+                                ImGui::TextWrapped(
+                                    "Use a joystick for throttle/strafe and your mouse for steering. "
+                                    "Pitch and Yaw are released to the game's native mouse pipeline.");
                             }
 
                             ImGui::Unindent(12);

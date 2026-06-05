@@ -108,6 +108,13 @@ public:
         // Toggle button: switches between aim-driven steering and independent aim at runtime
         BindingRef toggleAimModeButton;
 
+        // HOSAM (Hands On Stick And Mouse) — release pitch/yaw gates for native mouse steering
+        bool    bHOSAMMode = false;
+        bool    bAlignmentAssist = false;     // Gently decay mouse to center when idle
+        float   fAlignmentRadius = 15.0f;     // Accumulator radius within which assist triggers (0-200)
+        int     iAlignmentIdleMs = 80;        // Milliseconds mouse must be idle before decay starts
+        float   fAlignmentDecayRate = 4.0f;   // Exponential decay speed (higher = faster centering)
+
         // [DigitalAxes] — Per-binding button references
         BindingRef digitalReverseButton;
         BindingRef digitalRollLeftButton;

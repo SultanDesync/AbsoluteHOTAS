@@ -639,15 +639,25 @@ void ThrottleController::LoadConfig() {
     s_config.digitalAimCenterButton = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimCenterButton", nullptr), -1);
     s_config.fDigitalAimValue = (float)ini.GetDoubleValue("Aim", "fDigitalAimValue", 1.0);
     s_config.toggleAimModeButton = ParseBindingRef(ini.GetValue("Aim", "iToggleAimModeButton", nullptr), -1);
+
+    // HOSAM (Hands On Stick And Mouse)
+    s_config.bHOSAMMode = ini.GetBoolValue("Aim", "bHOSAMMode", false);
+    s_config.bAlignmentAssist = ini.GetBoolValue("Aim", "bAlignmentAssist", false);
+    s_config.fAlignmentRadius = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentRadius", 15.0), 0.0f, 200.0f);
+    s_config.iAlignmentIdleMs = std::clamp((int)ini.GetLongValue("Aim", "iAlignmentIdleMs", 80), 0, 2000);
+    s_config.fAlignmentDecayRate = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentDecayRate", 4.0), 0.1f, 50.0f);
+
     {
-        char aimMsg[256];
+        char aimMsg[512];
         snprintf(aimMsg, sizeof(aimMsg),
-            "[Aim] bSourceObjectAim=%s fAimSensitivity=%.2f aimYaw=%d aimPitch=%d mirror=%s",
+            "[Aim] bSourceObjectAim=%s fAimSensitivity=%.2f aimYaw=%d aimPitch=%d mirror=%s HOSAM=%s align=%s",
             s_config.bSourceObjectAim ? "true" : "false",
             s_config.fAimSensitivity,
             s_config.aimYawAxis.value,
             s_config.aimPitchAxis.value,
-            s_config.bMirrorFlightToAim ? "true" : "false");
+            s_config.bMirrorFlightToAim ? "true" : "false",
+            s_config.bHOSAMMode ? "true" : "false",
+            s_config.bAlignmentAssist ? "true" : "false");
         RuntimePaths::AppendLogAlways("[Controller]", aimMsg);
     }
 
@@ -832,6 +842,15 @@ static void ArmDiscoveryForReacquire(const char* reason) {
     ThrottleHook::SetSilenceEnabled(false);
     ThrottleHook::ClearCandidates();
     ThrottleHook::SetCaptureEnabled(true);
+}
+
+
+// SEH-guarded float write — needed because ControlLoop() uses C++ objects
+// that prevent inline __try/__except.
+static void SafeWriteFloat2(uintptr_t addr, float value) {
+    __try {
+        *(volatile float*)addr = value;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 void ThrottleController::ControlLoop() {
@@ -1376,7 +1395,10 @@ void ThrottleController::ControlLoop() {
                 // (i.e., aim-driven steering where engine derives steering from mouse accumulators).
                 // With separate aim input (analog axes OR digital buttons), the flight stick keeps
                 // direct cluster authority.
-                bool suppressClusterForAim = sourceAimActive && !hasSeparateAimInput;
+                // HOSAM mode: plugin releases pitch/yaw gates entirely so native mouse drives
+                // steering through the game's normal pipeline.
+                bool suppressForHOSAM = s_config.bHOSAMMode;
+                bool suppressClusterForAim = suppressForHOSAM || (sourceAimActive && !hasSeparateAimInput);
                 ThrottleHook::SetRotationalOverride(
                     lateral,
                     yaw,
@@ -1394,7 +1416,7 @@ void ThrottleController::ControlLoop() {
                 // pathway works regardless of controller mode state, unlike the gamepad
                 // input lanes (+0x44/+0x48). If the source pointer is not yet valid
                 // or the feature is disabled, this is a no-op.
-                if (s_config.bSourceObjectAim) {
+                if (s_config.bSourceObjectAim && !s_config.bHOSAMMode) {
                     static bool s_aimDiagLogged = false;
                     if (!s_aimDiagLogged) {
                         s_aimDiagLogged = true;
@@ -1534,6 +1556,58 @@ void ThrottleController::ControlLoop() {
                         }
                     } else {
                         ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, true);
+                    }
+                }
+
+                // --- HOSAM Alignment Assist ---
+                // Observes the game's native mouse accumulator. When the mouse has been
+                // idle (no change) for the configured duration and the accumulator is
+                // within the alignment radius, apply exponential decay toward (0,0).
+                if (s_config.bHOSAMMode && s_config.bAlignmentAssist && ThrottleHook::IsSourcePtrValid()) {
+                    static float s_prevAccumYaw = 0.0f;
+                    static float s_prevAccumPitch = 0.0f;
+                    static int   s_alignIdleFrames = 0;
+
+                    uintptr_t src = ThrottleHook::GetSourceBasePtr();
+                    float curYaw   = SafeReadFloat(src + 0x4C);
+                    float curPitch = SafeReadFloat(src + 0x50);
+
+                    // Detect mouse movement: has the accumulator changed since last frame?
+                    constexpr float kMoveEpsilon = 0.5f; // Ignore sub-pixel jitter
+                    bool mouseMoved = (std::abs(curYaw - s_prevAccumYaw) > kMoveEpsilon)
+                                   || (std::abs(curPitch - s_prevAccumPitch) > kMoveEpsilon);
+
+                    s_prevAccumYaw = curYaw;
+                    s_prevAccumPitch = curPitch;
+
+                    if (mouseMoved) {
+                        s_alignIdleFrames = 0;
+                    } else {
+                        s_alignIdleFrames++;
+                    }
+
+                    int idleFrameThreshold = std::max(1, (s_config.pollRateHz * s_config.iAlignmentIdleMs) / 1000);
+
+                    if (s_alignIdleFrames >= idleFrameThreshold) {
+                        float dist = std::sqrt(curYaw * curYaw + curPitch * curPitch);
+
+                        if (dist <= s_config.fAlignmentRadius && dist > 0.1f) {
+                            // Exponential decay: each frame, reduce toward zero
+                            float decayFactor = std::exp(-s_config.fAlignmentDecayRate * dt);
+                            float newYaw   = curYaw   * decayFactor;
+                            float newPitch = curPitch * decayFactor;
+
+                            // Snap to exactly zero when close enough to prevent asymptotic creep
+                            if (std::abs(newYaw) < 0.1f) newYaw = 0.0f;
+                            if (std::abs(newPitch) < 0.1f) newPitch = 0.0f;
+
+                            SafeWriteFloat2(src + 0x4C, newYaw);
+                            SafeWriteFloat2(src + 0x50, newPitch);
+
+                            // Update prev so our own write doesn't register as mouse movement
+                            s_prevAccumYaw = newYaw;
+                            s_prevAccumPitch = newPitch;
+                        }
                     }
                 }
 

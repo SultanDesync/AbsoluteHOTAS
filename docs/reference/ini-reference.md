@@ -301,6 +301,18 @@ Bind buttons to move the reticle like a virtual cursor. Hold a direction to accu
 |-----|------|---------|-------------|
 | `iToggleAimModeButton` | int | `-1` | Toggle between Independent Aim and Aim-Driven Steering at runtime. Only useful when aim axes are bound. |
 
+### HOSAM Mode (Stick + Mouse)
+
+HOSAM (Hands On Stick And Mouse) mode releases the pitch and yaw cluster gates so that the game's native mouse steering pipeline drives ship rotation. Throttle, strafe, and roll remain under plugin control. This enables left-hand joystick + right-hand mouse setups.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bHOSAMMode` | bool | `false` | Enable HOSAM mode. When `true`, the plugin releases pitch/yaw gates to the game's native mouse pipeline. |
+| `bAlignmentAssist` | bool | `false` | Enable alignment assist. When the mouse is idle near center, gently decay steering toward `(0,0)`. Requires `bHOSAMMode = true`. |
+| `fAlignmentRadius` | float | `15.0` | Mouse accumulator radius (0–200) within which alignment assist triggers. At `15.0`, the assist activates when the reticle is within ~7.5% of center. |
+| `iAlignmentIdleMs` | int | `80` | Milliseconds the mouse must be idle before the decay begins. At 120Hz polling, this is ~10 frames. Range: `0`–`2000`. |
+| `fAlignmentDecayRate` | float | `4.0` | Exponential decay speed. At `4.0`, 95% of remaining offset decays in ~0.75 seconds. Higher values = faster centering. Range: `0.1`–`50.0`. |
+
 ---
 
 ## [DualStick]

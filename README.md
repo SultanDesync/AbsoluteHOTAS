@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.5-beta
+# AbsoluteHOTAS v2.5.1-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -197,6 +197,37 @@ fAimSmoothing = 0.0           ; EMA smoothing for low-res sensors (0=off, 0.98=m
 ```
 
 Digital aim buttons (5-way directional) can also be bound via the wizard Aiming tab to move the reticle like a virtual cursor. A toggle button can switch between independent aim and aim-driven steering at runtime.
+
+## HOSAM Mode (Stick + Mouse)
+
+For players using a left-hand joystick for throttle/strafe and a mouse for steering, **HOSAM (Hands On Stick And Mouse)** mode releases the pitch and yaw cluster gates so the game's native mouse steering pipeline drives ship rotation. Throttle, strafe, and roll remain under plugin control.
+
+Mice don't self-center like joysticks, so an optional **Alignment Assist** feature observes the mouse accumulator and gently decays the ship's steering back to neutral when the mouse is idle near center. This prevents the "drift problem" where the ship keeps turning after you stop moving the mouse.
+
+### How to Bind and Configure
+
+#### Option A: In-Game Binding Wizard (Recommended)
+1. Press `Ctrl+Alt+B` to open the wizard.
+2. Go to the **Axes & Settings** tab.
+3. Bind your **Throttle** (and optionally **Strafe** / **Roll**) axes to your joystick.
+4. Leave **Pitch** and **Yaw** unbound (or they will be ignored in HOSAM mode).
+5. Scroll down to the **HOSAM Mode (Stick + Mouse)** collapsible panel and expand it.
+6. Check **Enable HOSAM Mode**.
+7. Optionally check **Alignment Assist** and tune:
+   * **Radius**: How close to center the mouse must be before the assist activates (default: 15 of 200 units).
+   * **Idle Time**: How long the mouse must be idle before decay starts (default: 80ms).
+   * **Decay Speed**: How fast steering decays to center (default: 4.0; higher = faster).
+8. Click **Save & Apply**.
+
+#### Option B: Manual INI Configuration
+```ini
+[Aim]
+bHOSAMMode = true              ; Enable stick+mouse hybrid mode
+bAlignmentAssist = true        ; Enable mouse centering assist
+fAlignmentRadius = 15.0        ; Accumulator radius for assist trigger (0-200)
+iAlignmentIdleMs = 80          ; Idle time before decay starts (ms)
+fAlignmentDecayRate = 4.0      ; Decay speed (higher = faster centering)
+```
 
 ## Tuning
 

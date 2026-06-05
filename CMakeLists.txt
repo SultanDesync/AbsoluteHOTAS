@@ -5,7 +5,7 @@ set(X_VCPKG_APPLOCAL_DEPS_INSTALL OFF)
 
 project(
   AbsoluteHOTAS
-  VERSION 2.5.0
+  VERSION 2.5.1
   LANGUAGES CXX
 )
 
