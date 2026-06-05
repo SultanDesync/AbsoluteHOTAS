@@ -93,7 +93,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.5.1-beta - Direct HID + In-Game UI");
+    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.5.2 - Direct HID + In-Game UI");
     RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 
