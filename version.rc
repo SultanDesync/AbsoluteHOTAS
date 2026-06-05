@@ -18,11 +18,11 @@ BEGIN
 		BLOCK "040904B0"
 		BEGIN
 			VALUE "FileDescription", ""
-			VALUE "FileVersion", "2.5.2"
+			VALUE "FileVersion", "2.5.2-beta"
 			VALUE "InternalName", "StarfieldFlightControl"
 			VALUE "LegalCopyright", "GNU General Public License v3.0"
 			VALUE "ProductName", ""
-			VALUE "ProductVersion", "2.5.2"
+			VALUE "ProductVersion", "2.5.2-beta"
 		END
 	END
 	BLOCK "VarFileInfo"

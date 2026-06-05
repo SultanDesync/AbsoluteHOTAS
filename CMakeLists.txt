@@ -121,7 +121,7 @@ add_custom_command(
 )
 
 set(RELEASE_ARCHIVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/releases")
-set(RELEASE_ARCHIVE_NAME "${PROJECT_NAME}-v${PROJECT_VERSION}-${BUILD_NAME}.zip")
+set(RELEASE_ARCHIVE_NAME "${PROJECT_NAME}-v${PROJECT_VERSION}-beta-${BUILD_NAME}.zip")
 
 add_custom_target(
   package-mo2
