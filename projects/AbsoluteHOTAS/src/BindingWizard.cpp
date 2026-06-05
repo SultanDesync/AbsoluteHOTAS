@@ -172,6 +172,7 @@ static float       s_accumulatorRate = 1.0f;
 static float       s_accumulatorDecay = 0.0f;
 static float       s_reverseGateVelocity = 5.0f;
 static bool        s_symmetricalThrottleDz = true;
+static bool        s_holdForBoost = true;
 
 // Aim axis slots (saved to [Aim] section, capture range 600-699)
 struct AimAxisSlot {
@@ -370,6 +371,7 @@ static void LoadCurrentBindings() {
     s_reverseGateVelocity = cfg.fReverseGateVelocity;
     // Symmetry detection: if idle plateau ≈ (1 - saturation), start in symmetrical mode
     s_symmetricalThrottleDz = (std::abs(cfg.idlePlateau - (1.0f - cfg.fThrottleSaturation)) < 0.01f);
+    s_holdForBoost = cfg.bHoldForBoost;
 
     // HOSAM mode
     s_hosamMode = cfg.bHOSAMMode;
@@ -857,6 +859,7 @@ static void SaveBindingsToINI() {
         ini.SetValue("DualStick", "fAccumulatorDecay", decayStr);
         ini.SetValue("DualStick", "fReverseGateVelocity", gateStr);
     }
+    ini.SetBoolValue("Injection", "bHoldForBoost", s_holdForBoost);
 
     // HOSAM mode ([Aim] section — appended to existing aim writes)
     ini.SetBoolValue("Aim", "bHOSAMMode", s_hosamMode);
@@ -1529,6 +1532,15 @@ void BindingWizard::Draw() {
             for (int i = 0; i < (int)s_shipActionSlots.size(); i++) {
                 ImGui::PushID(3000 + i);
                 DrawBindingRow(s_shipActionSlots[i].label.c_str(), s_shipActionSlots[i].binding, 200 + i, false);
+                // Show "Hold for Boost" checkbox next to Fire Boosters (index 0)
+                if (i == 0) {
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Hold for Boost", &s_holdForBoost);
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Pause throttle injection while boost is held.\n"
+                                          "On release: set throttle to max and cancel boost.");
+                    }
+                }
                 ImGui::PopID();
             }
 

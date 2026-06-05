@@ -137,6 +137,7 @@ static constexpr ShipOutput SpaceOutput{ ShipOutputKind::Keyboard, 0x39, false }
 static constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
 static constexpr ShipOutput ReverseOutput{ ShipOutputKind::Keyboard, 0x1F, false };
 static constexpr uint32_t OwnerDigitalReverse = 0x00000002u;
+static constexpr uint32_t OwnerBoostCancel    = 0x00000003u;  // Brief reverse hold to cancel boost on release
 static constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 
 static std::vector<ShipButtonBinding> s_shipButtonBindings;
@@ -607,6 +608,7 @@ void ThrottleController::LoadConfig() {
     s_config.rollEnabled = ini.GetBoolValue("Injection", "bRollEnabled", true);
     s_config.logThrottle = ini.GetBoolValue("Injection", "bLogThrottle", false);
     g_verboseLog = s_config.logThrottle;
+    s_config.bHoldForBoost = ini.GetBoolValue("Injection", "bHoldForBoost", true);
 
     s_config.digitalReverseButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalReverseButton", ""), -1);
     s_config.digitalRollLeftButton = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalRollLeftButton", ""), -1);
@@ -737,6 +739,19 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
     }
 }
 
+// Check if the FireBoosters ship action output is currently being held.
+// Starfield cancels boost on throttle reduction — the accumulator must
+// suppress writes during boost to prevent jitter-induced cancellation.
+static bool IsBoostOutputHeld() {
+    if (s_shipButtonBindings.empty()) return false;
+    // FireBoosters is index 0 in the ship button bindings array
+    const auto& boostBinding = s_shipButtonBindings[0];
+    for (const auto& held : s_heldShipOutputs) {
+        if (SameOutput(held.output, boostBinding.output)) return true;
+    }
+    return false;
+}
+
 // ---- Safe Memory Access ----
 #pragma warning(push)
 #pragma warning(disable: 4733)
@@ -806,6 +821,10 @@ static int s_handoverGraceFrames = 0;
 static int s_throttleBurstFrames = 0;
 static float s_throttleBurstValue = 0.0f;
 static float s_accumulatorThrottle = 0.0f;  // Accumulated throttle target for dual-stick mode
+static int   s_accumBurstFrames = 0;        // Delta burst frames remaining for accumulator writes
+static float s_lastAccumBurstValue = -999.0f; // Last accumulator value that triggered a burst
+static bool  s_prevBoostHeld = false;         // Edge detection for boost release transition
+static int   s_boostCancelFrames = 0;         // Frames remaining for reverse-hold boost cancel
 
 static void DisarmFlightControlState() {
     g_discoveryArmed = false;
@@ -819,6 +838,10 @@ static void DisarmFlightControlState() {
     s_throttleBurstFrames = 0;
     s_throttleBurstValue = 0.0f;
     s_accumulatorThrottle = 0.0f;
+    s_accumBurstFrames = 0;
+    s_lastAccumBurstValue = -999.0f;
+    s_prevBoostHeld = false;
+    s_boostCancelFrames = 0;
     ReleaseAllShipButtonOutputs();
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
@@ -1612,12 +1635,41 @@ void ThrottleController::ControlLoop() {
                 }
 
                 if (s_config.bAccumulatorThrottle) {
+                    // --- BOOST GUARD ---
+                    // Hold-for-boost: when the boost output is held, completely pause
+                    // accumulator logic and let the game engine own the throttle.
+                    // Combined with delta burst below, this ensures the game retains
+                    // ownership of +0x68/+0x6C whenever we're not actively changing speed.
+                    const bool boostHeld = s_config.bHoldForBoost && IsBoostOutputHeld();
+                    float stickDeflection = throttle; // [-1.0, +1.0] bipolar
+
+                    if (!boostHeld) {
+                     // --- BOOST RELEASE TRANSITION ---
+                     // On the falling edge of boost, cancel the boost state and
+                     // set accumulator to max throttle (post-boost = full speed).
+                     if (s_prevBoostHeld) {
+                         s_accumulatorThrottle = 1.0f;
+                         s_lastAccumBurstValue = -999.0f; // Force burst to write new value
+                         // Brief reverse key hold to trip the engine's boost cancellation.
+                         // A pulse is too short for the engine to recognize; a sustained
+                         // hold of ~150ms reliably triggers the deceleration check.
+                         s_boostCancelFrames = std::max(1, (s_config.pollRateHz * 150) / 1000);
+                     }
+
+                     // --- BOOST CANCEL: sustained reverse hold ---
+                     if (s_boostCancelFrames > 0) {
+                         SetOutputHeld(ReverseOutput, OwnerBoostCancel, true);
+                         s_boostCancelFrames--;
+                         if (s_boostCancelFrames == 0) {
+                             SetOutputHeld(ReverseOutput, OwnerBoostCancel, false);
+                         }
+                     }
+
                      // --- ACCUMULATOR THROTTLE MODE (Dual-Stick / Self-Centering) ---
                      // Stick deflection is a RATE input:
                      //   Forward  → accumulate throttle upward, proportional to deflection
                      //   Backward → reduce throttle toward 0, then hold S key for reverse
                      //   Neutral  → HOLD current throttle value (no decay)
-                     float stickDeflection = throttle; // [-1.0, +1.0] bipolar
                      const float kDeadzone = std::max(s_config.fThrottleDeadzone, 0.05f); // Min 5% for accumulator stability
                      bool wantReverse = false;
 
@@ -1646,12 +1698,37 @@ void ThrottleController::ControlLoop() {
                          // else: decay=0 → hold at current value
                      }
 
-                     // Drive the S-key output for reverse braking
+                     // Drive the S-key output for reverse braking (normal operation)
                      SetOutputHeld(ReverseOutput, OwnerDigitalReverse, wantReverse);
 
+                     // --- DELTA BURST INJECTION ---
+                     // Only write to +0x68/+0x6C when the accumulator value actually
+                     // changes, then stop after a burst window. This lets the game
+                     // engine retain ownership between changes — required for boost
+                     // and other game systems that monitor throttle address writes.
+                     // At max throttle (1.0) with stick forward, the clamped value
+                     // doesn't change → no burst → game keeps ownership.
+                     float accTarget = std::max(s_accumulatorThrottle, 0.0f);
+                     bool accMoved = (std::abs(accTarget - s_lastAccumBurstValue) > kThrottleDeltaAuthority);
+                     if (accMoved) {
+                         s_accumBurstFrames = throttleBurstFrameCount;
+                         s_lastAccumBurstValue = accTarget;
+                     }
+
+                     if (s_accumBurstFrames > 0) {
+                         s_lastInjectedThrottle = accTarget;
+                         SafeInjectThrottle(s_activeThrottlePtr, accTarget);
+                         s_accumBurstFrames--;
+                     }
+                    } else {
+                     // Boost held: accumulator frozen, no writes. Game owns throttle.
+                     // Reset burst state so we don't resume with stale burst frames.
+                     s_accumBurstFrames = 0;
+                    }
+
+                    s_prevBoostHeld = boostHeld;
+
                      float targetThrottle = std::max(s_accumulatorThrottle, 0.0f);
-                     s_lastInjectedThrottle = targetThrottle;
-                     SafeInjectThrottle(s_activeThrottlePtr, targetThrottle);
 
                      // --- VELOCITY DIAGNOSTICS (only when logging is enabled) ---
                      if (s_config.logThrottle) {
@@ -1700,6 +1777,9 @@ void ThrottleController::ControlLoop() {
                 } else if (reverseKeyHeld || reverseHeld) {
                      s_throttleBurstFrames = 0;
                      lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
+                } else if (s_config.bHoldForBoost && IsBoostOutputHeld()) {
+                     // Hold-for-boost: suppress throttle writes, let the game own +0x68/+0x6C
+                     s_throttleBurstFrames = 0;
                 } else {
                      float commandedThrottle = throttle;
                      bool firstThrottleCommand = (lastInjectedHardwareValue == -999.0f);

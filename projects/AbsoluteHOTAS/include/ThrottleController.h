@@ -79,6 +79,7 @@ public:
         bool    reverseAxisEnabled = true;
 
         bool    logThrottle = false;    // Log throttle values to file
+        bool    bHoldForBoost = true;   // Pause throttle injection while boost is held; cancel on release
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 
