@@ -223,7 +223,14 @@ static float       s_idlePlateau = 0.05f;
 static long        s_detentCenter = 32768;
 static long        s_detentDeadzone = 500;
 static bool        s_calibratingCenter = false;
-
+static bool        s_unipolarReverse = false;
+static long        s_reverseZoneCenter = 3000;
+static long        s_reverseZoneDeadzone = 3000;
+static bool        s_calibratingReverseZone = false;
+static bool        s_boostZone = false;
+static long        s_boostZoneCenter = 62000;
+static long        s_boostZoneDeadzone = 2000;
+static bool        s_calibratingBoostZone = false;
 // ============================================================================
 // Full-device calibration state — tracks all 8 axes simultaneously
 // ============================================================================
@@ -384,6 +391,12 @@ static void LoadCurrentBindings() {
     s_idlePlateau = cfg.idlePlateau;
     s_detentCenter = cfg.detentCenter;
     s_detentDeadzone = cfg.detentDeadzone;
+    s_unipolarReverse = cfg.bUnipolarReverse;
+    s_reverseZoneCenter = cfg.reverseZoneCenter;
+    s_reverseZoneDeadzone = cfg.reverseZoneDeadzone;
+    s_boostZone = cfg.bBoostZone;
+    s_boostZoneCenter = cfg.boostZoneCenter;
+    s_boostZoneDeadzone = cfg.boostZoneDeadzone;
 
     s_buttonBindings[0] = FormatButtonRef(cfg.activateButton);
     s_buttonBindings[1] = FormatButtonRef(cfg.stopButton);
@@ -769,6 +782,26 @@ static void SaveBindingsToINI() {
         char dzStr[32];
         sprintf_s(dzStr, "%ld", s_detentDeadzone);
         ini.SetValue("Normalization", "iDetentDeadzone", dzStr);
+
+        ini.SetBoolValue("Normalization", "bUnipolarReverse", s_unipolarReverse);
+
+        char rzCenterStr[32];
+        sprintf_s(rzCenterStr, "%ld", s_reverseZoneCenter);
+        ini.SetValue("Normalization", "iReverseZoneCenter", rzCenterStr);
+
+        char rzDzStr[32];
+        sprintf_s(rzDzStr, "%ld", s_reverseZoneDeadzone);
+        ini.SetValue("Normalization", "iReverseZoneDeadzone", rzDzStr);
+
+        ini.SetBoolValue("Normalization", "bBoostZone", s_boostZone);
+
+        char bzCenterStr[32];
+        sprintf_s(bzCenterStr, "%ld", s_boostZoneCenter);
+        ini.SetValue("Normalization", "iBoostZoneCenter", bzCenterStr);
+
+        char bzDzStr[32];
+        sprintf_s(bzDzStr, "%ld", s_boostZoneDeadzone);
+        ini.SetValue("Normalization", "iBoostZoneDeadzone", bzDzStr);
     }
 
     // Control buttons
@@ -1235,15 +1268,25 @@ void BindingWizard::Draw() {
 
                         bool isThrottle = (i == 0);
                         if (isThrottle) {
-                            // Throttle (unipolar): red on both ends
-                            // Left dead = idle plateau, right dead = saturation cap
-                            float idleEnd = s_idlePlateau * barWidth;
-                            float satEnd = sat * barWidth;
-                            if (satEnd > idleEnd) {
-                                dl->AddRectFilled(
-                                    ImVec2(pos.x + idleEnd, pos.y),
-                                    ImVec2(pos.x + satEnd, pos.y + barHeight),
-                                    colActive, 3.0f);
+                            if (s_unipolarReverse) {
+                                // Three-zone graph: reverse (red) | dead stop (orange) | forward (green)
+                                // We compute center and deadzone positions from the NormThrottleRaw lambda below,
+                                // but we can compute approximate normalized positions here for the background fill.
+                                // The exact positions are drawn after NormThrottleRaw is defined (center marker section).
+                                // For now, just fill the entire bar as dead (red); the forward/center overlays come later.
+                                // Forward zone: from center+dz to saturation cap
+                                // (Rendered after NormThrottleRaw is available below)
+                            } else {
+                                // Standard unipolar: red on both ends
+                                // Left dead = idle plateau, right dead = saturation cap
+                                float idleEnd = s_idlePlateau * barWidth;
+                                float satEnd = sat * barWidth;
+                                if (satEnd > idleEnd) {
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + idleEnd, pos.y),
+                                        ImVec2(pos.x + satEnd, pos.y + barHeight),
+                                        colActive, 3.0f);
+                                }
                             }
 
                             // Resolve throttle device (cached — only re-resolve when binding changes)
@@ -1289,23 +1332,118 @@ void BindingWizard::Draw() {
                                 ImVec2(pos.x + centerX, pos.y + barHeight),
                                 IM_COL32(80, 220, 240, 220), 2.0f);
 
-                            // Deadzone around center (orange shading)
+                            // Compute all zone boundaries in normalized [0,1] space
                             float dzNorm = (float)s_detentDeadzone / 65535.0f;
+                            float rzNorm = 0.0f, rzDzNorm = 0.0f;
+                            float bzNorm = 0.0f, bzDzNorm = 0.0f;
                             if (tDevIdx >= 0) {
                                 int calibKey = (tDevIdx << 8) | tUsage;
                                 auto calibIt = s_calibData.find(calibKey);
                                 if (calibIt != s_calibData.end()) {
                                     long crange = calibIt->second.second - calibIt->second.first;
-                                    if (crange > 0) dzNorm = (float)s_detentDeadzone / (float)crange;
+                                    if (crange > 0) {
+                                        dzNorm = (float)s_detentDeadzone / (float)crange;
+                                        if (s_unipolarReverse) rzDzNorm = (float)s_reverseZoneDeadzone / (float)crange;
+                                        if (s_boostZone) bzDzNorm = (float)s_boostZoneDeadzone / (float)crange;
+                                    }
                                 }
                             }
-                            if (dzNorm > 0.001f) {
-                                float dzLeft = std::max(0.0f, centerNorm - dzNorm) * barWidth;
-                                float dzRight = std::min(1.0f, centerNorm + dzNorm) * barWidth;
+
+                            if (s_unipolarReverse) {
+                                rzNorm = NormThrottleRaw(s_reverseZoneCenter);
+                                if (rzDzNorm == 0.0f) rzDzNorm = (float)s_reverseZoneDeadzone / 65535.0f;
+                                if (s_boostZone) {
+                                    bzNorm = NormThrottleRaw(s_boostZoneCenter);
+                                    if (bzDzNorm == 0.0f) bzDzNorm = (float)s_boostZoneDeadzone / 65535.0f;
+                                }
+
+                                // Per-zone rectangles: each drawn at its exact range
+                                // Zone 1: Reverse — 0 to rzNorm-dz (already colDead background)
+
+                                // Zone 2: Dead stop (amber/yellow) — rzNorm-dz to rzNorm+dz
+                                float dsLeft = std::max(0.0f, rzNorm - rzDzNorm) * barWidth;
+                                float dsRight = std::min(1.0f, rzNorm + rzDzNorm) * barWidth;
                                 dl->AddRectFilled(
-                                    ImVec2(pos.x + dzLeft, pos.y),
-                                    ImVec2(pos.x + dzRight, pos.y + barHeight),
-                                    IM_COL32(200, 100, 30, 140), 0.0f);
+                                    ImVec2(pos.x + dsLeft, pos.y),
+                                    ImVec2(pos.x + dsRight, pos.y + barHeight),
+                                    IM_COL32(200, 150, 30, 200), 0.0f);
+
+                                // Zone 3: 0%→50% ramp (green) — rzNorm+dz to centerNorm-dzNorm
+                                float ramp1Left = std::min(1.0f, rzNorm + rzDzNorm) * barWidth;
+                                float ramp1Right = std::max(0.0f, centerNorm - dzNorm) * barWidth;
+                                if (ramp1Right > ramp1Left) {
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + ramp1Left, pos.y),
+                                        ImVec2(pos.x + ramp1Right, pos.y + barHeight),
+                                        colActive, 0.0f);
+                                }
+
+                                // Zone 4: 50% cruise plateau (orange) — centerNorm-dz to centerNorm+dz
+                                if (dzNorm > 0.001f) {
+                                    float cruiseLeft = std::max(0.0f, centerNorm - dzNorm) * barWidth;
+                                    float cruiseRight = std::min(1.0f, centerNorm + dzNorm) * barWidth;
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + cruiseLeft, pos.y),
+                                        ImVec2(pos.x + cruiseRight, pos.y + barHeight),
+                                        IM_COL32(220, 130, 30, 200), 0.0f);
+                                }
+
+                                // Zone 5: 50%→100% ramp (green) — centerNorm+dz to boostZone or barEnd
+                                float ramp2Left = std::min(1.0f, centerNorm + dzNorm) * barWidth;
+                                float ramp2Right = barWidth;
+                                if (s_boostZone) {
+                                    ramp2Right = std::max(0.0f, bzNorm - bzDzNorm) * barWidth;
+                                }
+                                if (ramp2Right > ramp2Left) {
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + ramp2Left, pos.y),
+                                        ImVec2(pos.x + ramp2Right, pos.y + barHeight),
+                                        colActive, 0.0f);
+                                }
+
+                                // Boost zone rendering
+                                if (s_boostZone) {
+                                    // Zone 6: 100% plateau (white/silver) — bzNorm-dz to bzNorm+dz
+                                    if (bzDzNorm > 0.001f) {
+                                        float platLeft = std::max(0.0f, bzNorm - bzDzNorm) * barWidth;
+                                        float platRight = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
+                                        dl->AddRectFilled(
+                                            ImVec2(pos.x + platLeft, pos.y),
+                                            ImVec2(pos.x + platRight, pos.y + barHeight),
+                                            IM_COL32(210, 220, 235, 200), 0.0f);
+                                    }
+
+                                    // Zone 7: Boost trigger (purple/magenta) — bzNorm+dz to barEnd
+                                    float boostLeft = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + boostLeft, pos.y),
+                                        ImVec2(pos.x + barWidth, pos.y + barHeight),
+                                        IM_COL32(180, 50, 220, 200), 0.0f);
+
+                                    // Boost zone center marker (bright magenta line)
+                                    float bzX = bzNorm * barWidth;
+                                    dl->AddLine(
+                                        ImVec2(pos.x + bzX, pos.y),
+                                        ImVec2(pos.x + bzX, pos.y + barHeight),
+                                        IM_COL32(255, 100, 255, 230), 2.0f);
+                                }
+
+                                // Reverse zone center marker (red line)
+                                float rzX = rzNorm * barWidth;
+                                dl->AddLine(
+                                    ImVec2(pos.x + rzX, pos.y),
+                                    ImVec2(pos.x + rzX, pos.y + barHeight),
+                                    IM_COL32(255, 80, 80, 220), 2.0f);
+                            } else {
+                                // Standard center deadzone shading (orange)
+                                if (dzNorm > 0.001f) {
+                                    float dzLeft = std::max(0.0f, centerNorm - dzNorm) * barWidth;
+                                    float dzRight = std::min(1.0f, centerNorm + dzNorm) * barWidth;
+                                    dl->AddRectFilled(
+                                        ImVec2(pos.x + dzLeft, pos.y),
+                                        ImVec2(pos.x + dzRight, pos.y + barHeight),
+                                        IM_COL32(200, 100, 30, 140), 0.0f);
+                                }
                             }
 
                             // Live axis position (yellow marker)
@@ -1323,6 +1461,14 @@ void BindingWizard::Draw() {
                                     // "Set Center" capture: update detent to current position
                                     if (s_calibratingCenter) {
                                         s_detentCenter = rawVal;
+                                    }
+                                    // "Set Zero-Thrust" capture: update reverse zone to current position
+                                    if (s_calibratingReverseZone) {
+                                        s_reverseZoneCenter = rawVal;
+                                    }
+                                    // "Set Boost" capture: update boost zone to current position
+                                    if (s_calibratingBoostZone) {
+                                        s_boostZoneCenter = rawVal;
                                     }
                                 }
                             }
@@ -1350,7 +1496,7 @@ void BindingWizard::Draw() {
                     if (i == 0) {
                         ImGui::Indent(180);
 
-                        // Idle plateau slider
+                        // Idle plateau slider (always available)
                         ImGui::PushItemWidth(120);
                         ImGui::SliderFloat("Idle Zone", &s_idlePlateau, 0.0f, 0.20f, "%.2f");
                         s_idlePlateau = std::clamp(s_idlePlateau, 0.0f, 0.20f);
@@ -1366,7 +1512,7 @@ void BindingWizard::Draw() {
                             ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "(Sat locked to %.0f%%)", s_axisSaturation[0] * 100.0f);
                         }
 
-                        // Set Center button + live readout
+                        // Set Center button + live readout (always available)
                         if (s_calibratingCenter) {
                             if (ImGui::Button("Done##center")) {
                                 s_calibratingCenter = false;
@@ -1382,15 +1528,97 @@ void BindingWizard::Draw() {
                             ImGui::Text("Center: %ld", s_detentCenter);
                         }
 
-                        // Deadzone slider (raw units, but show as percentage)
-                        ImGui::PushItemWidth(120);
-                        float dzPct = (float)s_detentDeadzone / 65535.0f * 100.0f;
-                        if (ImGui::SliderFloat("Deadzone", &dzPct, 0.0f, 10.0f, "%.1f%%")) {
-                            s_detentDeadzone = (long)(dzPct / 100.0f * 65535.0f);
+                        // Center deadzone slider (always available)
+                        {
+                            ImGui::PushItemWidth(120);
+                            float dzPct = (float)s_detentDeadzone / 65535.0f * 100.0f;
+                            if (ImGui::SliderFloat("Center Deadzone", &dzPct, 0.0f, 10.0f, "%.1f%%")) {
+                                s_detentDeadzone = (long)(dzPct / 100.0f * 65535.0f);
+                            }
+                            ImGui::PopItemWidth();
+                            ImGui::SameLine();
+                            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Around center (%ld raw)", s_detentDeadzone);
                         }
-                        ImGui::PopItemWidth();
+
+                        ImGui::Spacing();
+                        ImGui::Separator();
+                        ImGui::Spacing();
+
+                        // --- Reverse Zone (independent, optional) ---
+                        ImGui::Checkbox("Reverse Zone", &s_unipolarReverse);
                         ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Around center (%ld raw)", s_detentDeadzone);
+                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f),
+                            s_unipolarReverse ? "Bottom of axis = reverse thrust" : "Off");
+
+                        if (s_unipolarReverse) {
+                            // Set Zero-Thrust position (independent from center)
+                            if (s_calibratingReverseZone) {
+                                if (ImGui::Button("Done##revzone")) {
+                                    s_calibratingReverseZone = false;
+                                    WizLog("Reverse zone set to: " + std::to_string(s_reverseZoneCenter));
+                                }
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Move throttle to zero-thrust position... %ld", s_reverseZoneCenter);
+                            } else {
+                                if (ImGui::Button("Set Zero-Thrust")) {
+                                    s_calibratingReverseZone = true;
+                                }
+                                ImGui::SameLine();
+                                ImGui::Text("Zero-Thrust: %ld", s_reverseZoneCenter);
+                            }
+
+                            // Reverse zone deadzone slider (independent)
+                            {
+                                ImGui::PushItemWidth(120);
+                                float rzDzPct = (float)s_reverseZoneDeadzone / 65535.0f * 100.0f;
+                                if (ImGui::SliderFloat("Dead Stop Range", &rzDzPct, 0.0f, 15.0f, "%.1f%%")) {
+                                    s_reverseZoneDeadzone = (long)(rzDzPct / 100.0f * 65535.0f);
+                                }
+                                ImGui::PopItemWidth();
+                                ImGui::SameLine();
+                                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Width of dead-stop range (%ld raw)", s_reverseZoneDeadzone);
+                            }
+                        }
+
+                        ImGui::Spacing();
+
+                        // --- Boost Zone (independent, optional, requires Reverse Zone) ---
+                        if (s_unipolarReverse) {
+                            ImGui::Checkbox("Boost Zone", &s_boostZone);
+                            ImGui::SameLine();
+                            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f),
+                                s_boostZone ? "Top of axis = fire boosters" : "Off");
+
+                            if (s_boostZone) {
+                                // Set Boost position
+                                if (s_calibratingBoostZone) {
+                                    if (ImGui::Button("Done##boostzone")) {
+                                        s_calibratingBoostZone = false;
+                                        WizLog("Boost zone set to: " + std::to_string(s_boostZoneCenter));
+                                    }
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Move throttle to boost position... %ld", s_boostZoneCenter);
+                                } else {
+                                    if (ImGui::Button("Set Boost")) {
+                                        s_calibratingBoostZone = true;
+                                    }
+                                    ImGui::SameLine();
+                                    ImGui::Text("Boost: %ld", s_boostZoneCenter);
+                                }
+
+                                // Boost zone deadzone slider (100% plateau below boost)
+                                {
+                                    ImGui::PushItemWidth(120);
+                                    float bzDzPct = (float)s_boostZoneDeadzone / 65535.0f * 100.0f;
+                                    if (ImGui::SliderFloat("100%% Plateau", &bzDzPct, 0.0f, 15.0f, "%.1f%%")) {
+                                        s_boostZoneDeadzone = (long)(bzDzPct / 100.0f * 65535.0f);
+                                    }
+                                    ImGui::PopItemWidth();
+                                    ImGui::SameLine();
+                                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Flat 100%% before boost (%ld raw)", s_boostZoneDeadzone);
+                                }
+                            }
+                        }
 
                         ImGui::Unindent(180);
 

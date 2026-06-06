@@ -138,6 +138,7 @@ static constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
 static constexpr ShipOutput ReverseOutput{ ShipOutputKind::Keyboard, 0x1F, false };
 static constexpr uint32_t OwnerDigitalReverse = 0x00000002u;
 static constexpr uint32_t OwnerBoostCancel    = 0x00000003u;  // Brief reverse hold to cancel boost on release
+static constexpr uint32_t OwnerBoostZone      = 0x00000004u;  // Throttle axis boost zone trigger
 static constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 
 static std::vector<ShipButtonBinding> s_shipButtonBindings;
@@ -598,6 +599,12 @@ void ThrottleController::LoadConfig() {
     s_config.detentDeadzone = ini.GetLongValue("Normalization", "iDetentDeadzone", 500);
     s_config.reverseEnabled = ini.GetBoolValue("Normalization", "bReverseEnabled", false);
     s_config.unipolarMode = ini.GetBoolValue("Normalization", "bUnipolarMode", true);
+    s_config.bUnipolarReverse = ini.GetBoolValue("Normalization", "bUnipolarReverse", false);
+    s_config.reverseZoneCenter = ini.GetLongValue("Normalization", "iReverseZoneCenter", 3000);
+    s_config.reverseZoneDeadzone = ini.GetLongValue("Normalization", "iReverseZoneDeadzone", 3000);
+    s_config.bBoostZone = ini.GetBoolValue("Normalization", "bBoostZone", false);
+    s_config.boostZoneCenter = ini.GetLongValue("Normalization", "iBoostZoneCenter", 62000);
+    s_config.boostZoneDeadzone = ini.GetLongValue("Normalization", "iBoostZoneDeadzone", 2000);
     s_config.idlePlateau = (float)ini.GetDoubleValue("Normalization", "fIdlePlateau", 0.05);
     s_config.reverseDeadzone = (float)ini.GetDoubleValue("Normalization", "fReverseDeadzone", 0.05);
     s_config.reverseActivationThreshold = (float)ini.GetDoubleValue("Normalization", "fReverseActivationThreshold", 0.05);
@@ -714,6 +721,55 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
     }
 
     if (s_config.unipolarMode) {
+        // Multi-zone normalization: reverseZone + center(50%) + boostZone
+        if (s_config.bUnipolarReverse) {
+            long rzCenter = s_config.reverseZoneCenter;
+            long rzDz = s_config.reverseZoneDeadzone;
+
+            // Zone 1: Reverse — below reverse zone (throttle = 0, S-key handled in control loop)
+            if (rawValue < rzCenter - rzDz) return 0.0f;
+
+            // Zone 2: Dead stop — within reverse zone deadzone (zero velocity)
+            if (rawValue <= rzCenter + rzDz) return 0.0f;
+
+            // Above reverse zone: forward territory using center as 50% cruise point
+            long fwdStart = rzCenter + rzDz;
+
+            // Zone 3: 0% → 50% ramp — from top of dead stop to bottom of center deadzone
+            if (rawValue < center - deadzone) {
+                float range = (float)((center - deadzone) - fwdStart);
+                if (range <= 0.0f) return 0.0f;
+                return 0.5f * (float)(rawValue - fwdStart) / range;
+            }
+
+            // Zone 4: 50% cruise plateau — within center deadzone
+            if (rawValue <= center + deadzone) return 0.5f;
+
+            // Above center: 50% → 100% territory
+            long rampStart = center + deadzone;
+
+            if (s_config.bBoostZone) {
+                long bzCenter = s_config.boostZoneCenter;
+                long bzDz = s_config.boostZoneDeadzone;
+
+                // Zone 5: 50% → 100% ramp — from top of center dz to bottom of boost zone
+                if (rawValue < bzCenter - bzDz) {
+                    float range = (float)((bzCenter - bzDz) - rampStart);
+                    if (range <= 0.0f) return 1.0f;
+                    return 0.5f + 0.5f * (float)(rawValue - rampStart) / range;
+                }
+
+                // Zone 6 & 7: 100% plateau + boost zone (boost trigger handled in control loop)
+                return 1.0f;
+            }
+
+            // No boost zone: 50% → 100% ramp to axisMax with saturation
+            float range = (float)(axisMax - rampStart);
+            if (range <= 0.0f) return 1.0f;
+            float norm = 0.5f + 0.5f * (float)(rawValue - rampStart) / range;
+            return std::clamp(norm / s_config.fThrottleSaturation, 0.0f, 1.0f);
+        }
+
         float range = (float)(axisMax - axisMin);
         float norm = (range <= 0.0f) ? 0.0f : (float)(rawValue - axisMin) / range;
         
@@ -1201,8 +1257,36 @@ void ThrottleController::ControlLoop() {
 
         float reverseAxis = NormalizeReverseInput();
         const bool reverseAxisHeld = reverseAxis > s_config.reverseActivationThreshold;
-        const bool reverseHeld = digitalReverseHeld || reverseAxisHeld;
+        bool reverseHeld = digitalReverseHeld || reverseAxisHeld;
+
+        // Unipolar reverse zone: derive reverse from main throttle axis when below reverseZone-dz
+        if (s_config.bUnipolarReverse && s_config.unipolarMode
+            && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
+            long rawThrottle = GetRawAxis(s_config.throttleAxis);
+            if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
+            long rzCenter = s_config.reverseZoneCenter;
+            long rzDeadzone = s_config.reverseZoneDeadzone;
+            if (rawThrottle < rzCenter - rzDeadzone) {
+                reverseHeld = true;
+            }
+        }
+
         SetOutputHeld(ReverseOutput, OwnerDigitalReverse, reverseHeld);
+
+        // Boost zone: trigger FireBoosters output when throttle axis is above boostZone+dz
+        // Uses the same SetOutputHeld system so IsBoostOutputHeld() detects it and
+        // the existing boost guard (throttle write suppression + release cancellation) works.
+        if (s_config.bBoostZone && s_config.bUnipolarReverse && s_config.unipolarMode
+            && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0
+            && !s_shipButtonBindings.empty()) {
+            long rawThrottle = GetRawAxis(s_config.throttleAxis);
+            if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
+            long bzCenter = s_config.boostZoneCenter;
+            long bzDz = s_config.boostZoneDeadzone;
+            bool inBoostZone = rawThrottle > bzCenter + bzDz;
+            // FireBoosters is index 0 in ship button bindings
+            SetOutputHeld(s_shipButtonBindings[0].output, OwnerBoostZone, inBoostZone);
+        }
 
         // 1. POLL ALL HARDWARE AXES
         auto NormalizeBipolarRate = [&](long rawValue) -> float {

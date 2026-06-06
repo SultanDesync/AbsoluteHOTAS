@@ -123,18 +123,35 @@ sFireWeapon0Output = mouse:1
 sCancelOutput = none
 ```
 
-## Throttle Calibration
+## Multi-Zone Throttle Calibration
+
+AbsoluteHOTAS allows you to divide a single physical throttle axis into up to **seven distinct zones**, providing complete control over reverse thrust, precise speed plateaus, and engine boost without ever taking your hand off the throttle.
+
+When configured via the Binding Wizard (`Ctrl+Alt+B`), the graph provides a live, multi-colored visualization of your zones:
+* **Reverse Zone (Red):** The bottom of your physical axis triggers reverse thrust.
+* **Dead Stop Range (Amber):** An absolute zero velocity point that is easy to find by feel.
+* **50% Cruise Plateau (Orange):** Locks your throttle to exactly 50% for optimal turn rate and combat maneuverability.
+* **100% Plateau (Silver):** Ensures you reach top speed without accidentally triggering your boosters.
+* **Boost Trigger (Purple):** The very top limit of your axis automatically engages ship boost.
+
+Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
+
+### Manual INI Configuration
+
+While the Binding Wizard is highly recommended for visual tuning, you can also manually configure the zones in `AbsoluteHOTAS.ini`:
 
 ```ini
 [Normalization]
-bUnipolarMode = true          ; 0% to 100% throttle range
-fIdlePlateau = 0.05           ; Bottom 5% treated as idle
-bReverseEnabled = false       ; Legacy center-detent reverse
-bReverseAxisEnabled = true    ; Dedicated reverse slider
-iDetentCenter = 16384         ; Only for bUnipolarMode=false
+bUnipolarMode = true          ; Required for multi-zone throttle
+bUnipolarReverse = true       ; Enable the reverse zone logic
+iReverseZoneCenter = 3000     ; Raw axis value of the zero-thrust point
+iReverseZoneDeadzone = 3000   ; Width of the dead-stop range
+iDetentCenter = 32768         ; Raw axis value of the 50% cruise point
+iDetentDeadzone = 500         ; Width of the 50% cruise plateau
+bBoostZone = true             ; Enable the top-of-axis boost trigger
+iBoostZoneCenter = 62000      ; Raw axis value where boost activates
+iBoostZoneDeadzone = 2000     ; Width of the 100% plateau before boost
 ```
-
-Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
 
 ## Dual-Stick / HOSAS Accumulator Mode
 

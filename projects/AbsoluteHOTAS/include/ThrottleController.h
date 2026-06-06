@@ -60,6 +60,12 @@ public:
         long    detentDeadzone = 500;   // Deadzone around detent (raw units)
         bool    reverseEnabled = false; // Axis reverse is disabled for the beta; use keyboard S.
         bool    unipolarMode = true;    // If true, maps whole axis (min-max) to 0.0-1.0 range (linear)
+        bool    bUnipolarReverse = false; // Split unipolar axis: above reverseZone = forward, reverseZone±dz = dead stop, below = reverse
+        long    reverseZoneCenter = 3000;   // Raw axis value at zero-thrust boundary (separate from detentCenter)
+        long    reverseZoneDeadzone = 3000; // Deadzone around zero-thrust boundary (raw units)
+        bool    bBoostZone = false;         // Enable boost zone at top of throttle axis
+        long    boostZoneCenter = 62000;    // Raw axis value where boost zone starts
+        long    boostZoneDeadzone = 2000;   // Deadzone: area below boost = flat 100%, above = boost trigger
         float   idlePlateau = 0.05f;    // Software deadzone at the bottom (0.0-1.0)
         float   reverseDeadzone = 0.05f;
         float   reverseActivationThreshold = 0.05f;
