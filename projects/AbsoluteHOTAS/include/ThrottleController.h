@@ -171,7 +171,6 @@ public:
 private:
     static Config s_config;
     static std::atomic<bool> s_running;
-    static std::atomic<bool> s_isStandingDown;
     static std::atomic<bool> s_configReloadRequested;
     static std::atomic<float> s_currentThrottle;
     static std::thread s_thread;

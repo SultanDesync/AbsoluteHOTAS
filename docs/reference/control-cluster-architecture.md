@@ -1,6 +1,6 @@
-# Starfield Spaceship Control Cluster Research
+# Starfield Spaceship Control Cluster Architecture
 
-This note summarizes the research that led to the current AbsoluteHOTAS flight-control hook strategy. It is intentionally sanitized for publication: it describes reproducible structures and validation rules, but it does not include local machine paths, raw private trace logs, or broad experimental dumps.
+This document summarizes the research that led to the current AbsoluteHOTAS flight-control hook strategy. It describes reproducible structures and validation rules for flight-control memory injection.
 
 ## Summary
 
@@ -150,21 +150,3 @@ Patch compatibility should still be validated after each Starfield/SFSE update. 
 - Whether direct signed-throttle writes should become a supported reverse mode.
 - Whether adjacent source-object fields contain boost, flight mode, power allocation, or weapon/targeting state.
 - Whether future builds should add a separate game-data bridge for richer in-game state, or keep the public release strictly DLL/INI-only.
-
-## Publication Boundary
-
-Good public material:
-
-- validated lane maps
-- writer-pattern strategy
-- candidate validation rules
-- safety and patching principles
-- known limitations
-
-Keep in the experimental workspace:
-
-- broad raw trace dumps
-- absolute process addresses without context
-- failed hook branches
-- machine-specific paths
-- unreleased test builds and binary artifacts

@@ -1,9 +1,9 @@
-# AbsoluteHOTAS v2.5.5-beta
+# AbsoluteHOTAS v2.6.0-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Changelog
-### v2.5.5-beta
+### v2.6.0-beta
 - **Direct-Memory Reverse Flight:** Reverse flight no longer emulates the `S` key via keyboard injection. The plugin now writes directly to the flight control cluster's memory lanes. This completely eliminates unintended keyboard inputs in menus, dialogue, and on-foot contexts when reverse is mapped to an axis or button.
 - **Improved Velocity Reading:** Removed the dependency on a fragile HUD-based static address. The ship's velocity is now read directly from the validated flight control cluster, improving stability across game updates.
 

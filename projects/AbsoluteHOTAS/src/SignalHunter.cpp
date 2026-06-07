@@ -1,0 +1,473 @@
+#include "PCH.h"
+#include "SignalHunter.h"
+#include "ThrottleHook.h"
+#include "ShipOutput.h"
+#include "RuntimePaths.h"
+#include <windows.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+// ============================================================================
+// Logging
+// ============================================================================
+static void SHLog(const char* msg) {
+    RuntimePaths::AppendLogAlways("[SignalHunter]", msg);
+}
+
+// ============================================================================
+// SEH-guarded memory helpers
+// ============================================================================
+#pragma warning(push)
+#pragma warning(disable: 4733)
+
+static void SafeInjectThrottle(uintptr_t baseAddr, float throttle) {
+    if (!baseAddr) return;
+    __try {
+        *(float*)(baseAddr + 0x68) = throttle;
+        // +0x6C is the game's effective throttle (post turn-rate penalties).
+        // Only write it at/below the penalty floor (0.50) so feathering works
+        // during rotation. Above 0.50 the game manages +0x6C itself.
+        if (throttle <= 0.50f)
+            *(float*)(baseAddr + 0x6C) = throttle;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static bool IsThrottlePlausible(uintptr_t basePtr) {
+    __try {
+        float val = *(volatile float*)(basePtr + 0x68);
+        return std::isfinite(val);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static float SafeReadThrottle(uintptr_t basePtr) {
+    __try { return *(volatile float*)(basePtr + 0x68); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
+}
+
+static float SafeReadFloat(uintptr_t addr) {
+    __try { return *(volatile float*)(addr); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
+}
+
+// Read ship velocity from flight control cluster (+0x70).
+static float ReadClusterVelocity(uintptr_t clusterBase) {
+    if (!clusterBase) return -1.0f;
+    __try { return *(volatile float*)(clusterBase + 0x70); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -1.0f; }
+}
+
+#pragma warning(pop)
+
+// ============================================================================
+// State
+// ============================================================================
+static constexpr int kMaxCandidates   = 2048;
+static constexpr int kScoreThreshold  = 250;
+
+static int       s_candidateAges[kMaxCandidates]     = {};
+static uintptr_t s_lastFrameCandidates[kMaxCandidates] = {};
+static float     s_lastFrameValues[kMaxCandidates]   = {};
+
+static bool      s_discoveryLocked      = false;
+static bool      s_discoveryArmed       = false;
+static int       s_activeCandidateIndex = -1;
+static uintptr_t s_activeThrottlePtr   = 0;
+static int       s_plausibilityFailCount = 0;
+static bool      s_lastLogLockedState   = false;
+static bool      s_reacquireWatchdogEnabled = false;
+static float     s_lastInjectedThrottle = -999.0f;
+
+// Burst injection state (absolute throttle mode)
+static int       s_throttleBurstFrames  = 0;
+static float     s_throttleBurstValue   = 0.0f;
+
+// Accumulator throttle state (dual-stick mode)
+static float     s_accumulatorThrottle  = 0.0f;
+static int       s_accumBurstFrames     = 0;
+static float     s_lastAccumBurstValue  = -999.0f;
+static bool      s_prevBoostHeld        = false;
+static int       s_boostCancelFrames    = 0;
+
+// ============================================================================
+// Public API
+// ============================================================================
+namespace SignalHunter {
+
+bool IsLocked()          { return s_discoveryLocked; }
+uintptr_t GetActivePtr() { return s_activeThrottlePtr; }
+
+void Disarm() {
+    s_discoveryArmed          = false;
+    s_discoveryLocked         = false;
+    s_activeCandidateIndex    = -1;
+    s_activeThrottlePtr       = 0;
+    s_plausibilityFailCount   = 0;
+    s_reacquireWatchdogEnabled = false;
+    s_lastInjectedThrottle    = -999.0f;
+    s_throttleBurstFrames     = 0;
+    s_throttleBurstValue      = 0.0f;
+    s_accumulatorThrottle     = 0.0f;
+    s_accumBurstFrames        = 0;
+    s_lastAccumBurstValue     = -999.0f;
+    s_prevBoostHeld           = false;
+    s_boostCancelFrames       = 0;
+    ShipOutputSystem::ReleaseAllShipButtonOutputs();
+    ThrottleHook::SetReverseOverride(false);
+    ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
+    ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
+    ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::SetCaptureEnabled(false);
+    ThrottleHook::ClearCandidates();
+}
+
+void ArmForReacquire(const char* reason) {
+    if (reason) SHLog((std::string("Re-arming discovery: ") + reason).c_str());
+    s_discoveryArmed        = true;
+    s_discoveryLocked       = false;
+    s_activeCandidateIndex  = -1;
+    s_activeThrottlePtr     = 0;
+    s_plausibilityFailCount = 0;
+    s_throttleBurstFrames   = 0;
+    ThrottleHook::SetReverseOverride(false);
+    ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
+    ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::ClearCandidates();
+    ThrottleHook::SetCaptureEnabled(true);
+}
+
+// --- Arm from ThrottleController (AlwaysOn startup path) ---
+void ArmInitial() {
+    s_reacquireWatchdogEnabled = true;
+    s_discoveryArmed = true;
+    ThrottleHook::SetCaptureEnabled(true);
+}
+
+void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
+    const auto& cfg = ThrottleController::GetConfig();
+
+    // SIGNAL HUNTER: Magic Number Pulse detection
+    if (s_discoveryArmed && !s_discoveryLocked && candCount > 0) {
+        if (iter % (cfg.pollRateHz * 5) == 0) {
+            ThrottleHook::ClearCandidates();
+            SHLog("Periodic buffer flush (Noise reduction).");
+        }
+
+        for (int i = 0; i < candCount && i < kMaxCandidates; i++) {
+            uintptr_t cand = ThrottleHook::GetCandidate(i);
+            if (!cand) continue;
+
+            float memVal = SafeReadThrottle(cand);
+
+            if (cand == s_lastFrameCandidates[i]) {
+                s_candidateAges[i]++;
+            } else {
+                s_candidateAges[i]        = 0;
+                s_lastFrameCandidates[i]  = cand;
+                s_lastFrameValues[i]      = memVal;
+            }
+
+            // Magic-number lock: game signals with 0.0314f
+            if (std::abs(memVal - 0.0314f) < 0.0001f) {
+                SHLog("**************************************************");
+                SHLog("MAGIC NUMBER DETECTED! (0.0314f)");
+                char buf[128]; sprintf_s(buf, "Winner: Candidate #%d at 0x%llX", i, (unsigned long long)cand);
+                SHLog(buf);
+                SHLog("**************************************************");
+                s_activeCandidateIndex     = i;
+                s_activeThrottlePtr        = cand;
+                s_discoveryLocked          = true;
+                s_reacquireWatchdogEnabled = true;
+                s_plausibilityFailCount    = 0;
+                ThrottleHook::SetCaptureEnabled(false);
+                ThrottleHook::SetSilenceEnabled(false);
+                break;
+            }
+
+            // Manual correlation fallback: stable signal in plausible float range
+            if (s_candidateAges[i] >= 15 && memVal >= -2.1f && memVal <= 2.1f) {
+                SHLog("**************************************************");
+                SHLog("STABLE SIGNAL DETECTED! Locking (Manual Fallback).");
+                char buf[128]; sprintf_s(buf, "Winner: Candidate #%d at 0x%llX", i, (unsigned long long)cand);
+                SHLog(buf);
+                SHLog("**************************************************");
+                s_activeCandidateIndex     = i;
+                s_activeThrottlePtr        = cand;
+                s_discoveryLocked          = true;
+                s_reacquireWatchdogEnabled = true;
+                s_discoveryArmed           = false;
+                s_plausibilityFailCount    = 0;
+                ThrottleHook::SetCaptureEnabled(false);
+                ThrottleHook::SetSilenceEnabled(false);
+                break;
+            }
+        }
+    }
+
+    // Reacquire watchdog
+    if (s_reacquireWatchdogEnabled) {
+        if (s_discoveryLocked && !s_activeThrottlePtr)
+            ArmForReacquire("locked state had no active pointer");
+        else if (!s_discoveryLocked && !s_discoveryArmed)
+            ArmForReacquire("inactive state after prior lock");
+    }
+
+    // Dampened state log
+    if (s_discoveryLocked != s_lastLogLockedState) {
+        s_lastLogLockedState = s_discoveryLocked;
+        if (s_discoveryLocked) SHLog("State: PASSIVE (Locked)");
+        else                   SHLog("State: DISCOVERY (Active)");
+    }
+
+    if (cfg.logThrottle && s_discoveryArmed && (iter % cfg.pollRateHz == 0)) {
+        char buf[256];
+        sprintf_s(buf, "[iter=%llu] FINDING SIGNAL: norm=%.3f candidates=%d",
+            iter, throttle, candCount);
+        SHLog(buf);
+    }
+    if (cfg.logThrottle && s_discoveryLocked && s_activeThrottlePtr
+        && (iter % (cfg.pollRateHz * 12)) == 0) {
+        char buf[256];
+        sprintf_s(buf, "[iter=%llu] ACTIVE INJECTION: throttle=%.3f ptr=0x%llX",
+            iter, throttle, (unsigned long long)s_activeThrottlePtr);
+        SHLog(buf);
+    }
+}
+
+void Inject(float throttle, float pitch, float yaw, float roll,
+            float strafeX, float strafeY, float dt, uint64_t iter,
+            bool reverseHeld)
+{
+    if (!s_activeThrottlePtr) return;
+
+    const auto& cfg = ThrottleController::GetConfig();
+
+    if (!IsThrottlePlausible(s_activeThrottlePtr)) {
+        s_plausibilityFailCount++;
+        if (s_plausibilityFailCount > 60) {
+            SHLog("Persistent signal loss. Pointer invalidated.");
+            ArmForReacquire("persistent signal loss");
+            s_lastInjectedThrottle = -999.0f;
+            ShipOutputSystem::ReleaseAllShipButtonOutputs();
+        }
+        return;
+    }
+
+    s_plausibilityFailCount = 0;
+
+    float gameTarget = SafeReadThrottle(s_activeThrottlePtr);
+    constexpr float kThrottleDeltaAuthority = 0.015f;
+    int throttleBurstFrameCount = (cfg.throttleBurstMs <= 0)
+        ? 1 : std::max(1, (cfg.pollRateHz * cfg.throttleBurstMs) / 1000);
+
+    // Rotational override
+    bool rollOverrideActive      = cfg.rollEnabled && (std::abs(roll) > 0.05f);
+    bool strafeLatOverrideActive = std::abs(strafeX) > 0.05f;
+    bool strafeVertOverrideActive = std::abs(strafeY) > 0.05f;
+    float lateral = strafeLatOverrideActive ? strafeX : roll;
+
+    ThrottleHook::SetRotationalOverride(
+        lateral, yaw, pitch, true,
+        strafeLatOverrideActive || rollOverrideActive,
+        strafeY, strafeVertOverrideActive,
+        true, true);  // yaw/pitch enabled (aim suppression handled by AimController)
+
+    if (cfg.bAccumulatorThrottle) {
+        // --- BOOST GUARD ---
+        const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();
+        float stickDeflection = throttle;
+
+        if (!boostHeld) {
+            // Boost release transition
+            if (s_prevBoostHeld) {
+                s_accumulatorThrottle = 1.0f;
+                s_lastAccumBurstValue = -999.0f;
+                s_boostCancelFrames   = std::max(1, (cfg.pollRateHz * 150) / 1000);
+            }
+
+            // Sustained reverse hold to cancel boost
+            if (s_boostCancelFrames > 0) {
+                ShipOutputSystem::SetOutputHeld(ReverseOutput, OwnerBoostCancel, true);
+                s_boostCancelFrames--;
+                if (s_boostCancelFrames == 0)
+                    ShipOutputSystem::SetOutputHeld(ReverseOutput, OwnerBoostCancel, false);
+            }
+
+            const float kDeadzone = std::max(cfg.fThrottleDeadzone, 0.05f);
+
+            if (stickDeflection > kDeadzone) {
+                ThrottleHook::SetReverseOverride(false);
+                s_accumulatorThrottle += stickDeflection * cfg.fAccumulatorRate * dt;
+                s_accumulatorThrottle = std::clamp(s_accumulatorThrottle, 0.0f, 1.0f);
+            } else if (stickDeflection < -kDeadzone) {
+                if (s_accumulatorThrottle > 0.0f) {
+                    s_accumulatorThrottle += stickDeflection * cfg.fAccumulatorRate * dt;
+                    if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
+                } else {
+                    s_accumulatorThrottle = 0.0f;
+                    float vel   = ReadClusterVelocity(s_activeThrottlePtr);
+                    bool gateOpen = (vel < 0.0f) || (vel >= 0.0f && vel <= cfg.fReverseGateVelocity);
+
+                    if (gateOpen) {
+                        ThrottleHook::SetReverseOverride(true);
+                        SafeInjectThrottle(s_activeThrottlePtr, -1.0f);
+                        s_lastInjectedThrottle = -1.0f;
+                    } else {
+                        ThrottleHook::SetReverseOverride(false);
+                        SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
+                    }
+
+                    if (cfg.logThrottle) {
+                        static uint64_t s_revLogIter = 0;
+                        if (iter > s_revLogIter + 15) {
+                            s_revLogIter = iter;
+                            float vel2 = ReadClusterVelocity(s_activeThrottlePtr);
+                            char buf[256];
+                            snprintf(buf, sizeof(buf),
+                                "[Reverse/Accum] vel=%.1f gate=%s src=%s +68=%+.3f +6C=%+.3f +70=%.1f",
+                                vel2, gateOpen ? "OPEN" : "CLOSED",
+                                ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
+                                SafeReadFloat(s_activeThrottlePtr + 0x68),
+                                SafeReadFloat(s_activeThrottlePtr + 0x6C),
+                                SafeReadFloat(s_activeThrottlePtr + 0x70));
+                            RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
+                        }
+                    }
+                }
+            } else {
+                ThrottleHook::SetReverseOverride(false);
+                if (cfg.fAccumulatorDecay > 0.0f && s_accumulatorThrottle > 0.0f) {
+                    s_accumulatorThrottle -= cfg.fAccumulatorDecay * dt;
+                    if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
+                }
+            }
+
+            // Delta burst injection
+            float accTarget = std::max(s_accumulatorThrottle, 0.0f);
+            bool accMoved   = (std::abs(accTarget - s_lastAccumBurstValue) > kThrottleDeltaAuthority);
+            if (accMoved) {
+                s_accumBurstFrames    = throttleBurstFrameCount;
+                s_lastAccumBurstValue = accTarget;
+            }
+            if (s_accumBurstFrames > 0) {
+                s_lastInjectedThrottle = accTarget;
+                SafeInjectThrottle(s_activeThrottlePtr, accTarget);
+                s_accumBurstFrames--;
+            }
+        } else {
+            // Boost held: game owns throttle
+            s_accumBurstFrames = 0;
+        }
+
+        s_prevBoostHeld = boostHeld;
+
+        // Diagnostics
+        if (cfg.logThrottle) {
+            static bool s_velStartupLogged = false;
+            static uint64_t s_velLogIter   = 0;
+            float vel = ReadClusterVelocity(s_activeThrottlePtr);
+            if (!s_velStartupLogged) {
+                s_velStartupLogged = true;
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                    "[DualStick] Velocity monitor online: cluster+0x70 @ 0x%llX rawVal=%.4f",
+                    (unsigned long long)(s_activeThrottlePtr + 0x70), vel);
+                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
+            }
+            if (iter > s_velLogIter + (uint64_t)(cfg.pollRateHz * 2)) {
+                s_velLogIter = iter;
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                    "[DualStick] vel=%.2f accum=%+.3f stick=%+.3f gate=%.1f %s",
+                    vel, s_accumulatorThrottle, throttle,
+                    cfg.fReverseGateVelocity,
+                    (vel >= 0.0f && vel <= cfg.fReverseGateVelocity) ? "GATE_OPEN" : "GATE_CLOSED");
+                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
+            }
+        }
+
+    } else if (reverseHeld) {
+        // Direct-memory reverse
+        float vel = ReadClusterVelocity(s_activeThrottlePtr);
+        bool gateOpen = (vel < 0.0f) || (vel >= 0.0f && vel <= cfg.fReverseGateVelocity);
+
+        if (gateOpen) {
+            ThrottleHook::SetReverseOverride(true);
+            SafeInjectThrottle(s_activeThrottlePtr, -1.0f);
+            s_lastInjectedThrottle = -1.0f;
+        } else {
+            ThrottleHook::SetReverseOverride(false);
+            SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
+            s_lastInjectedThrottle = 0.0f;
+        }
+
+        if (cfg.logThrottle) {
+            static uint64_t s_revLogIter2 = 0;
+            static bool s_prevGateOpen = false;
+            bool gateTransition = (gateOpen != s_prevGateOpen);
+            s_prevGateOpen = gateOpen;
+            if (gateTransition || iter > s_revLogIter2 + 15) {
+                s_revLogIter2 = iter;
+                uintptr_t src = ThrottleHook::GetSourceBasePtr();
+                char buf[384];
+                snprintf(buf, sizeof(buf),
+                    "[Reverse] %svel=%.1f gate=%s src=%s src3C=%+.3f +5C=%+.3f +68=%+.3f +6C=%+.3f +70=%.1f",
+                    gateTransition ? "TRANSITION " : "",
+                    vel, gateOpen ? "OPEN" : "CLOSED",
+                    ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
+                    src ? SafeReadFloat(src + 0x3C) : -999.0f,
+                    SafeReadFloat(s_activeThrottlePtr + 0x5C),
+                    SafeReadFloat(s_activeThrottlePtr + 0x68),
+                    SafeReadFloat(s_activeThrottlePtr + 0x6C),
+                    SafeReadFloat(s_activeThrottlePtr + 0x70));
+                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
+            }
+        }
+
+        s_throttleBurstFrames  = 0;
+        s_lastInjectedThrottle = -999.0f;
+
+    } else if (cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld()) {
+        // Suppress throttle writes during boost
+        ThrottleHook::SetReverseOverride(false);
+        s_throttleBurstFrames = 0;
+
+    } else {
+        // Standard absolute throttle injection
+        ThrottleHook::SetReverseOverride(false);
+
+        bool firstCommand  = (s_lastInjectedThrottle == -999.0f);
+        bool throttleMoved = firstCommand ||
+            (std::abs(throttle - s_lastInjectedThrottle) > kThrottleDeltaAuthority);
+
+        if (throttleMoved) {
+            s_throttleBurstFrames = throttleBurstFrameCount;
+            s_throttleBurstValue  = throttle;
+            s_lastInjectedThrottle = throttle;
+        }
+
+        float targetThrottle = (s_throttleBurstFrames > 0) ? s_throttleBurstValue : gameTarget;
+
+        if (s_throttleBurstFrames > 0) {
+            SafeInjectThrottle(s_activeThrottlePtr, targetThrottle);
+            s_throttleBurstFrames--;
+        }
+
+        // 6DOF telemetry (merged from both branches)
+        if (cfg.logThrottle) {
+            static float lP = 0, lY = 0, lR = 0;
+            static uint64_t lastLogIter = 0;
+            if (iter > lastLogIter + 30) {
+                if (std::abs(pitch - lP) > 0.05f || std::abs(yaw - lY) > 0.05f || std::abs(roll - lR) > 0.05f) {
+                    char tel[256];
+                    sprintf_s(tel, "[Telemetry] P%+.3f Y%+.3f R%+.3f | T%+.3f",
+                        pitch, yaw, roll, targetThrottle);
+                    RuntimePaths::AppendLogAlways("[SignalHunter]", tel);
+                    lP = pitch; lY = yaw; lR = roll; lastLogIter = iter;
+                }
+            }
+        }
+    }
+}
+
+} // namespace SignalHunter

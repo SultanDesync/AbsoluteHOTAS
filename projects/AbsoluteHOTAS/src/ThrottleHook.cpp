@@ -37,12 +37,7 @@ static volatile uint32_t g_vertStrafeBits = 0;
 static volatile uint32_t g_yawBits = 0;
 static volatile uint32_t g_pitchBits = 0;
 
-static constexpr int MAX_MANUAL_CAMERA_GATES = 96;
-static volatile uint8_t g_manualGateActive[MAX_MANUAL_CAMERA_GATES] = {};
-static volatile uint32_t g_manualGateBits[MAX_MANUAL_CAMERA_GATES] = {};
-static uintptr_t g_manualGateAddress[MAX_MANUAL_CAMERA_GATES] = {};
-static uintptr_t g_manualGateOffset[MAX_MANUAL_CAMERA_GATES] = {};
-static int g_manualGateCount = 0;
+
 
 // ---- Experimental: source-object aim injection ----
 static volatile uint8_t  g_sourceAimEnabled  = 0;
@@ -329,121 +324,6 @@ static bool InstallRdxDispGate(uintptr_t targetAddr, uint8_t disp, volatile uint
     return true;
 }
 
-static bool InstallManualCameraGate(uintptr_t targetAddr, uint8_t disp, int gateIndex, uintptr_t moduleBase) {
-    if (gateIndex < 0 || gateIndex >= MAX_MANUAL_CAMERA_GATES) return false;
-
-    uint8_t* trampMem = AllocateNear(targetAddr);
-    if (!trampMem) {
-        HookLog("CRITICAL: Could not allocate manual camera gate trampoline.");
-        return false;
-    }
-
-    int idx = 0;
-    trampMem[idx++] = 0x51; // push rcx
-    trampMem[idx++] = 0x9C; // pushfq
-
-    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9;
-    uintptr_t activeAddr = (uintptr_t)&g_manualGateActive[gateIndex];
-    memcpy(&trampMem[idx], &activeAddr, 8); idx += 8;
-    trampMem[idx++] = 0x80; trampMem[idx++] = 0x39; trampMem[idx++] = 0x00; // cmp byte ptr [rcx],0
-    trampMem[idx++] = 0x74;
-    int inactiveJump = idx++;
-
-    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9;
-    uintptr_t valueAddr = (uintptr_t)&g_manualGateBits[gateIndex];
-    memcpy(&trampMem[idx], &valueAddr, 8); idx += 8;
-    trampMem[idx++] = 0x8B; trampMem[idx++] = 0x09; // mov ecx,[rcx]
-    trampMem[idx++] = 0x89; trampMem[idx++] = 0x48; trampMem[idx++] = disp; // mov [rax+disp],ecx
-    trampMem[idx++] = 0xEB;
-    int doneJump = idx++;
-
-    int inactiveLabel = idx;
-    trampMem[idx++] = 0x9D; // popfq
-    trampMem[idx++] = 0x59; // pop rcx
-    memcpy(&trampMem[idx], (void*)targetAddr, 5); idx += 5;
-    trampMem[idx++] = 0xE9;
-    int32_t inactiveBack = (int32_t)((targetAddr + 5) - ((uintptr_t)&trampMem[idx] + 4));
-    memcpy(&trampMem[idx], &inactiveBack, 4); idx += 4;
-
-    int doneLabel = idx;
-    trampMem[idx++] = 0x9D; // popfq
-    trampMem[idx++] = 0x59; // pop rcx
-    trampMem[idx++] = 0xE9;
-    int32_t activeBack = (int32_t)((targetAddr + 5) - ((uintptr_t)&trampMem[idx] + 4));
-    memcpy(&trampMem[idx], &activeBack, 4); idx += 4;
-
-    trampMem[inactiveJump] = (uint8_t)(inactiveLabel - inactiveJump - 1);
-    trampMem[doneJump] = (uint8_t)(doneLabel - doneJump - 1);
-
-    uint8_t orig[5];
-    memcpy(orig, (void*)targetAddr, 5);
-    if (!PatchJump5(targetAddr, trampMem)) {
-        HookLog("CRITICAL: Could not patch manual camera gate.");
-        return false;
-    }
-
-    HookRecord rec;
-    rec.targetAddr = targetAddr;
-    rec.isStore = true;
-    memcpy(rec.origBytes, orig, 5);
-    memcpy(rec.trampJmp, (void*)targetAddr, 5);
-    g_hookRegistry.push_back(rec);
-
-    g_manualGateAddress[gateIndex] = targetAddr;
-    g_manualGateOffset[gateIndex] = disp;
-
-    char buf[192];
-    sprintf_s(buf, "Manual camera gate #%d installed at Starfield.exe+%X disp=0x%X",
-        gateIndex, (unsigned int)(targetAddr - moduleBase), disp);
-    HookLog(buf);
-    return true;
-}
-
-static void InstallManualCameraGates(uintptr_t textStart, size_t textSize, uintptr_t moduleBase) {
-    g_manualGateCount = 0;
-    memset((void*)g_manualGateActive, 0, sizeof(g_manualGateActive));
-    memset((void*)g_manualGateBits, 0, sizeof(g_manualGateBits));
-    memset(g_manualGateAddress, 0, sizeof(g_manualGateAddress));
-    memset(g_manualGateOffset, 0, sizeof(g_manualGateOffset));
-
-    struct Pattern {
-        uint8_t bytes[5];
-        uint8_t disp;
-        const char* label;
-    };
-
-    const Pattern patterns[] = {
-        {{0xC5, 0xFA, 0x11, 0x48, 0x64}, 0x64, "pitch-xmm1"},
-        {{0xC5, 0xFA, 0x11, 0x58, 0x60}, 0x60, "yaw-xmm3"},
-    };
-
-    for (const auto& pat : patterns) {
-        for (size_t i = 0; i + 5 < textSize && g_manualGateCount < MAX_MANUAL_CAMERA_GATES; ++i) {
-            uintptr_t addr = textStart + i;
-            uint8_t* ptr = (uint8_t*)addr;
-            if (memcmp(ptr, pat.bytes, 5) != 0) continue;
-
-            // Exact ship rotational gates are installed separately. Do not double-patch them.
-            bool alreadyPatched = false;
-            for (const auto& hook : g_hookRegistry) {
-                if (hook.targetAddr == addr) {
-                    alreadyPatched = true;
-                    break;
-                }
-            }
-            if (alreadyPatched) continue;
-
-            int gateIndex = g_manualGateCount;
-            if (InstallManualCameraGate(addr, pat.disp, gateIndex, moduleBase)) {
-                ++g_manualGateCount;
-            }
-        }
-    }
-
-    char buf[128];
-    sprintf_s(buf, "Manual camera broad gate install complete: %d gates", g_manualGateCount);
-    HookLog(buf);
-}
 
 static bool InstallRotationalGates(uintptr_t textStart, size_t textSize, uintptr_t moduleBase) {
     const uint8_t writerBlock[] = {
@@ -780,31 +660,6 @@ void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool ena
     g_rotOverrideEnabled = 1;
 }
 
-int ThrottleHook::GetManualGateCount() {
-    return g_manualGateCount;
-}
-
-uintptr_t ThrottleHook::GetManualGateAddress(int index) {
-    if (index < 0 || index >= g_manualGateCount) return 0;
-    return g_manualGateAddress[index];
-}
-
-uintptr_t ThrottleHook::GetManualGateOffset(int index) {
-    if (index < 0 || index >= g_manualGateCount) return 0;
-    return g_manualGateOffset[index];
-}
-
-void ThrottleHook::SetManualGateOverride(int index, float value, bool enabled) {
-    for (int i = 0; i < g_manualGateCount && i < MAX_MANUAL_CAMERA_GATES; ++i) {
-        g_manualGateActive[i] = 0;
-    }
-
-    if (!enabled) return;
-    if (index < 0 || index >= g_manualGateCount || index >= MAX_MANUAL_CAMERA_GATES) return;
-
-    g_manualGateBits[index] = FloatToBits(value);
-    g_manualGateActive[index] = 1;
-}
 
 // ---- Experimental: source-object aim injection ----
 void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
@@ -912,7 +767,7 @@ bool ThrottleHook::Install() {
     }
 
     InstallRotationalGates(textStart, textSize, moduleBase);
-    InstallManualCameraGates(textStart, textSize, moduleBase);
+
 
     // ======================================================
     // ======================================================

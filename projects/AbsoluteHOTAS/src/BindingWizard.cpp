@@ -2,6 +2,7 @@
 #include "UIHook.h"
 #include "DeviceManager.h"
 #include "ThrottleController.h"
+#include "ShipOutput.h"
 #include "RuntimePaths.h"
 
 #include <imgui.h>
@@ -451,46 +452,37 @@ static void LoadCurrentBindings() {
         s_calibLoaded = true;
     }
 
-    // Load custom bindings from [ButtonExpansion]
+    // Load custom bindings from [ButtonExpansion] via ShipOutputSystem
+    // (ShipOutputSystem::LoadShipButtonBindings has already parsed the INI — no second file open needed)
     if (!s_customBindingsLoaded) {
         s_customBindings.clear();
-        auto iniPath = RuntimePaths::IniPath();
-        CSimpleIniA ini;
-        ini.SetUnicode(false);
-        if (ini.LoadFile(iniPath.string().c_str()) == SI_OK) {
-            CSimpleIniA::TNamesDepend keys;
-            if (ini.GetAllKeys("ButtonExpansion", keys)) {
-                for (const auto& entry : keys) {
-                    const char* iniKey = entry.pItem;
-                    const char* outputVal = ini.GetValue("ButtonExpansion", iniKey, "none");
+        int count = ShipOutputSystem::GetShipButtonCount();
+        for (int i = 0; i < count; i++) {
+            const auto& b = ShipOutputSystem::GetShipButtonBindings()[i];
+            if (strcmp(b.actionId, "ButtonExpansion") != 0) continue;
+            if (b.buttonRef.value < 1) continue;
 
-                    // Parse key: could be "iButton12" or "DeviceName@iButton12"
-                    std::string keyStr(iniKey);
-                    std::string devicePrefix;
-                    std::string btnPart = keyStr;
-                    auto atPos = keyStr.rfind('@');
-                    if (atPos != std::string::npos) {
-                        devicePrefix = keyStr.substr(0, atPos);
-                        btnPart = keyStr.substr(atPos + 1);
-                    }
-
-                    // Extract button number
-                    int btnId = -1;
-                    if (btnPart.size() > 7 && (btnPart.substr(0, 7) == "iButton" || btnPart.substr(0, 7) == "IButton")) {
-                        btnId = std::atoi(btnPart.c_str() + 7);
-                    }
-                    if (btnId < 1 || btnId > 128) continue;
-
-                    std::string binding;
-                    if (!devicePrefix.empty()) {
-                        binding = devicePrefix + "@" + std::to_string(btnId);
-                    } else {
-                        binding = std::to_string(btnId);
-                    }
-
-                    s_customBindings.push_back({ binding, outputVal });
-                }
+            std::string binding;
+            if (!b.buttonRef.deviceName.empty()) {
+                binding = b.buttonRef.deviceName + "@" + std::to_string(b.buttonRef.value);
+            } else if (b.buttonRef.deviceIndex >= 0) {
+                binding = "#" + std::to_string(b.buttonRef.deviceIndex) + "@" + std::to_string(b.buttonRef.value);
+            } else {
+                binding = std::to_string(b.buttonRef.value);
             }
+
+            // Reconstruct the output string from the ShipOutput
+            std::string output;
+            switch (b.output.kind) {
+                case ShipOutputKind::Keyboard:
+                    { char buf[32]; sprintf_s(buf, "key:0x%02X", b.output.code); output = buf; }
+                    break;
+                case ShipOutputKind::Mouse:
+                    { char buf[32]; sprintf_s(buf, "mouse:%d", b.output.code); output = buf; }
+                    break;
+                default: output = "none"; break;
+            }
+            s_customBindings.push_back({ binding, output });
         }
         s_customBindingsLoaded = true;
     }

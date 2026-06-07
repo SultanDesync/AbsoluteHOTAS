@@ -5,7 +5,7 @@ set(X_VCPKG_APPLOCAL_DEPS_INSTALL OFF)
 
 project(
   AbsoluteHOTAS
-  VERSION 2.5.5
+  VERSION 2.6.0
   LANGUAGES CXX
 )
 
@@ -43,9 +43,15 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleHook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/BindingWizard.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ShipOutput.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SignalHunter.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/AimController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleController.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleHook.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/BindingWizard.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ShipOutput.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SignalHunter.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/AimController.h
   ${CMAKE_CURRENT_BINARY_DIR}/version.rc
   ${shared_sources}
 )
@@ -114,9 +120,6 @@ add_custom_command(
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy
     ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini
-    ${PACKAGE_PLUGIN_DIR}
-  COMMAND ${CMAKE_COMMAND} -E copy
-    ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS_SteamDeck.ini
     ${PACKAGE_PLUGIN_DIR}
 )
 
