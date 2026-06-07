@@ -1,4 +1,4 @@
-# AbsoluteHOTAS v2.5.3-beta
+# AbsoluteHOTAS v2.5.4-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
@@ -31,6 +31,7 @@ fThrottleAtEngineStart = 0.0314
 * **Digital Axis Buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
 * **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
+* **Turn-Rate Throttle Respect** — The game's native turn-rate speed penalty is preserved during flight. During hard turns the throttle naturally reduces to match the game's effective speed, while feathering below 50% remains responsive.
 * **Silent logging** — Diagnostic logging is disabled by default to minimize performance impact, and can be toggled on via `bLogThrottle = true` in the INI.
 
 ## Requirements

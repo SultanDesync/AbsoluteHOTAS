@@ -815,7 +815,11 @@ static void SafeInjectThrottle(uintptr_t baseAddr, float throttle) {
     if (!baseAddr) return;
     __try {
         *(float*)(baseAddr + 0x68) = throttle;
-        *(float*)(baseAddr + 0x6C) = throttle;
+        // +0x6C is the game's effective throttle (after turn-rate penalties).
+        // Only write it at or below the penalty floor (0.50) so feathering
+        // works during rotation. Above 0.50 the game manages +0x6C.
+        if (throttle <= 0.50f)
+            *(float*)(baseAddr + 0x6C) = throttle;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
