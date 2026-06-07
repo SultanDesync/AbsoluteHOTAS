@@ -25,22 +25,18 @@ static void SafeInjectThrottle(uintptr_t baseAddr, float throttle) {
     if (!baseAddr) return;
     __try {
         *(float*)(baseAddr + 0x68) = throttle;
-        // +0x6C is the game's effective throttle (post turn-rate penalties).
-        // Only write it at/below the penalty floor (0.50) so feathering works
-        // during rotation. Above 0.50 the game manages +0x6C itself.
-        if (throttle <= 0.50f)
+        
+        float gameEffective = *(float*)(baseAddr + 0x6C);
+        
+        // Organic penalty detection:
+        // If our requested throttle is lower than or equal to the game's effective throttle,
+        // we are decelerating or exiting a boost state. We force the effective
+        // throttle down to our stick position to organically break boost locks.
+        // If our input is higher, the game is penalizing our turn-rate (or naturally
+        // accelerating), so we don't touch +0x6C.
+        if (throttle <= gameEffective) {
             *(float*)(baseAddr + 0x6C) = throttle;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-}
-
-// Injects a brief downward delta to cross the 0.50 boost gating threshold
-// without dropping all the way to 0.0, minimizing UI snap.
-static void SafeCancelBoostThrottle(uintptr_t baseAddr, float currentThrottle) {
-    if (!baseAddr) return;
-    float cancelImpulse = std::max(0.0f, currentThrottle - 0.01f);
-    __try {
-        *(float*)(baseAddr + 0x68) = cancelImpulse;
-        *(float*)(baseAddr + 0x6C) = cancelImpulse;
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -98,7 +94,6 @@ static float     s_accumulatorThrottle  = 0.0f;
 static int       s_accumBurstFrames     = 0;
 static float     s_lastAccumBurstValue  = -999.0f;
 static bool      s_prevBoostHeld        = false;
-static int       s_boostCancelFrames    = 0;
 
 // ============================================================================
 // Public API
@@ -122,7 +117,6 @@ void Disarm() {
     s_accumBurstFrames        = 0;
     s_lastAccumBurstValue     = -999.0f;
     s_prevBoostHeld           = false;
-    s_boostCancelFrames       = 0;
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
@@ -287,26 +281,14 @@ void Inject(float throttle, float pitch, float yaw, float roll,
     const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();
     
     if (!boostHeld && s_prevBoostHeld) {
-        // Boost release transition: burst a downward delta impulse through the throttle
-        // to write both +0x68 and +0x6C (passing the ≤0.50 gate) to hard-cancel boost.
-        s_boostCancelFrames = std::max(1, (cfg.pollRateHz * 50) / 1000); // Brief 50ms impulse
         if (cfg.bAccumulatorThrottle) {
             s_accumulatorThrottle = 1.0f;
             s_lastAccumBurstValue = -999.0f;
+            s_lastInjectedThrottle = -999.0f;
         }
-        s_lastInjectedThrottle = -999.0f;
     }
 
     s_prevBoostHeld = boostHeld;
-
-    // During boost cancel window, inject 0.0 directly into the effective throttle memory
-    // while keeping the visual indicator at the stick's true position.
-    if (s_boostCancelFrames > 0) {
-        ThrottleHook::SetReverseOverride(false);
-        SafeCancelBoostThrottle(s_activeThrottlePtr, throttle);
-        s_boostCancelFrames--;
-        return; // Skip normal injection so this pulse isn't overwritten
-    }
 
     if (cfg.bAccumulatorThrottle) {
         float stickDeflection = throttle;
