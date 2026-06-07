@@ -9,6 +9,6 @@ namespace Plugin
     static constexpr auto Name{ "AbsoluteHOTAS"sv };
     static constexpr auto Author{ "Antigravity"sv };
     static constexpr auto Version{
-        REL::Version{ 2, 5, 0, 0 }
+        REL::Version{ 2, 7, 0, 0 }
     };
 }

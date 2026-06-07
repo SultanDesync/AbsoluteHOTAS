@@ -147,13 +147,14 @@ static void DrawThrottleRangeGraph(WizardState& s, float barWidth, float barHeig
         }
     }
 
+    if (s.boostZone) {
+        bzNorm = NormThrottleRaw(s.boostZoneCenter);
+        if (bzDzNorm == 0.0f) bzDzNorm = (float)s.boostZoneDeadzone / 65535.0f;
+    }
+
     if (s.unipolarReverse) {
         rzNorm = NormThrottleRaw(s.reverseZoneCenter);
         if (rzDzNorm == 0.0f) rzDzNorm = (float)s.reverseZoneDeadzone / 65535.0f;
-        if (s.boostZone) {
-            bzNorm = NormThrottleRaw(s.boostZoneCenter);
-            if (bzDzNorm == 0.0f) bzDzNorm = (float)s.boostZoneDeadzone / 65535.0f;
-        }
 
         // Dead stop zone (amber)
         float dsLeft = std::max(0.0f, rzNorm - rzDzNorm) * barWidth;
@@ -181,28 +182,13 @@ static void DrawThrottleRangeGraph(WizardState& s, float barWidth, float barHeig
         if (ramp2Right > ramp2Left)
             dl->AddRectFilled(ImVec2(pos.x + ramp2Left, pos.y), ImVec2(pos.x + ramp2Right, pos.y + barHeight), colActive, 0.0f);
 
-        // Boost zone
-        if (s.boostZone) {
-            if (bzDzNorm > 0.001f) {
-                float platLeft = std::max(0.0f, bzNorm - bzDzNorm) * barWidth;
-                float platRight = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
-                dl->AddRectFilled(ImVec2(pos.x + platLeft, pos.y), ImVec2(pos.x + platRight, pos.y + barHeight),
-                    IM_COL32(210, 220, 235, 200), 0.0f);
-            }
-            float boostLeft = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
-            dl->AddRectFilled(ImVec2(pos.x + boostLeft, pos.y), ImVec2(pos.x + barWidth, pos.y + barHeight),
-                IM_COL32(180, 50, 220, 200), 0.0f);
-            float bzX = bzNorm * barWidth;
-            dl->AddLine(ImVec2(pos.x + bzX, pos.y), ImVec2(pos.x + bzX, pos.y + barHeight), IM_COL32(255, 100, 255, 230), 2.0f);
-        }
-
         // Reverse zone center marker (red line)
         float rzX = rzNorm * barWidth;
         dl->AddLine(ImVec2(pos.x + rzX, pos.y), ImVec2(pos.x + rzX, pos.y + barHeight), IM_COL32(255, 80, 80, 220), 2.0f);
     } else {
         // Standard unipolar
         float idleEnd = s.idlePlateau * barWidth;
-        float satEnd = sat * barWidth;
+        float satEnd = s.boostZone ? std::max(0.0f, bzNorm - bzDzNorm) * barWidth : sat * barWidth;
         if (satEnd > idleEnd)
             dl->AddRectFilled(ImVec2(pos.x + idleEnd, pos.y), ImVec2(pos.x + satEnd, pos.y + barHeight), colActive, 3.0f);
 
@@ -213,6 +199,21 @@ static void DrawThrottleRangeGraph(WizardState& s, float barWidth, float barHeig
             dl->AddRectFilled(ImVec2(pos.x + dzLeft, pos.y), ImVec2(pos.x + dzRight, pos.y + barHeight),
                 IM_COL32(200, 100, 30, 140), 0.0f);
         }
+    }
+
+    // Boost zone
+    if (s.boostZone) {
+        if (bzDzNorm > 0.001f) {
+            float platLeft = std::max(0.0f, bzNorm - bzDzNorm) * barWidth;
+            float platRight = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
+            dl->AddRectFilled(ImVec2(pos.x + platLeft, pos.y), ImVec2(pos.x + platRight, pos.y + barHeight),
+                IM_COL32(210, 220, 235, 200), 0.0f);
+        }
+        float boostLeft = std::min(1.0f, bzNorm + bzDzNorm) * barWidth;
+        dl->AddRectFilled(ImVec2(pos.x + boostLeft, pos.y), ImVec2(pos.x + barWidth, pos.y + barHeight),
+            IM_COL32(180, 50, 220, 200), 0.0f);
+        float bzX = bzNorm * barWidth;
+        dl->AddLine(ImVec2(pos.x + bzX, pos.y), ImVec2(pos.x + bzX, pos.y + barHeight), IM_COL32(255, 100, 255, 230), 2.0f);
     }
 
     // Center marker (cyan)
@@ -315,33 +316,31 @@ static void DrawThrottleCalibrationPanel(WizardState& s) {
     ImGui::Spacing();
 
     // Boost Zone
-    if (s.unipolarReverse) {
-        ImGui::Checkbox("Boost Zone", &s.boostZone);
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), s.boostZone ? "Top of axis = fire boosters" : "Off");
+    ImGui::Checkbox("Boost Zone", &s.boostZone);
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), s.boostZone ? "Top of axis = fire boosters" : "Off");
 
-        if (s.boostZone) {
-            if (s.calibratingBoostZone) {
-                if (ImGui::Button("Done##boostzone")) {
-                    s.calibratingBoostZone = false;
-                    WizLog("Boost zone set to: " + std::to_string(s.boostZoneCenter));
-                }
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Move throttle to boost position... %ld", s.boostZoneCenter);
-            } else {
-                if (ImGui::Button("Set Boost")) s.calibratingBoostZone = true;
-                ImGui::SameLine();
-                ImGui::Text("Boost: %ld", s.boostZoneCenter);
+    if (s.boostZone) {
+        if (s.calibratingBoostZone) {
+            if (ImGui::Button("Done##boostzone")) {
+                s.calibratingBoostZone = false;
+                WizLog("Boost zone set to: " + std::to_string(s.boostZoneCenter));
             }
-
-            ImGui::PushItemWidth(120);
-            float bzDzPct = (float)s.boostZoneDeadzone / 65535.0f * 100.0f;
-            if (ImGui::SliderFloat("100%% Plateau", &bzDzPct, 0.0f, 15.0f, "%.1f%%"))
-                s.boostZoneDeadzone = (long)(bzDzPct / 100.0f * 65535.0f);
-            ImGui::PopItemWidth();
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Flat 100%% before boost (%ld raw)", s.boostZoneDeadzone);
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Move throttle to boost position... %ld", s.boostZoneCenter);
+        } else {
+            if (ImGui::Button("Set Boost")) s.calibratingBoostZone = true;
+            ImGui::SameLine();
+            ImGui::Text("Boost: %ld", s.boostZoneCenter);
         }
+
+        ImGui::PushItemWidth(120);
+        float bzDzPct = (float)s.boostZoneDeadzone / 65535.0f * 100.0f;
+        if (ImGui::SliderFloat("100%% Plateau", &bzDzPct, 0.0f, 15.0f, "%.1f%%"))
+            s.boostZoneDeadzone = (long)(bzDzPct / 100.0f * 65535.0f);
+        ImGui::PopItemWidth();
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Flat 100%% before boost (%ld raw)", s.boostZoneDeadzone);
     }
 }
 
@@ -527,6 +526,7 @@ static void DrawAxesTab(WizardState& s) {
                 DrawThrottleRangeGraph(s, 200.0f, 14.0f);
             } else {
                 float sat = s.axisSaturation[i];
+                float dz = s.axisDeadzone[i];
                 float barWidth = 200.0f, barHeight = 14.0f;
                 ImVec2 pos = ImGui::GetCursorScreenPos();
                 ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -534,6 +534,19 @@ static void DrawAxesTab(WizardState& s) {
                 float cappedEdge = ((1.0f - sat) / 2.0f) * barWidth;
                 dl->AddRectFilled(ImVec2(pos.x + cappedEdge, pos.y), ImVec2(pos.x + barWidth - cappedEdge, pos.y + barHeight),
                     IM_COL32(50, 200, 80, 220), 3.0f);
+
+                // Draw Center Deadzone
+                if (dz > 0.001f) {
+                    float dzLeft = (0.5f - dz) * barWidth;
+                    float dzRight = (0.5f + dz) * barWidth;
+                    dl->AddRectFilled(ImVec2(pos.x + dzLeft, pos.y), ImVec2(pos.x + dzRight, pos.y + barHeight),
+                        IM_COL32(200, 100, 30, 140), 0.0f);
+                }
+
+                // Center line
+                dl->AddLine(ImVec2(pos.x + barWidth * 0.5f, pos.y), ImVec2(pos.x + barWidth * 0.5f, pos.y + barHeight),
+                    IM_COL32(80, 220, 240, 220), 2.0f);
+
                 dl->AddRect(pos, ImVec2(pos.x + barWidth, pos.y + barHeight), IM_COL32(120, 120, 120, 180), 3.0f);
                 ImGui::Dummy(ImVec2(barWidth, barHeight));
                 ImGui::SameLine();
@@ -546,63 +559,6 @@ static void DrawAxesTab(WizardState& s) {
                 ImGui::Indent(180);
                 DrawThrottleCalibrationPanel(s);
                 ImGui::Unindent(180);
-
-                // DualStick / Accumulator Mode
-                ImGui::Spacing();
-                ImGui::Indent(20);
-                if (ImGui::CollapsingHeader("Dual-Stick / Accumulator Mode", ImGuiTreeNodeFlags_None)) {
-                    ImGui::Indent(12);
-                    ImGui::Checkbox("Enable Accumulator Throttle", &s.accumulatorThrottle);
-                    if (s.accumulatorThrottle) {
-                        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Rate)");
-                        ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Stick deflection controls throttle speed, not position.");
-                        ImGui::Spacing();
-                        ImGui::PushItemWidth(180);
-                        ImGui::SliderFloat("Ramp Rate##accRate", &s.accumulatorRate, 0.1f, 5.0f, "%.1f units/s");
-                        ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At full deflection");
-                        ImGui::SliderFloat("Decay Rate##accDecay", &s.accumulatorDecay, 0.0f, 3.0f, "%.1f units/s");
-                        ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At neutral (0=hold)");
-                        ImGui::SliderFloat("Rev. Gate##accGate", &s.reverseGateVelocity, 0.0f, 50.0f, "%.0f m/s");
-                        ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Reverse below this speed");
-                        ImGui::PopItemWidth();
-                        ImGui::Spacing();
-                        ImGui::TextWrapped("Push forward to accelerate. Pull back to decelerate; at zero throttle, pulling further triggers reverse braking.");
-                    }
-                    ImGui::Unindent(12);
-                }
-                ImGui::Unindent(20);
-
-                // HOSAM Mode
-                ImGui::Spacing();
-                ImGui::Indent(20);
-                if (ImGui::CollapsingHeader("HOSAM Mode (Stick + Mouse)", ImGuiTreeNodeFlags_None)) {
-                    ImGui::Indent(12);
-                    ImGui::Checkbox("Enable HOSAM Mode", &s.hosamMode);
-                    if (s.hosamMode) {
-                        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Active)");
-                        ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Mouse drives steering. Pitch/Yaw axes released to native mouse.");
-                        ImGui::Spacing();
-                        ImGui::Checkbox("Alignment Assist", &s.alignmentAssist);
-                        if (s.alignmentAssist) {
-                            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Gently centers steering when mouse is idle near center.");
-                            ImGui::PushItemWidth(180);
-                            ImGui::SliderFloat("Radius##alignRad", &s.alignmentRadius, 1.0f, 100.0f, "%.0f units");
-                            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "of 200 max");
-                            int idleMs = s.alignmentIdleMs;
-                            if (ImGui::SliderInt("Idle Time##alignIdle", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
-                            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Before decay starts");
-                            ImGui::SliderFloat("Decay Speed##alignDecay", &s.alignmentDecayRate, 0.5f, 20.0f, "%.1f");
-                            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Higher = faster snap");
-                            ImGui::PopItemWidth();
-                        }
-                    } else {
-                        ImGui::TextWrapped("Use a joystick for throttle/strafe and your mouse for steering. Pitch and Yaw are released to the game's native mouse pipeline.");
-                    }
-                    ImGui::Unindent(12);
-                }
-                ImGui::Unindent(20);
             }
         }
 
@@ -720,6 +676,183 @@ static void DrawAimingTab(WizardState& s) {
     ImGui::PopID();
 }
 
+static void DrawAdvancedModesTab(WizardState& s) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Advanced Flight Modes");
+    ImGui::TextWrapped("Configure paradigm-shifting playstyles that fundamentally change how the ship is controlled.");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Dual-Stick / Accumulator Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(12);
+        ImGui::Checkbox("Enable Accumulator Throttle", &s.accumulatorThrottle);
+        if (s.accumulatorThrottle) {
+            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Rate)");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Stick deflection controls throttle speed, not position.");
+            ImGui::Spacing();
+            ImGui::PushItemWidth(180);
+            ImGui::SliderFloat("Ramp Rate##accRate", &s.accumulatorRate, 0.1f, 5.0f, "%.1f units/s");
+            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At full deflection");
+            ImGui::SliderFloat("Decay Rate##accDecay", &s.accumulatorDecay, 0.0f, 3.0f, "%.1f units/s");
+            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "At neutral (0=hold)");
+            ImGui::SliderFloat("Rev. Gate##accGate", &s.reverseGateVelocity, 0.0f, 50.0f, "%.0f m/s");
+            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Reverse below this speed");
+            ImGui::PopItemWidth();
+            ImGui::Spacing();
+            ImGui::TextWrapped("Push forward to accelerate. Pull back to decelerate; at zero throttle, pulling further triggers reverse braking.");
+        }
+        ImGui::Unindent(12);
+    }
+    
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("HOSAM Mode (Stick + Mouse)", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(12);
+        ImGui::Checkbox("Enable HOSAM Mode", &s.hosamMode);
+        if (s.hosamMode) {
+            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Active)");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Mouse drives steering. Pitch/Yaw axes released to native mouse.");
+            ImGui::Spacing();
+            ImGui::Checkbox("Alignment Assist", &s.alignmentAssist);
+            if (s.alignmentAssist) {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Gently centers steering when mouse is idle near center.");
+                ImGui::PushItemWidth(180);
+                ImGui::SliderFloat("Radius##alignRad", &s.alignmentRadius, 1.0f, 100.0f, "%.0f units");
+                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "of 200 max");
+                int idleMs = s.alignmentIdleMs;
+                if (ImGui::SliderInt("Idle Time##alignIdle", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
+                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Before decay starts");
+                ImGui::SliderFloat("Decay Speed##alignDecay", &s.alignmentDecayRate, 0.5f, 20.0f, "%.1f");
+                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Higher = faster snap");
+                ImGui::PopItemWidth();
+            }
+        } else {
+            ImGui::TextWrapped("Use a joystick for throttle/strafe and your mouse for steering. Pitch and Yaw are released to the game's native mouse pipeline.");
+        }
+        ImGui::Unindent(12);
+    }
+}
+
+static void DrawButtonsTab(WizardState& s) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons & Macros");
+    ImGui::TextWrapped("Configure button bindings for ship actions, custom macros, and plugin controls.");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(12);
+        ImGui::TextWrapped("Bind physical buttons to ship actions. Each action emits a keyboard/mouse output to Starfield.");
+        ImGui::Spacing();
+        for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
+            ImGui::PushID(3000 + i);
+            DrawBindingRow(s.shipActionSlots[i].label.c_str(), s.shipActionSlots[i].binding, CaptureSlot::kShipActionBase + i, false);
+            if (i == 0) {
+                ImGui::SameLine();
+                ImGui::Checkbox("Hold for Boost", &s.holdForBoost);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Pause throttle injection while boost is held.\nOn release: set throttle to max and cancel boost.");
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::Unindent(12);
+    }
+
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Custom Keyboard Macros", ImGuiTreeNodeFlags_None)) {
+        ImGui::Indent(12);
+        ImGui::TextWrapped("Bind controller buttons to emit custom keyboard/mouse outputs. Use Starfield's vanilla binding menu to assign matching secondary bindings.");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Add Binding")) s.customBindings.push_back({"(unbound)", "none"});
+        ImGui::SameLine();
+        if (ImGui::Button("Add Menu Cluster")) {
+            s.customBindings.push_back({"(unbound)", "key:0x11"});
+            s.customBindings.push_back({"(unbound)", "key:0x1E"});
+            s.customBindings.push_back({"(unbound)", "key:0x1F"});
+            s.customBindings.push_back({"(unbound)", "key:0x20"});
+            s.customBindings.push_back({"(unbound)", "key:0x0F"});
+            s.customBindings.push_back({"(unbound)", "key:0x12"});
+            s.customBindings.push_back({"(unbound)", "key:0x01"});
+            WizLog("Added menu cluster preset (WASD/Tab/E/Esc).");
+        }
+        ImGui::Spacing();
+
+        int removeIdx = -1;
+        for (int i = 0; i < (int)s.customBindings.size(); i++) {
+            auto& row = s.customBindings[i];
+            ImGui::PushID(5000 + i);
+            ImGui::Text("%-22s", row.buttonBinding.c_str());
+            ImGui::SameLine(180);
+
+            int currentOutput = FindOutputIndex(row.output);
+            const char* previewLabel = (currentOutput >= 0) ? kOutputCatalog[currentOutput].label : row.output.c_str();
+            ImGui::PushItemWidth(120);
+            if (ImGui::BeginCombo("##output", previewLabel)) {
+                for (int j = 0; j < kOutputCatalogSize; j++) {
+                    bool selected = (j == currentOutput);
+                    if (ImGui::Selectable(kOutputCatalog[j].label, selected)) row.output = kOutputCatalog[j].value;
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopItemWidth();
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Bind")) {
+                char label[64];
+                int outputIdx = FindOutputIndex(row.output);
+                std::snprintf(label, sizeof(label), "Custom #%d (%s)", i + 1, outputIdx >= 0 ? kOutputCatalog[outputIdx].label : "?");
+                WizardCapture::StartButtonCapture(i, CaptureSlot::kCustomBase, label);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear")) row.buttonBinding = "(unbound)";
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove")) removeIdx = i;
+            ImGui::PopID();
+        }
+        if (removeIdx >= 0) s.customBindings.erase(s.customBindings.begin() + removeIdx);
+        if (s.customBindings.empty())
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No custom bindings. Click 'Add Binding' or 'Add Menu Cluster' to get started.");
+        ImGui::Unindent(12);
+    }
+
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Digital Axis Emulation", ImGuiTreeNodeFlags_None)) {
+        ImGui::Indent(12);
+        ImGui::TextWrapped("Bind buttons to emulate axis input digitally (on/off). Useful for hat switches.");
+        ImGui::Spacing();
+        for (int i = 0; i < kNumDigitalAxisSlots; i++) {
+            ImGui::PushID(4000 + i);
+            DrawBindingRow(kDigitalAxisSlots[i].label, s.digitalAxisBindings[i], CaptureSlot::kDigitalAxisBase + i, false);
+            ImGui::PopID();
+        }
+        ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+        ImGui::PushItemWidth(120);
+        ImGui::SliderFloat("Roll Value", &s.digitalRollValue, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Strafe Value", &s.digitalStrafeValue, 0.0f, 1.0f, "%.2f");
+        ImGui::PopItemWidth();
+        ImGui::Unindent(12);
+    }
+
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Plugin Controls", ImGuiTreeNodeFlags_None)) {
+        ImGui::Indent(12);
+        ImGui::TextWrapped("Bind physical buttons to control the AbsoluteHOTAS plugin itself.");
+        ImGui::Spacing();
+        for (int i = 0; i < kNumButtonSlots; i++) {
+            ImGui::PushID(2000 + i);
+            DrawBindingRow(kButtonSlots[i].label, s.buttonBindings[i], CaptureSlot::kButtonBase + i, false);
+            ImGui::PopID();
+        }
+        ImGui::Unindent(12);
+    }
+}
+
 // --- Main Draw ---
 void BindingWizard::Draw() {
     static bool s_allDevicesOpened = false;
@@ -738,144 +871,52 @@ void BindingWizard::Draw() {
         return;
     }
 
+    float footerHeightToReserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + 20.0f;
+    ImGui::BeginChild("WizardTabsChild", ImVec2(0, -footerHeightToReserve), false);
+
     if (ImGui::BeginTabBar("WizardTabs")) {
 
-        if (ImGui::BeginTabItem("Devices")) {
+        if (ImGui::BeginTabItem("Hardware & Devices")) {
             DrawDevicesTab(s);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Axes & Settings")) {
+        if (ImGui::BeginTabItem("Flight Axes")) {
             DrawAxesTab(s);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Control Buttons")) {
-            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Plugin Control Buttons");
-            ImGui::TextWrapped("Click 'Bind' then press the physical button to assign.");
-            ImGui::Separator();
-            ImGui::Spacing();
-            for (int i = 0; i < kNumButtonSlots; i++) {
-                ImGui::PushID(2000 + i);
-                DrawBindingRow(kButtonSlots[i].label, s.buttonBindings[i], CaptureSlot::kButtonBase + i, false);
-                ImGui::PopID();
-            }
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Ship Actions")) {
-            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Ship Action Button Bindings");
-            ImGui::TextWrapped("Bind physical buttons to ship actions. Each action emits a keyboard/mouse output to Starfield.");
-            ImGui::Separator();
-            ImGui::Spacing();
-            for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
-                ImGui::PushID(3000 + i);
-                DrawBindingRow(s.shipActionSlots[i].label.c_str(), s.shipActionSlots[i].binding, CaptureSlot::kShipActionBase + i, false);
-                if (i == 0) {
-                    ImGui::SameLine();
-                    ImGui::Checkbox("Hold for Boost", &s.holdForBoost);
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Pause throttle injection while boost is held.\nOn release: set throttle to max and cancel boost.");
-                    }
-                }
-                ImGui::PopID();
-            }
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Digital Axes")) {
-            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Digital Axis Button Bindings");
-            ImGui::TextWrapped("Bind buttons to emulate axis input digitally (on/off). Useful for hat switches.");
-            ImGui::Separator();
-            ImGui::Spacing();
-            for (int i = 0; i < kNumDigitalAxisSlots; i++) {
-                ImGui::PushID(4000 + i);
-                DrawBindingRow(kDigitalAxisSlots[i].label, s.digitalAxisBindings[i], CaptureSlot::kDigitalAxisBase + i, false);
-                ImGui::PopID();
-            }
-            ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
-            ImGui::PushItemWidth(120);
-            ImGui::SliderFloat("Roll Value", &s.digitalRollValue, 0.0f, 1.0f, "%.2f");
-            ImGui::SliderFloat("Strafe Value", &s.digitalStrafeValue, 0.0f, 1.0f, "%.2f");
-            ImGui::PopItemWidth();
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Custom Bindings")) {
-            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Custom Button Bindings");
-            ImGui::TextWrapped("Bind controller buttons to emit keyboard/mouse outputs. Use Starfield's vanilla binding menu to assign matching secondary bindings.");
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            if (ImGui::Button("Add Binding")) s.customBindings.push_back({"(unbound)", "none"});
-            ImGui::SameLine();
-            if (ImGui::Button("Add Menu Cluster")) {
-                s.customBindings.push_back({"(unbound)", "key:0x11"});
-                s.customBindings.push_back({"(unbound)", "key:0x1E"});
-                s.customBindings.push_back({"(unbound)", "key:0x1F"});
-                s.customBindings.push_back({"(unbound)", "key:0x20"});
-                s.customBindings.push_back({"(unbound)", "key:0x0F"});
-                s.customBindings.push_back({"(unbound)", "key:0x12"});
-                s.customBindings.push_back({"(unbound)", "key:0x01"});
-                WizLog("Added menu cluster preset (WASD/Tab/E/Esc).");
-            }
-            ImGui::Spacing();
-
-            int removeIdx = -1;
-            for (int i = 0; i < (int)s.customBindings.size(); i++) {
-                auto& row = s.customBindings[i];
-                ImGui::PushID(5000 + i);
-                ImGui::Text("%-22s", row.buttonBinding.c_str());
-                ImGui::SameLine(180);
-
-                int currentOutput = FindOutputIndex(row.output);
-                const char* previewLabel = (currentOutput >= 0) ? kOutputCatalog[currentOutput].label : row.output.c_str();
-                ImGui::PushItemWidth(120);
-                if (ImGui::BeginCombo("##output", previewLabel)) {
-                    for (int j = 0; j < kOutputCatalogSize; j++) {
-                        bool selected = (j == currentOutput);
-                        if (ImGui::Selectable(kOutputCatalog[j].label, selected)) row.output = kOutputCatalog[j].value;
-                        if (selected) ImGui::SetItemDefaultFocus();
-                    }
-                    ImGui::EndCombo();
-                }
-                ImGui::PopItemWidth();
-
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Bind")) {
-                    char label[64];
-                    int outputIdx = FindOutputIndex(row.output);
-                    std::snprintf(label, sizeof(label), "Custom #%d (%s)", i + 1, outputIdx >= 0 ? kOutputCatalog[outputIdx].label : "?");
-                    WizardCapture::StartButtonCapture(i, CaptureSlot::kCustomBase, label);
-                }
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Clear")) row.buttonBinding = "(unbound)";
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Remove")) removeIdx = i;
-                ImGui::PopID();
-            }
-            if (removeIdx >= 0) s.customBindings.erase(s.customBindings.begin() + removeIdx);
-            if (s.customBindings.empty())
-                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No custom bindings. Click 'Add Binding' or 'Add Menu Cluster' to get started.");
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Aiming")) {
+        if (ImGui::BeginTabItem("Aiming & Combat")) {
             DrawAimingTab(s);
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Buttons & Macros")) {
+            DrawButtonsTab(s);
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Advanced Modes")) {
+            DrawAdvancedModesTab(s);
             ImGui::EndTabItem();
         }
 
         ImGui::EndTabBar();
     }
+    ImGui::EndChild();
 
-    ImGui::Spacing();
+    // Fixed Footer for Save Button
     ImGui::Separator();
     ImGui::Spacing();
-
-    ImGui::Spacing();
+    
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
     if (ImGui::Button("Save & Apply", ImVec2(160, 36))) {
         WizardConfig::SaveBindingsToINI();
     }
+    ImGui::PopStyleColor(3);
+
     ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Writes to AbsoluteHOTAS.ini and reloads live.");
 
