@@ -49,6 +49,11 @@ static volatile uint8_t  g_sourceAimEnabled  = 0;
 static volatile uint32_t g_sourceAimYawBits  = 0;
 static volatile uint32_t g_sourceAimPitchBits = 0;
 
+// Guard flag: when true, reverse override owns the vertical strafe gate (+0x5C).
+// SetRotationalOverride and SetManualLaneOverride must not touch g_vertStrafeOverrideEnabled
+// or g_vertStrafeBits while this flag is set.
+static volatile uint8_t g_reverseOwnsVertStrafe = 0;
+
 
 // ---- Hook Registry for Persistent Silencing ----
 struct HookRecord {
@@ -725,23 +730,30 @@ bool ThrottleHook::IsSilenceEnabled() {
 
 void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled, bool yawEnabled, bool pitchEnabled) {
     g_rollBits = FloatToBits(lateral);
-    g_vertStrafeBits = FloatToBits(vertical);
     g_yawBits = FloatToBits(yaw);
     g_pitchBits = FloatToBits(pitch);
     g_rotOverrideEnabled = enabled ? 1 : 0;
     g_rollOverrideEnabled = (enabled && lateralEnabled) ? 1 : 0;
-    g_vertStrafeOverrideEnabled = (enabled && verticalEnabled) ? 1 : 0;
     g_yawOverrideEnabled = (enabled && yawEnabled) ? 1 : 0;
     g_pitchOverrideEnabled = (enabled && pitchEnabled) ? 1 : 0;
+
+    // Vertical strafe lane: skip if reverse override owns it.
+    if (!g_reverseOwnsVertStrafe) {
+        g_vertStrafeBits = FloatToBits(vertical);
+        g_vertStrafeOverrideEnabled = (enabled && verticalEnabled) ? 1 : 0;
+    }
 }
 
 void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool enabled) {
     uint32_t bits = FloatToBits(value);
 
     g_rollOverrideEnabled = 0;
-    g_vertStrafeOverrideEnabled = 0;
     g_yawOverrideEnabled = 0;
     g_pitchOverrideEnabled = 0;
+    // Only touch vertical strafe if reverse doesn't own it
+    if (!g_reverseOwnsVertStrafe) {
+        g_vertStrafeOverrideEnabled = 0;
+    }
 
     if (!enabled) {
         g_rotOverrideEnabled = 0;
@@ -842,6 +854,37 @@ void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
 
 bool ThrottleHook::IsSourcePtrValid() {
     return g_capturedSourceR13 != 0;
+}
+
+void ThrottleHook::SetReverseOverride(bool enabled) {
+    if (enabled) {
+        // Claim the vertical strafe gate for reverse — blocks SetRotationalOverride
+        g_reverseOwnsVertStrafe = 1;
+
+        // 1. Lock the vertical strafe gate to -1.0
+        g_vertStrafeBits = FloatToBits(-1.0f);
+        g_vertStrafeOverrideEnabled = 1;
+
+        // 2. Write upstream decel intent to source+0x3C
+        uintptr_t src = g_capturedSourceR13;
+        if (src) {
+            __try {
+                *(volatile float*)(src + 0x3C) = -1.0f;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+    } else {
+        // Release the vertical strafe gate — SetRotationalOverride can reclaim it
+        g_reverseOwnsVertStrafe = 0;
+        g_vertStrafeOverrideEnabled = 0;
+
+        // Clear upstream decel intent
+        uintptr_t src = g_capturedSourceR13;
+        if (src) {
+            __try {
+                *(volatile float*)(src + 0x3C) = 0.0f;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+    }
 }
 
 static bool HasCompanion6C(uintptr_t addr, uintptr_t textStart, size_t textSize) {

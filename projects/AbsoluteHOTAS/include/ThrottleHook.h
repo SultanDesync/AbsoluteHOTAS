@@ -48,6 +48,13 @@ public:
     static void SetSourceObjectAim(float yaw, float pitch, bool enabled);
     static bool IsSourcePtrValid();
 
+    // Engage or disengage direct-memory reverse flight.
+    // When enabled: locks cluster+0x5C to -1.0 via the vertical strafe trampoline gate,
+    // writes -1.0 to source+0x3C (upstream decel intent).
+    // Caller is responsible for writing -1.0 to cluster+0x68 (throttle target).
+    // When disabled: releases the vertical strafe gate and clears source+0x3C.
+    static void SetReverseOverride(bool enabled);
+
 private:
     static std::atomic<uintptr_t> s_basePtr;
     static std::atomic<int64_t>   s_lastHookTimestamp;

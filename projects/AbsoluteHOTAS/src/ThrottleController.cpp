@@ -841,24 +841,18 @@ static float SafeReadFloat(uintptr_t addr) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
 }
 
-// Static module offset for ship velocity (HUD-rate cached).
-// Discovered via CE integer-match on speedometer display (2026-06-04).
-// Must be re-validated per game version.
-static constexpr uintptr_t kVelocityModuleOffset = 0x5E75644;
-
-static float ReadShipVelocity() {
-    static uintptr_t s_velocityAddr = 0;
-    if (!s_velocityAddr) {
-        uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
-        if (moduleBase) s_velocityAddr = moduleBase + kVelocityModuleOffset;
-    }
-    if (!s_velocityAddr) return -1.0f;
+// Read ship velocity from the validated flight control cluster (+0x70).
+// Lives inside the same struct discovered by SignalHunter — no separate
+// pointer resolution needed. Returns -1.0f if cluster not yet locked.
+static float ReadClusterVelocity(uintptr_t clusterBase) {
+    if (!clusterBase) return -1.0f;
     __try {
-        return *(volatile float*)(s_velocityAddr);
+        return *(volatile float*)(clusterBase + 0x70);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return -1.0f;
     }
 }
+
 
 #pragma warning(pop)
 
@@ -903,6 +897,7 @@ static void DisarmFlightControlState() {
     s_prevBoostHeld = false;
     s_boostCancelFrames = 0;
     ReleaseAllShipButtonOutputs();
+    ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
@@ -921,6 +916,7 @@ static void ArmDiscoveryForReacquire(const char* reason) {
     s_activeThrottlePtr = 0;
     s_plausibilityFailCount = 0;
     s_throttleBurstFrames = 0;
+    ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
     ThrottleHook::ClearCandidates();
@@ -1151,8 +1147,6 @@ void ThrottleController::ControlLoop() {
             wasPiloting = true;
         }
 
-        bool reverseKeyHeld = (GetAsyncKeyState('S') & 0x8000) != 0;
-
         auto IsButtonPressed = [](const BindingRef& ref) -> bool {
             return IsButtonPressedStatic(ref);
         };
@@ -1275,7 +1269,8 @@ void ThrottleController::ControlLoop() {
             }
         }
 
-        SetOutputHeld(ReverseOutput, OwnerDigitalReverse, reverseHeld);
+        // Reverse is now handled via direct-memory override in the injection branch below.
+        // No S-key emulation needed — SetReverseOverride() drives +0x5C, +0x3C, and +0x68 directly.
 
         // Boost zone: trigger FireBoosters output when throttle axis is above boostZone+dz
         // Uses the same SetOutputHeld system so IsBoostOutputHeld() detects it and
@@ -1756,13 +1751,13 @@ void ThrottleController::ControlLoop() {
                      // --- ACCUMULATOR THROTTLE MODE (Dual-Stick / Self-Centering) ---
                      // Stick deflection is a RATE input:
                      //   Forward  → accumulate throttle upward, proportional to deflection
-                     //   Backward → reduce throttle toward 0, then hold S key for reverse
+                     //   Backward → reduce throttle toward 0, then direct-memory reverse
                      //   Neutral  → HOLD current throttle value (no decay)
                      const float kDeadzone = std::max(s_config.fThrottleDeadzone, 0.05f); // Min 5% for accumulator stability
-                     bool wantReverse = false;
 
                      if (stickDeflection > kDeadzone) {
                          // Forward: accumulate upward
+                         ThrottleHook::SetReverseOverride(false);
                          s_accumulatorThrottle += stickDeflection * s_config.fAccumulatorRate * dt;
                          s_accumulatorThrottle = std::clamp(s_accumulatorThrottle, 0.0f, 1.0f);
                      } else if (stickDeflection < -kDeadzone) {
@@ -1771,12 +1766,41 @@ void ThrottleController::ControlLoop() {
                              s_accumulatorThrottle += stickDeflection * s_config.fAccumulatorRate * dt;
                              if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
                          } else {
-                             // Throttle at 0 and stick still back → send S for reverse/brake
-                             s_accumulatorThrottle = 0.0f;
-                             wantReverse = true;
-                         }
+                              // Throttle at 0 and stick still back → direct-memory reverse
+                              s_accumulatorThrottle = 0.0f;
+                              float vel = ReadClusterVelocity(s_activeThrottlePtr);
+                              bool gateOpen = (vel < 0.0f) || (vel >= 0.0f && vel <= s_config.fReverseGateVelocity);
+
+                              if (gateOpen) {
+                                  ThrottleHook::SetReverseOverride(true);
+                                  SafeInjectThrottle(s_activeThrottlePtr, -1.0f);
+                                  s_lastInjectedThrottle = -1.0f;
+                              } else {
+                                  ThrottleHook::SetReverseOverride(false);
+                                  SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
+                              }
+
+                              // Reverse diagnostics
+                              if (s_config.logThrottle) {
+                                  static uint64_t s_revLogIter = 0;
+                                  if (iter > s_revLogIter + 15) {
+                                      s_revLogIter = iter;
+                                      char revBuf[256];
+                                      snprintf(revBuf, sizeof(revBuf),
+                                          "[Reverse] accum vel=%.1f gate=%s src=%s +5C=%+.3f +68=%+.3f +6C=%+.3f +70=%.1f",
+                                          vel, gateOpen ? "OPEN" : "CLOSED",
+                                          ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
+                                          SafeReadFloat(s_activeThrottlePtr + 0x5C),
+                                          SafeReadFloat(s_activeThrottlePtr + 0x68),
+                                          SafeReadFloat(s_activeThrottlePtr + 0x6C),
+                                          SafeReadFloat(s_activeThrottlePtr + 0x70));
+                                      RuntimePaths::AppendLogAlways("[Controller]", revBuf);
+                                  }
+                              }
+                          }
                      } else {
                          // Neutral: HOLD current throttle value (optional decay if configured)
+                         ThrottleHook::SetReverseOverride(false);
                          if (s_config.fAccumulatorDecay > 0.0f) {
                              if (s_accumulatorThrottle > 0.0f) {
                                  s_accumulatorThrottle -= s_config.fAccumulatorDecay * dt;
@@ -1785,9 +1809,6 @@ void ThrottleController::ControlLoop() {
                          }
                          // else: decay=0 → hold at current value
                      }
-
-                     // Drive the S-key output for reverse braking (normal operation)
-                     SetOutputHeld(ReverseOutput, OwnerDigitalReverse, wantReverse);
 
                      // --- DELTA BURST INJECTION ---
                      // Only write to +0x68/+0x6C when the accumulator value actually
@@ -1822,17 +1843,14 @@ void ThrottleController::ControlLoop() {
                      if (s_config.logThrottle) {
                          static bool s_velStartupLogged = false;
                          static uint64_t s_velLogIter = 0;
-                         float vel = ReadShipVelocity();
+                         float vel = ReadClusterVelocity(s_activeThrottlePtr);
 
                          if (!s_velStartupLogged) {
                              s_velStartupLogged = true;
-                             uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
                              char velBuf[256];
                              snprintf(velBuf, sizeof(velBuf),
-                                 "[DualStick] Velocity monitor online: addr=0x%llX (base=0x%llX + 0x%X) rawVal=%.4f",
-                                 (unsigned long long)(moduleBase + kVelocityModuleOffset),
-                                 (unsigned long long)moduleBase,
-                                 (unsigned)kVelocityModuleOffset,
+                                 "[DualStick] Velocity monitor online: cluster+0x70 @ 0x%llX rawVal=%.4f",
+                                 (unsigned long long)(s_activeThrottlePtr + 0x70),
                                  vel);
                              RuntimePaths::AppendLogAlways("[Controller]", velBuf);
                          }
@@ -1855,20 +1873,66 @@ void ThrottleController::ControlLoop() {
                      static uint64_t lastLogIter = 0;
                      if (s_config.logThrottle && iter > lastLogIter + 30) {
                          if (std::abs(pitch - lP) > 0.05f || std::abs(yaw - lY) > 0.05f || std::abs(roll - lR) > 0.05f || std::abs(stickDeflection) > 0.05f) {
-                             float vel = ReadShipVelocity();
+                             float vel = ReadClusterVelocity(s_activeThrottlePtr);
                              char tel[256];
                              sprintf_s(tel, "[Telemetry] Vector: P%+.3f Y%+.3f R%+.3f | Accum%+.3f Stick%+.3f Vel%.0f", pitch, yaw, roll, targetThrottle, stickDeflection, vel);
                              CtrlLog(tel);
                              lP=pitch; lY=yaw; lR=roll; lastLogIter = iter;
                          }
                      }
-                } else if (reverseKeyHeld || reverseHeld) {
+                } else if (reverseHeld) {
+                     // Direct-memory reverse: binary -1.0 across all three lanes.
+                     float vel = ReadClusterVelocity(s_activeThrottlePtr);
+                     // Gate logic: allow reverse when velocity is at or below the threshold,
+                     // OR already negative (already reversing — don't cut out mid-reverse).
+                     // Only block when moving forward faster than the gate threshold.
+                     bool gateOpen = (vel < 0.0f) || (vel >= 0.0f && vel <= s_config.fReverseGateVelocity);
+
+                     if (gateOpen) {
+                         ThrottleHook::SetReverseOverride(true);
+                         SafeInjectThrottle(s_activeThrottlePtr, -1.0f);
+                         s_lastInjectedThrottle = -1.0f;
+                     } else {
+                         // Above velocity gate: brake to zero, don't engage reverse yet
+                         ThrottleHook::SetReverseOverride(false);
+                         SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
+                         s_lastInjectedThrottle = 0.0f;
+                     }
+
+                     // Reverse diagnostics — log every gate transition + periodic
+                     if (s_config.logThrottle) {
+                         static uint64_t s_revLogIter2 = 0;
+                         static bool s_prevGateOpen = false;
+                         bool gateTransition = (gateOpen != s_prevGateOpen);
+                         s_prevGateOpen = gateOpen;
+
+                         if (gateTransition || iter > s_revLogIter2 + 15) {
+                             s_revLogIter2 = iter;
+                             uintptr_t src = ThrottleHook::GetSourceBasePtr();
+                             float src3C = src ? SafeReadFloat(src + 0x3C) : -999.0f;
+                             char revBuf[384];
+                             snprintf(revBuf, sizeof(revBuf),
+                                 "[Reverse] hw %svel=%.1f gate=%s src=%s src3C=%+.3f +5C=%+.3f +68=%+.3f +6C=%+.3f +70=%.1f",
+                                 gateTransition ? "TRANSITION " : "",
+                                 vel, gateOpen ? "OPEN" : "CLOSED",
+                                 ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
+                                 src3C,
+                                 SafeReadFloat(s_activeThrottlePtr + 0x5C),
+                                 SafeReadFloat(s_activeThrottlePtr + 0x68),
+                                 SafeReadFloat(s_activeThrottlePtr + 0x6C),
+                                 SafeReadFloat(s_activeThrottlePtr + 0x70));
+                             RuntimePaths::AppendLogAlways("[Controller]", revBuf);
+                         }
+                     }
+
                      s_throttleBurstFrames = 0;
-                     lastInjectedHardwareValue = throttle; // Prevent sudden jumps on re-engagement
+                     lastInjectedHardwareValue = -999.0f; // Reset delta guard for forward re-engagement
                 } else if (s_config.bHoldForBoost && IsBoostOutputHeld()) {
                      // Hold-for-boost: suppress throttle writes, let the game own +0x68/+0x6C
+                     ThrottleHook::SetReverseOverride(false);
                      s_throttleBurstFrames = 0;
                 } else {
+                     ThrottleHook::SetReverseOverride(false);
                      float commandedThrottle = throttle;
                      bool firstThrottleCommand = (lastInjectedHardwareValue == -999.0f);
                      bool throttleMoved = firstThrottleCommand ||
