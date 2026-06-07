@@ -33,6 +33,17 @@ static void SafeInjectThrottle(uintptr_t baseAddr, float throttle) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+// Injects a brief downward delta to cross the 0.50 boost gating threshold
+// without dropping all the way to 0.0, minimizing UI snap.
+static void SafeCancelBoostThrottle(uintptr_t baseAddr, float currentThrottle) {
+    if (!baseAddr) return;
+    float cancelImpulse = std::max(0.0f, currentThrottle - 0.01f);
+    __try {
+        *(float*)(baseAddr + 0x68) = cancelImpulse;
+        *(float*)(baseAddr + 0x6C) = cancelImpulse;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 static bool IsThrottlePlausible(uintptr_t basePtr) {
     __try {
         float val = *(volatile float*)(basePtr + 0x68);
@@ -272,27 +283,35 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         strafeY, strafeVertOverrideActive,
         true, true);  // yaw/pitch enabled (aim suppression handled by AimController)
 
+    // --- BOOST GUARD & CANCEL LOGIC ---
+    const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();
+    
+    if (!boostHeld && s_prevBoostHeld) {
+        // Boost release transition: burst a downward delta impulse through the throttle
+        // to write both +0x68 and +0x6C (passing the ≤0.50 gate) to hard-cancel boost.
+        s_boostCancelFrames = std::max(1, (cfg.pollRateHz * 50) / 1000); // Brief 50ms impulse
+        if (cfg.bAccumulatorThrottle) {
+            s_accumulatorThrottle = 1.0f;
+            s_lastAccumBurstValue = -999.0f;
+        }
+        s_lastInjectedThrottle = -999.0f;
+    }
+
+    s_prevBoostHeld = boostHeld;
+
+    // During boost cancel window, inject 0.0 directly into the effective throttle memory
+    // while keeping the visual indicator at the stick's true position.
+    if (s_boostCancelFrames > 0) {
+        ThrottleHook::SetReverseOverride(false);
+        SafeCancelBoostThrottle(s_activeThrottlePtr, throttle);
+        s_boostCancelFrames--;
+        return; // Skip normal injection so this pulse isn't overwritten
+    }
+
     if (cfg.bAccumulatorThrottle) {
-        // --- BOOST GUARD ---
-        const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();
         float stickDeflection = throttle;
 
         if (!boostHeld) {
-            // Boost release transition
-            if (s_prevBoostHeld) {
-                s_accumulatorThrottle = 1.0f;
-                s_lastAccumBurstValue = -999.0f;
-                s_boostCancelFrames   = std::max(1, (cfg.pollRateHz * 150) / 1000);
-            }
-
-            // Sustained reverse hold to cancel boost
-            if (s_boostCancelFrames > 0) {
-                ShipOutputSystem::SetOutputHeld(ReverseOutput, OwnerBoostCancel, true);
-                s_boostCancelFrames--;
-                if (s_boostCancelFrames == 0)
-                    ShipOutputSystem::SetOutputHeld(ReverseOutput, OwnerBoostCancel, false);
-            }
-
             const float kDeadzone = std::max(cfg.fThrottleDeadzone, 0.05f);
 
             if (stickDeflection > kDeadzone) {
@@ -344,6 +363,7 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
             // Delta burst injection
             float accTarget = std::max(s_accumulatorThrottle, 0.0f);
+
             bool accMoved   = (std::abs(accTarget - s_lastAccumBurstValue) > kThrottleDeltaAuthority);
             if (accMoved) {
                 s_accumBurstFrames    = throttleBurstFrameCount;
@@ -358,8 +378,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             // Boost held: game owns throttle
             s_accumBurstFrames = 0;
         }
-
-        s_prevBoostHeld = boostHeld;
 
         // Diagnostics
         if (cfg.logThrottle) {
@@ -427,11 +445,10 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         s_throttleBurstFrames  = 0;
         s_lastInjectedThrottle = -999.0f;
 
-    } else if (cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld()) {
+    } else if (boostHeld) {
         // Suppress throttle writes during boost
         ThrottleHook::SetReverseOverride(false);
         s_throttleBurstFrames = 0;
-
     } else {
         // Standard absolute throttle injection
         ThrottleHook::SetReverseOverride(false);
