@@ -23,21 +23,6 @@ static void SafeWriteFloat(uintptr_t addr, float value) {
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-static long GetAxisFromState(const DIJOYSTATE2* st, int usageId) {
-    if (!st) return 0;
-    switch (usageId) {
-        case 0x30: return st->lX;
-        case 0x31: return st->lY;
-        case 0x32: return st->lZ;
-        case 0x33: return st->lRx;
-        case 0x34: return st->lRy;
-        case 0x35: return st->lRz;
-        case 0x36: return st->rglSlider[0];
-        case 0x37: return st->rglSlider[1];
-        default:   return 0;
-    }
-}
-
 // Bipolar normalisation for an analog axis, with optional calibration override.
 static float NormBipolar(const ThrottleController::Config& cfg,
                          const BindingRef& ref, float sens, bool invert, float saturation = 1.0f)
@@ -46,7 +31,7 @@ static float NormBipolar(const ThrottleController::Config& cfg,
     const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
     if (!st) return 0.0f;
 
-    float raw  = static_cast<float>(GetAxisFromState(st, ref.value));
+    float raw  = static_cast<float>(DeviceManager::GetAxisFromState(st, ref.value));
     float aMin = 0.0f, aMax = 65535.0f;
 
     if (ref.deviceIndex >= 0) {

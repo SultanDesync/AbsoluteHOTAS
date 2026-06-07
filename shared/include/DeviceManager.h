@@ -56,6 +56,9 @@ public:
     
     // Open ALL enumerated devices for polling (used by BindingWizard)
     static void OpenAllDevices();
+
+    // Extract an axis value from DIJOYSTATE2 by HID usage ID (0x30-0x37)
+    static long GetAxisFromState(const DIJOYSTATE2* st, int usageId);
     
     // DirectInput Context
     static LPDIRECTINPUT8 GetDirectInputContext();

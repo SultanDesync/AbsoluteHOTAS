@@ -107,3 +107,27 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
 
     return ref;
 }
+
+// Format a BindingRef as a human-readable display string.
+// When hex=true, values are printed as 0x%02X (axis usage IDs).
+// When hex=false, values are printed as decimal (button IDs).
+inline std::string FormatBindingRef(const BindingRef& ref, bool hex) {
+    if (!ref.IsValid() || ref.value <= 0) return "(unbound)";
+    char buf[256];
+    if (hex) {
+        if (ref.HasIndex() && ref.deviceName.empty())
+            std::snprintf(buf, sizeof(buf), "#%d@0x%02X", ref.deviceIndex, ref.value);
+        else if (ref.deviceName.empty())
+            std::snprintf(buf, sizeof(buf), "0x%02X", ref.value);
+        else
+            std::snprintf(buf, sizeof(buf), "%s@0x%02X", ref.deviceName.c_str(), ref.value);
+    } else {
+        if (ref.HasIndex() && ref.deviceName.empty())
+            std::snprintf(buf, sizeof(buf), "#%d@%d", ref.deviceIndex, ref.value);
+        else if (ref.deviceName.empty())
+            std::snprintf(buf, sizeof(buf), "%d", ref.value);
+        else
+            std::snprintf(buf, sizeof(buf), "%s@%d", ref.deviceName.c_str(), ref.value);
+    }
+    return buf;
+}

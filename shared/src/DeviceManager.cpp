@@ -277,6 +277,21 @@ void DeviceManager::OpenAllDevices() {
     DevLog(std::format("OpenAllDevices: {}/{} devices opened for polling.", opened, count));
 }
 
+long DeviceManager::GetAxisFromState(const DIJOYSTATE2* st, int usageId) {
+    if (!st) return 0;
+    switch (usageId) {
+        case 0x30: return st->lX;
+        case 0x31: return st->lY;
+        case 0x32: return st->lZ;
+        case 0x33: return st->lRx;
+        case 0x34: return st->lRy;
+        case 0x35: return st->lRz;
+        case 0x36: return st->rglSlider[0];
+        case 0x37: return st->rglSlider[1];
+        default:   return 0;
+    }
+}
+
 LPDIRECTINPUT8 DeviceManager::GetDirectInputContext() {
     return g_pDI;
 }

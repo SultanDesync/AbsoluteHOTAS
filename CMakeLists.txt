@@ -43,12 +43,17 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ThrottleHook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/BindingWizard.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/WizardCapture.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/WizardConfig.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ShipOutput.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SignalHunter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/AimController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleController.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleHook.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/BindingWizard.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/WizardDefs.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/WizardCapture.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/WizardConfig.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ShipOutput.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SignalHunter.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/AimController.h
