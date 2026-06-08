@@ -126,20 +126,53 @@ struct OutputOption {
 };
 
 inline const OutputOption kOutputCatalog[] = {
-    {"W", "key:0x11"}, {"A", "key:0x1E"}, {"S", "key:0x1F"}, {"D", "key:0x20"},
-    {"E", "key:0x12"}, {"R", "key:0x13"}, {"F", "key:0x21"}, {"G", "key:0x22"},
-    {"Q", "key:0x10"}, {"X", "key:0x2D"}, {"T", "key:0x14"}, {"O", "key:0x18"},
-    {"Tab", "key:0x0F"}, {"Space", "key:0x39"}, {"Esc", "key:0x01"},
-    {"L Shift", "key:0x2A"}, {"L Ctrl", "key:0x1D"}, {"L Alt", "key:0x38"},
-    {"Enter", "key:0x1C"},
-    {"Up", "key:0x48"}, {"Down", "key:0x50"}, {"Left", "key:0x4B"}, {"Right", "key:0x4D"},
-    {"[", "key:0x1A"}, {"]", "key:0x1B"}, {";", "key:0x27"}, {"'", "key:0x28"},
-    {",", "key:0x33"}, {".", "key:0x34"}, {"/", "key:0x35"},
+    // Mouse
     {"Mouse 1", "mouse:1"}, {"Mouse 2", "mouse:2"}, {"Mouse 3", "mouse:3"}, {"Mouse 4", "mouse:4"},
-    {"Numpad 0", "key:0x52"}, {"Numpad 1", "key:0x4F"}, {"Numpad 3", "key:0x51"},
-    {"Numpad 5", "key:0x4C"}, {"Numpad 7", "key:0x47"}, {"Numpad 9", "key:0x49"},
+
+    // Modifiers & Control
+    {"Space", "key:0x39"}, {"Tab", "key:0x0F"}, {"Esc", "key:0x01"}, {"Enter", "key:0x1C"}, {"Backspace", "key:0x0E"},
+    {"L Shift", "key:0x2A"}, {"L Ctrl", "key:0x1D"}, {"L Alt", "key:0x38"},
+    {"R Shift", "key:0x36"}, {"R Ctrl", "key:0x9D"}, {"R Alt", "key:0xB8"},
+
+    // Alphabet
+    {"A", "key:0x1E"}, {"B", "key:0x30"}, {"C", "key:0x2E"}, {"D", "key:0x20"},
+    {"E", "key:0x12"}, {"F", "key:0x21"}, {"G", "key:0x22"}, {"H", "key:0x23"},
+    {"I", "key:0x17"}, {"J", "key:0x24"}, {"K", "key:0x25"}, {"L", "key:0x26"},
+    {"M", "key:0x32"}, {"N", "key:0x31"}, {"O", "key:0x18"}, {"P", "key:0x19"},
+    {"Q", "key:0x10"}, {"R", "key:0x13"}, {"S", "key:0x1F"}, {"T", "key:0x14"},
+    {"U", "key:0x16"}, {"V", "key:0x2F"}, {"W", "key:0x11"}, {"X", "key:0x2D"},
+    {"Y", "key:0x15"}, {"Z", "key:0x2C"},
+
+    // Numbers
+    {"1", "key:0x02"}, {"2", "key:0x03"}, {"3", "key:0x04"}, {"4", "key:0x05"},
+    {"5", "key:0x06"}, {"6", "key:0x07"}, {"7", "key:0x08"}, {"8", "key:0x09"},
+    {"9", "key:0x0A"}, {"0", "key:0x0B"},
+
+    // Symbols
+    {"Minus (-)", "key:0x0C"}, {"Equals (=)", "key:0x0D"},
+    {"L Bracket ([)", "key:0x1A"}, {"R Bracket (])", "key:0x1B"},
+    {"Semicolon (;)", "key:0x27"}, {"Apostrophe (')", "key:0x28"},
+    {"Grave (`)", "key:0x29"}, {"Backslash (\\)", "key:0x2B"},
+    {"Comma (,)", "key:0x33"}, {"Period (.)", "key:0x34"}, {"Slash (/)", "key:0x35"},
+
+    // Arrows
+    {"Up", "key:0x48"}, {"Down", "key:0x50"}, {"Left", "key:0x4B"}, {"Right", "key:0x4D"},
+
+    // Numpad
+    {"Numpad 0", "key:0x52"}, {"Numpad 1", "key:0x4F"}, {"Numpad 2", "key:0x50"}, {"Numpad 3", "key:0x51"},
+    {"Numpad 4", "key:0x4B"}, {"Numpad 5", "key:0x4C"}, {"Numpad 6", "key:0x4D"},
+    {"Numpad 7", "key:0x47"}, {"Numpad 8", "key:0x48"}, {"Numpad 9", "key:0x49"},
+    {"Numpad Add", "key:0x4E"}, {"Numpad Sub", "key:0x4A"}, {"Numpad Mul", "key:0x37"}, {"Numpad Div", "key:0xB5"},
+    {"Numpad Enter", "key:0x9C"}, {"Numpad Dec", "key:0x53"},
+
+    // F-Keys
     {"F1", "key:0x3B"}, {"F2", "key:0x3C"}, {"F3", "key:0x3D"}, {"F4", "key:0x3E"},
     {"F5", "key:0x3F"}, {"F6", "key:0x40"}, {"F7", "key:0x41"}, {"F8", "key:0x42"},
+    {"F9", "key:0x43"}, {"F10", "key:0x44"}, {"F11", "key:0x57"}, {"F12", "key:0x58"},
+    
+    // Extended Control
+    {"Insert", "key:0xD2"}, {"Delete", "key:0xD3"}, {"Home", "key:0xC7"}, {"End", "key:0xCF"},
+    {"Page Up", "key:0xC9"}, {"Page Down", "key:0xD1"},
 };
 inline constexpr int kOutputCatalogSize = sizeof(kOutputCatalog) / sizeof(kOutputCatalog[0]);
 
