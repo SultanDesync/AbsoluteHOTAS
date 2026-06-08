@@ -677,7 +677,7 @@ static void DrawAimingTab(WizardState& s) {
 }
 
 static void DrawAdvancedModesTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Advanced Flight Modes");
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "HOSAM / HOSAS");
     ImGui::TextWrapped("Configure paradigm-shifting playstyles that fundamentally change how the ship is controlled.");
     ImGui::Separator();
     ImGui::Spacing();
@@ -896,7 +896,7 @@ void BindingWizard::Draw() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Advanced Modes")) {
+        if (ImGui::BeginTabItem("HOSAM/HOSAS")) {
             DrawAdvancedModesTab(s);
             ImGui::EndTabItem();
         }
