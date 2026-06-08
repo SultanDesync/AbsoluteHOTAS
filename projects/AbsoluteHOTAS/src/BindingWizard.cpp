@@ -735,14 +735,14 @@ static void DrawAdvancedModesTab(WizardState& s) {
 }
 
 static void DrawButtonsTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons & Macros");
-    ImGui::TextWrapped("Configure button bindings for ship actions, custom macros, and plugin controls.");
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons & Macros (Macros not yet supported)");
+    ImGui::TextWrapped("Configure button bindings for vanilla ship actions and plugin controls.");
     ImGui::Separator();
     ImGui::Spacing();
 
     if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("Bind physical buttons to ship actions. Each action emits a keyboard/mouse output to Starfield.");
+        ImGui::TextWrapped("These are vanilla ship bindings. Bind your controller buttons to emit the default keyboard/mouse outputs set in Starfield's 'Spaceflight Bindings' menu.");
         ImGui::Spacing();
         for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
             ImGui::PushID(3000 + i);
