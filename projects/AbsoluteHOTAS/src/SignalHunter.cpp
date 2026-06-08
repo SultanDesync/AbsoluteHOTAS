@@ -284,8 +284,8 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         if (cfg.bAccumulatorThrottle) {
             s_accumulatorThrottle = 1.0f;
             s_lastAccumBurstValue = -999.0f;
-            s_lastInjectedThrottle = -999.0f;
         }
+        s_lastInjectedThrottle = -999.0f; // Force a throttle burst on release to cancel boost
     }
 
     s_prevBoostHeld = boostHeld;
