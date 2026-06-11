@@ -22,9 +22,11 @@ void Tick(int candCount, float throttle, float dt, uint64_t iter);
 
 // Main injection call — writes throttle and rotation to game memory.
 // All six DOF values are in [-1, +1] normalised range.
+// suppressPitchYaw — when true (HOSAM mode), releases the yaw/pitch cluster
+//                    gates so the game's native mouse pipeline owns steering.
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t iter,
-            bool reverseHeld);
+            bool reverseHeld, bool suppressPitchYaw = false);
 
 // Disarm all state (called on pilot-seat exit).
 void Disarm();

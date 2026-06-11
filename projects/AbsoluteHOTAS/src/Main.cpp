@@ -1,6 +1,7 @@
 #include "ThrottleHook.h"
 #include "ThrottleController.h"
 #include "RuntimePaths.h"
+#include "SettingBeacon.h"
 #include "UIHook.h"
 #include "BindingWizard.h"
 #include <SFSE/Interfaces.h>
@@ -93,9 +94,23 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v2.7.1-beta - Direct HID + In-Game UI");
+    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v3.0 - Direct HID + In-Game UI");
     RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
+
+    // Plant the discovery beacon and zero game deadzones unless Signal Hunter fallback is enabled
+    bool fallbackMode = GetPrivateProfileIntA(
+        "Injection", "bSignalHunterFallback", 0,
+        RuntimePaths::IniPath().string().c_str()) != 0;
+    if (!fallbackMode) {
+        if (!SettingBeacon::PlantBeacon()) {
+            RuntimePaths::AppendLogAlways("[Main]",
+                "Beacon failed. Signal Hunter will rely on StarfieldCustom.ini fallback.");
+        }
+    } else {
+        RuntimePaths::AppendLogAlways("[Main]",
+            "Signal Hunter fallback enabled. Using StarfieldCustom.ini discovery.");
+    }
 
     // Phase 1: AOB scan + trampoline hook to capture ThrottleInterface pointer
     bool hookOk = ThrottleHook::Install();

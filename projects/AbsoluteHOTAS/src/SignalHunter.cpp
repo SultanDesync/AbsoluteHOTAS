@@ -241,7 +241,7 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
 
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t iter,
-            bool reverseHeld)
+            bool reverseHeld, bool suppressPitchYaw)
 {
     if (!s_activeThrottlePtr) return;
 
@@ -267,15 +267,20 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
     // Rotational override
     bool rollOverrideActive      = cfg.rollEnabled && (std::abs(roll) > 0.05f);
-    bool strafeLatOverrideActive = std::abs(strafeX) > 0.05f;
-    bool strafeVertOverrideActive = std::abs(strafeY) > 0.05f;
+    bool strafeLatOverrideActive = std::abs(strafeX) > std::max(0.05f, cfg.fStrafeDeadzone);
+    bool strafeVertOverrideActive = std::abs(strafeY) > std::max(0.05f, cfg.fStrafeVertDeadzone);
     float lateral = strafeLatOverrideActive ? strafeX : roll;
+
+    // HOSAM mode: release yaw/pitch gates so the game's native mouse pipeline
+    // owns steering.  All other rotational lanes (roll, strafe) stay active.
+    bool yawGateEnabled   = !suppressPitchYaw;
+    bool pitchGateEnabled = !suppressPitchYaw;
 
     ThrottleHook::SetRotationalOverride(
         lateral, yaw, pitch, true,
         strafeLatOverrideActive || rollOverrideActive,
         strafeY, strafeVertOverrideActive,
-        true, true);  // yaw/pitch enabled (aim suppression handled by AimController)
+        yawGateEnabled, pitchGateEnabled);
 
     // --- BOOST GUARD & CANCEL LOGIC ---
     const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();

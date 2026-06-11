@@ -728,9 +728,14 @@ void ThrottleHook::SetReverseOverride(bool enabled) {
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     } else {
-        // Release the vertical strafe gate — SetRotationalOverride can reclaim it
+        // Release the vertical strafe gate — SetRotationalOverride can reclaim it.
+        // Only clear the override flag if reverse was actually owning the lane;
+        // otherwise SetRotationalOverride already set it this frame and we must
+        // not clobber it.
+        if (g_reverseOwnsVertStrafe) {
+            g_vertStrafeOverrideEnabled = 0;
+        }
         g_reverseOwnsVertStrafe = 0;
-        g_vertStrafeOverrideEnabled = 0;
 
         // Clear upstream decel intent
         uintptr_t src = g_capturedSourceR13;

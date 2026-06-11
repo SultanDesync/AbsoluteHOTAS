@@ -53,9 +53,9 @@ struct WizardState {
     // HOSAM mode
     bool        hosamMode = false;
     bool        alignmentAssist = false;
-    float       alignmentRadius = 15.0f;
-    int         alignmentIdleMs = 80;
-    float       alignmentDecayRate = 4.0f;
+    float       alignmentRadius = 130.0f;
+    int         alignmentIdleMs = 50;
+    float       alignmentDecayRate = 8.0f;
 
     // Throttle calibration
     float       idlePlateau = 0.05f;

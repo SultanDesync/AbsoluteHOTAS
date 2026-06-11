@@ -5,7 +5,7 @@ set(X_VCPKG_APPLOCAL_DEPS_INSTALL OFF)
 
 project(
   AbsoluteHOTAS
-  VERSION 2.7.0
+  VERSION 3.0.0
   LANGUAGES CXX C
 )
 
@@ -48,6 +48,7 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ShipOutput.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SignalHunter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/AimController.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SettingBeacon.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleController.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ThrottleHook.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/BindingWizard.h
@@ -57,6 +58,7 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ShipOutput.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SignalHunter.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/AimController.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SettingBeacon.h
   ${CMAKE_CURRENT_BINARY_DIR}/version.rc
   ${shared_sources}
 )

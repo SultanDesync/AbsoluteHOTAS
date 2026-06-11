@@ -535,10 +535,11 @@ static void DrawAxesTab(WizardState& s) {
                 dl->AddRectFilled(ImVec2(pos.x + cappedEdge, pos.y), ImVec2(pos.x + barWidth - cappedEdge, pos.y + barHeight),
                     IM_COL32(50, 200, 80, 220), 3.0f);
 
-                // Draw Center Deadzone
+                // Draw Center Deadzone (dz is fraction of half-axis; /2 maps to full bar)
                 if (dz > 0.001f) {
-                    float dzLeft = (0.5f - dz) * barWidth;
-                    float dzRight = (0.5f + dz) * barWidth;
+                    float dzHalf = dz / 2.0f;
+                    float dzLeft = (0.5f - dzHalf) * barWidth;
+                    float dzRight = (0.5f + dzHalf) * barWidth;
                     dl->AddRectFilled(ImVec2(pos.x + dzLeft, pos.y), ImVec2(pos.x + dzRight, pos.y + barHeight),
                         IM_COL32(200, 100, 30, 140), 0.0f);
                 }
@@ -569,8 +570,8 @@ static void DrawAxesTab(WizardState& s) {
             char dzLabel[32];
             std::snprintf(dzLabel, sizeof(dzLabel), "Deadzone##axdz%d", i);
             float dzPct = s.axisDeadzone[i] * 100.0f;
-            if (ImGui::SliderFloat(dzLabel, &dzPct, 0.0f, 50.0f, "%.0f%%"))
-                s.axisDeadzone[i] = std::clamp(dzPct / 100.0f, 0.0f, 0.50f);
+            if (ImGui::SliderFloat(dzLabel, &dzPct, 0.0f, 95.0f, "%.0f%%"))
+                s.axisDeadzone[i] = std::clamp(dzPct / 100.0f, 0.0f, 0.95f);
             ImGui::PopItemWidth();
             if (s.axisDeadzone[i] > 0.001f) {
                 ImGui::SameLine();
@@ -718,12 +719,12 @@ static void DrawAdvancedModesTab(WizardState& s) {
             if (s.alignmentAssist) {
                 ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Gently centers steering when mouse is idle near center.");
                 ImGui::PushItemWidth(180);
-                ImGui::SliderFloat("Radius##alignRad", &s.alignmentRadius, 1.0f, 100.0f, "%.0f units");
+                ImGui::SliderFloat("Radius##alignRad", &s.alignmentRadius, 1.0f, 200.0f, "%.0f units");
                 ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "of 200 max");
                 int idleMs = s.alignmentIdleMs;
                 if (ImGui::SliderInt("Idle Time##alignIdle", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
                 ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Before decay starts");
-                ImGui::SliderFloat("Decay Speed##alignDecay", &s.alignmentDecayRate, 0.5f, 20.0f, "%.1f");
+                ImGui::SliderFloat("Decay Speed##alignDecay", &s.alignmentDecayRate, 0.5f, 30.0f, "%.1f");
                 ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Higher = faster snap");
                 ImGui::PopItemWidth();
             }

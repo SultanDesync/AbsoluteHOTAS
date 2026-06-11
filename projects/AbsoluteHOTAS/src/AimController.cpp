@@ -115,7 +115,9 @@ void Update(const ThrottleController::Config& cfg,
 
     // ---- Source-object reticle injection ----
     if (!cfg.bSourceObjectAim || cfg.bHOSAMMode) {
-        ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, true);
+        // HOSAM: mouse owns steering — disable the aim system entirely so the
+        // chase blender doesn't fight the native mouse accumulator.
+        ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
         return;
     }
 

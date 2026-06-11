@@ -1,32 +1,45 @@
-# AbsoluteHOTAS v2.7.0-beta
+# AbsoluteHOTAS v3.0
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Changelog
+### v3.0
+- **Zero-Config Flight Control Discovery:** The plugin now finds the flight control cluster automatically at runtime using the engine's own Setting system — no `StarfieldCustom.ini` edit required. The discovery is version-independent (scans for Setting names rather than hardcoded memory offsets).
+- **Game Deadzone Zeroing:** The engine's built-in `fRollDeadzone` (default 0.5 — half the axis range!) is automatically zeroed at plugin load. The plugin's own per-axis deadzones in the binding wizard remain in full effect, giving HOTAS users the full precision of their hardware.
+- **Strafe Modifier Fix:** The Space modifier (which locks roll for strafing) now respects configured deadzone values. Previously a hardcoded 5% threshold caused minor stick noise to fire the modifier and steal roll authority.
+- **Deadzone UI Fix:** The per-axis deadzone graph now correctly represents the deadzone as a proportion of the full axis range. The slider range is expanded to 0–95% (was previously capped at 50%).
+- **Mouse Steering Defaults:** HOSAM alignment assist defaults tuned for real-world use — radius 130/200 (was 15), idle 50ms (was 80), decay 8.0 (was 4.0). Wizard slider maximums raised accordingly.
+- **Signal Hunter Fallback:** The original Signal Hunter discovery method is preserved as a fallback via `bSignalHunterFallback = true` in the INI.
+
 ### v2.7.0-beta
 - **Direct-Memory Reverse Flight:** Reverse flight no longer emulates the `S` key via keyboard injection. The plugin now writes directly to the flight control cluster's memory lanes. This completely eliminates unintended keyboard inputs in menus, dialogue, and on-foot contexts when reverse is mapped to an axis or button.
 - **Improved Velocity Reading:** Removed the dependency on a fragile HUD-based static address. The ship's velocity is now read directly from the validated flight control cluster, improving stability across game updates.
 
 This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
 
-## ⚠️ Required: StarfieldCustom.ini Setup
+## Flight Control Discovery
 
-**You must add the following to your `StarfieldCustom.ini` or the plugin will not work.** This sets a known signal value that the plugin uses to locate the flight control memory structure at runtime.
+The plugin automatically detects the flight control cluster at runtime — **no manual setup required**.
 
-Add to `Documents\My Games\Starfield\StarfieldCustom.ini`:
+At load time, the plugin scans the engine's Setting system by name to plant a discovery beacon and zero game deadzones. This approach is version-independent and requires no hardcoded memory offsets.
+
+If a Starfield update breaks detection before a plugin update is available, enable Signal Hunter fallback mode:
+
+1. In `AbsoluteHOTAS.ini`, set `bSignalHunterFallback = true` under `[Injection]`.
+2. Add the following to `Documents\My Games\Starfield\StarfieldCustom.ini`:
 
 ```ini
 [Spaceship]
 fThrottleAtEngineStart = 0.0314
 ```
 
-> **Without this line, the plugin cannot discover the flight control cluster and will not inject any input.** If using a mod manager, add it to the profile's `StarfieldCustom.ini` instead.
-
 > **Plugin Fails to Load / DLL Blocked?** If the plugin fails to load or shows error `000011CC`, right-click `AbsoluteHOTAS.dll`, select **Properties**, check the **Unblock** box at the bottom of the General tab, and click **Apply**. For virtualizing mod managers like MO2, see the [Mod Manager Compatibility](#mod-manager-compatibility) section at the bottom.
 
 ## Key Features
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
+* **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
+* **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
 * **In-Game Binding Wizard** — Press `Ctrl+Alt+B` (or bind a controller button) to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware in real-time.
 * **Frame Generation Support** — Fully compatible with Starfield's built-in Frame Generation (FSR3 Frame Gen). The overlay automatically handles swap chain resizing and reinitializes seamlessly when toggled in-game.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
@@ -237,9 +250,9 @@ Mice don't self-center like joysticks, so an optional **Alignment Assist** featu
 5. Scroll down to the **HOSAM Mode (Stick + Mouse)** collapsible panel and expand it.
 6. Check **Enable HOSAM Mode**.
 7. Optionally check **Alignment Assist** and tune:
-   * **Radius**: How close to center the mouse must be before the assist activates (default: 15 of 200 units).
-   * **Idle Time**: How long the mouse must be idle before decay starts (default: 80ms).
-   * **Decay Speed**: How fast steering decays to center (default: 4.0; higher = faster).
+    * **Radius**: How close to center the mouse must be before the assist activates (default: 130 of 200 units).
+    * **Idle Time**: How long the mouse must be idle before decay starts (default: 50ms).
+    * **Decay Speed**: How fast steering decays to center (default: 8.0; higher = faster).
 8. Click **Save & Apply**.
 
 #### Option B: Manual INI Configuration
@@ -247,9 +260,9 @@ Mice don't self-center like joysticks, so an optional **Alignment Assist** featu
 [Aim]
 bHOSAMMode = true              ; Enable stick+mouse hybrid mode
 bAlignmentAssist = true        ; Enable mouse centering assist
-fAlignmentRadius = 15.0        ; Accumulator radius for assist trigger (0-200)
-iAlignmentIdleMs = 80          ; Idle time before decay starts (ms)
-fAlignmentDecayRate = 4.0      ; Decay speed (higher = faster centering)
+fAlignmentRadius = 130.0        ; Accumulator radius for assist trigger (0-200)
+iAlignmentIdleMs = 50          ; Idle time before decay starts (ms)
+fAlignmentDecayRate = 8.0      ; Decay speed (higher = faster centering)
 ```
 
 ## Tuning

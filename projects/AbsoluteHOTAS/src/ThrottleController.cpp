@@ -141,12 +141,12 @@ void ThrottleController::LoadConfig() {
     s_config.bInvertStrafeVert = ini.GetBoolValue("Hardware", "bInvertStrafeVert", false);
     s_config.bInvertReverse    = ini.GetBoolValue("Hardware", "bInvertReverse",    false);
 
-    s_config.fThrottleDeadzone  = std::clamp((float)ini.GetDoubleValue("Hardware", "fThrottleDeadzone",  0.0),  0.0f, 0.5f);
-    s_config.fPitchDeadzone     = std::clamp((float)ini.GetDoubleValue("Hardware", "fPitchDeadzone",     0.0),  0.0f, 0.5f);
-    s_config.fYawDeadzone       = std::clamp((float)ini.GetDoubleValue("Hardware", "fYawDeadzone",       0.0),  0.0f, 0.5f);
-    s_config.fRollDeadzone      = std::clamp((float)ini.GetDoubleValue("Hardware", "fRollDeadzone",      0.0),  0.0f, 0.5f);
-    s_config.fStrafeDeadzone    = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeDeadzone",    0.05), 0.0f, 0.5f);
-    s_config.fStrafeVertDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeVertDeadzone", 0.05), 0.0f, 0.5f);
+    s_config.fThrottleDeadzone  = std::clamp((float)ini.GetDoubleValue("Hardware", "fThrottleDeadzone",  0.0),  0.0f, 0.95f);
+    s_config.fPitchDeadzone     = std::clamp((float)ini.GetDoubleValue("Hardware", "fPitchDeadzone",     0.0),  0.0f, 0.95f);
+    s_config.fYawDeadzone       = std::clamp((float)ini.GetDoubleValue("Hardware", "fYawDeadzone",       0.0),  0.0f, 0.95f);
+    s_config.fRollDeadzone      = std::clamp((float)ini.GetDoubleValue("Hardware", "fRollDeadzone",      0.0),  0.0f, 0.95f);
+    s_config.fStrafeDeadzone    = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeDeadzone",    0.05), 0.0f, 0.95f);
+    s_config.fStrafeVertDeadzone = std::clamp((float)ini.GetDoubleValue("Hardware", "fStrafeVertDeadzone", 0.05), 0.0f, 0.95f);
 
     s_config.activateButton     = ParseBindingRef(ini.GetValue("Buttons", "iActivateButtonId",   ""), -1);
     s_config.stopButton         = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId",       ""), -1);
@@ -207,9 +207,9 @@ void ThrottleController::LoadConfig() {
     s_config.toggleAimModeButton = ParseBindingRef(ini.GetValue("Aim", "iToggleAimModeButton", nullptr), -1);
     s_config.bHOSAMMode        = ini.GetBoolValue("Aim", "bHOSAMMode",        false);
     s_config.bAlignmentAssist  = ini.GetBoolValue("Aim", "bAlignmentAssist",  false);
-    s_config.fAlignmentRadius  = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentRadius",  15.0), 0.0f, 200.0f);
-    s_config.iAlignmentIdleMs  = std::clamp((int)ini.GetLongValue("Aim", "iAlignmentIdleMs",      80),  0, 2000);
-    s_config.fAlignmentDecayRate = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentDecayRate", 4.0), 0.1f, 50.0f);
+    s_config.fAlignmentRadius  = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentRadius",  130.0), 0.0f, 200.0f);
+    s_config.iAlignmentIdleMs  = std::clamp((int)ini.GetLongValue("Aim", "iAlignmentIdleMs",      50),  0, 2000);
+    s_config.fAlignmentDecayRate = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentDecayRate", 8.0), 0.1f, 50.0f);
 
     {
         char msg[512];
@@ -595,7 +595,11 @@ void ThrottleController::ControlLoop() {
         strafeY = std::clamp(strafeY, -1.0f, 1.0f);
 
         // Strafe modifier key (Space) for lateral/vertical strafe
-        const bool strafeModifierHeld = std::abs(strafeX) > 0.05f || std::abs(strafeY) > 0.05f;
+        // Use configured deadzones as the modifier threshold so noise below
+        // the deadzone never fires the Space modifier (which locks roll).
+        const float modThreshX = std::max(0.05f, s_config.fStrafeDeadzone);
+        const float modThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
+        const bool strafeModifierHeld = std::abs(strafeX) > modThreshX || std::abs(strafeY) > modThreshY;
         ShipOutputSystem::SetOutputHeld(SpaceOutput, OwnerStrafeModifier, strafeModifierHeld);
 
         s_currentThrottle.store(throttle);
@@ -628,7 +632,7 @@ void ThrottleController::ControlLoop() {
             // ---- SignalHunter ----
             int candCount = ThrottleHook::GetCandidateCount();
             SignalHunter::Tick(candCount, throttle, dt, iter);
-            SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld);
+            SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim);
 
             // ---- AimController ----
             AimController::Update(s_config, yaw, pitch,
