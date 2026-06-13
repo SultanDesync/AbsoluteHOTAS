@@ -11,19 +11,10 @@
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <fstream>
-#include <string>
-#include <string_view>
-#include <vector>
 #include <chrono>
-#include <cmath>
 #include <SimpleIni.h>
 
-#pragma comment(lib, "dinput8.lib")
-#pragma comment(lib, "dxguid.lib")
+
 
 // ---- Static member definitions ----
 ThrottleController::Config    ThrottleController::s_config;
@@ -375,32 +366,13 @@ void ThrottleController::ControlLoop() {
     bool wasPiloting = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
 
-    // Inline axis reading helper
+    // Inline axis reading helper — delegates to DeviceManager
     auto GetRawAxis = [](const BindingRef& ref) -> long {
-        if (ref.value > 0) {
-            const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-            if (st) {
-                switch (ref.value) {
-                    case 0x30: return st->lX;
-                    case 0x31: return st->lY;
-                    case 0x32: return st->lZ;
-                    case 0x33: return st->lRx;
-                    case 0x34: return st->lRy;
-                    case 0x35: return st->lRz;
-                    case 0x36: return st->rglSlider[0];
-                    case 0x37: return st->rglSlider[1];
-                }
-            }
-        }
-        return 32768; // Neutral fallback
+        return DeviceManager::GetRawAxis(ref);
     };
 
     auto IsButtonPressed = [](const BindingRef& ref) -> bool {
-        if (ref.value < 1) return false;
-        const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-        if (!st) return false;
-        if (ref.value <= 128) return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
-        return false; // POV handled via digital axis bindings
+        return DeviceManager::IsButtonPressed(ref);
     };
 
     while (s_running) {
@@ -555,13 +527,14 @@ void ThrottleController::ControlLoop() {
         // ---- Rotation axes ----
         auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert, float sat = 1.0f) {
             if (!ref.IsValid() || ref.value <= 0) return 0.0f;
-            float raw  = (float)GetRawAxis(ref);
+            float raw  = static_cast<float>(DeviceManager::GetRawAxis(ref));
             float aMin = 0.0f, aMax = 65535.0f;
             if (ref.deviceIndex >= 0) {
                 int calibKey = (ref.deviceIndex << 8) | ref.value;
                 auto it = s_config.axisCalibration.find(calibKey);
                 if (it != s_config.axisCalibration.end()) {
-                    aMin = (float)it->second.first; aMax = (float)it->second.second;
+                    aMin = static_cast<float>(it->second.first);
+                    aMax = static_cast<float>(it->second.second);
                 }
             }
             float center = (aMin + aMax) / 2.0f, halfRange = (aMax - aMin) / 2.0f;

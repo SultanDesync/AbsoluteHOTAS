@@ -54,9 +54,8 @@ fThrottleAtEngineStart = 0.0314
 
 ## Requirements
 
-- Starfield 1.16.242
-- SFSE 0.2.20
-- Latest Starfield Address Library
+- Starfield 1.16.242 or later
+- SFSE 0.2.20 or later
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 
@@ -294,7 +293,7 @@ If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual Fil
 ### Wizard Crash / Overlay Doesn't Open
 If the overlay crashes or refuses to open on `Ctrl+Alt+B`, this is most likely caused by a leftover/orphaned SFSE plugin DLL from a previously uninstalled mod.
 1. Check `Data\SFSE\Plugins\` for any `.dll` files that do not belong to your currently enabled/active mods and remove them.
-2. If the issue persists: temporarily disable all mods except **AbsoluteHOTAS**, **SFSE**, and **Starfield Address Library**. Launch, open the wizard, save your bindings (which saves to the INI), and then re-enable your mods and relaunch. The plugin loads bindings automatically from the INI, so you do not need to access the wizard again in order to fly.
+2. If the issue persists: temporarily disable all mods except **AbsoluteHOTAS** and **SFSE**. Launch, open the wizard, save your bindings (which saves to the INI), and then re-enable your mods and relaunch. The plugin loads bindings automatically from the INI, so you do not need to access the wizard again in order to fly.
 
 ### Logging & Diagnostic Data
 If you encounter hardware axis mapping or detection issues:

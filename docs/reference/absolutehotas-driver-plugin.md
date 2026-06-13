@@ -1,6 +1,6 @@
 # AbsoluteHOTAS Standalone Plugin
 
-AbsoluteHOTAS 1.6 ships as a standalone SFSE DLL and INI. The previous
+AbsoluteHOTAS 3.0 ships as a standalone SFSE DLL and INI. The previous
 Papyrus/ESM driver bridge has been removed from the release path.
 
 ## Target Artifact
@@ -17,12 +17,12 @@ is required for the standalone build.
 
 The controller starts when SFSE loads the DLL. Discovery is controlled by:
 
-- `bAlwaysOn = true`: arm discovery when the DLL starts.
+- `bAlwaysOn = true` (default): arm discovery automatically when the pilot seat is entered.
 - `bAlwaysOn = false`: wait for `iActivateButtonId` or Ctrl+Alt+F8.
 - `iStopButtonId`: disarm the current capture/override state.
 
-The default public configuration leaves `bAlwaysOn = false` so users can arm
-the signal hunter deliberately after confirming their device mapping.
+The default public configuration leaves `bAlwaysOn = true` so users get
+immediate flight control without manual activation.
 
 ## Package Layout
 
@@ -37,12 +37,12 @@ not source.
 
 ## Runtime Check
 
-With `bLogThrottle=true`, `Data\SFSE\Plugins\StarfieldThrottleLog.txt` should
+With `bLogThrottle=true`, `Data\SFSE\Plugins\AbsoluteHOTAS.log` should
 show:
 
 - `[Main] Plugin load complete.`
 - `[Controller] Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.`
-- `[PilotState] Standalone mode active; waiting for activate button.`
+- `[PilotState] Standalone mode active; discovery armed automatically.`
 
-If `bAlwaysOn=true`, the final line should instead report that discovery was
-armed automatically.
+If `bAlwaysOn=false`, the final line should instead report that it is
+waiting for the activate button.

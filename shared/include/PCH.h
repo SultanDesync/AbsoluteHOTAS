@@ -77,7 +77,7 @@
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
-// Removed RE/Starfield.h to prevent global IDDatabase initializations
+// RE/Starfield.h excluded — plugin does not use CommonLibSF RE:: types
 #include <SFSE/Impl/PCH.h>
 #include <REL/REL.h>
 #include <SFSE/SFSE.h>

@@ -79,7 +79,7 @@ public:
         float   fStrafeVertDeadzone = 0.05f;
 
         // [Injection]
-        int     pollRateHz = 60;          // Polling frequency
+        int     pollRateHz = 60;          // Polling frequency (INI default: 120)
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
         bool    rollEnabled = true;       // Roll shares the +0x58 writer with lateral strafe.
         bool    reverseAxisEnabled = true;
@@ -89,9 +89,9 @@ public:
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 
-        // [Aim] - Experimental source-object reticle injection
+        // [Aim] - Source-object reticle injection
         bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle
-        float   fAimSensitivity   = 1.0f;   // Scale applied to pitch/yaw before writing source obj (mirror/legacy mode only)
+        float   fAimSensitivity   = 1.0f;   // Scale applied to pitch/yaw before writing source obj (mirror mode)
 
         // Separated aiming axes — if bound, these drive the reticle independently
         // from the flight stick. If unbound, behavior depends on bMirrorFlightToAim.

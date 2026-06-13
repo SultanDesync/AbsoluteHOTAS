@@ -140,7 +140,7 @@ The approach is intended to survive minor patches better than absolute offsets:
 - validate nearby lane structure before enabling injection
 - accept that optional hooks may safely skip on unknown runtimes
 - keep runtime version checks conservative
-- use Address Library/SFSE compatibility checks for loader safety
+- use SFSE compatibility checks for loader safety
 
 Patch compatibility should still be validated after each Starfield/SFSE update. A skipped optional hook is safer than a bad write into the wrong structure.
 

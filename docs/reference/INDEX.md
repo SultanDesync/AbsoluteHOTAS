@@ -12,4 +12,4 @@
 
 | File | Purpose |
 | --- | --- |
-| `../research/spaceship-control-cluster.md` | Sanitized summary of the ship movement cluster, writer hooks, source object, and patch-resilience strategy. |
+| `control-cluster-architecture.md` | Sanitized summary of the ship movement cluster, writer hooks, source object, and patch-resilience strategy. |

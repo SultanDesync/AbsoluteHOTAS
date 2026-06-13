@@ -1,14 +1,7 @@
 #include "ThrottleHook.h"
 #include "RuntimePaths.h"
 #include <windows.h>
-#include <fstream>
-#include <iomanip>
-#include <string>
-#include <cstring>
-#include <vector>
-#include <algorithm>
 #include <chrono>
-#include <cmath>
 
 // ---- Static member definitions ----
 std::atomic<uintptr_t> ThrottleHook::s_basePtr{ 0 };
@@ -39,7 +32,7 @@ static volatile uint32_t g_pitchBits = 0;
 
 
 
-// ---- Experimental: source-object aim injection ----
+// ---- Source-object aim injection ----
 static volatile uint8_t  g_sourceAimEnabled  = 0;
 static volatile uint32_t g_sourceAimYawBits  = 0;
 static volatile uint32_t g_sourceAimPitchBits = 0;
@@ -61,17 +54,7 @@ static std::vector<HookRecord> g_hookRegistry;
 
 // ---- Logging helper ----
 static bool IsHookFileLoggingEnabled() {
-    static bool checked = false;
-    static bool enabled = false;
-    if (!checked) {
-        enabled = GetPrivateProfileIntA(
-            "Injection",
-            "bLogThrottle",
-            0,
-            RuntimePaths::IniPath().string().c_str()) != 0;
-        checked = true;
-    }
-    return enabled;
+    return RuntimePaths::IsFileLoggingEnabled();
 }
 
 static bool IsCriticalHookLog(const std::string& msg) {
@@ -369,13 +352,7 @@ static bool InstallRotationalGates(uintptr_t textStart, size_t textSize, uintptr
 // ---- Install a 5-byte trampoline that captures RDI and stores in candidates ----
 static bool InstallTrampoline5(uintptr_t targetAddr, const uint8_t* savedBytes, const char* label, bool isStore = false) {
     // Allocate trampoline within ±2GB
-    uint8_t* trampMem = nullptr;
-    uintptr_t allocBase = targetAddr > 0x70000000 ? targetAddr - 0x70000000 : 0x10000;
-    for (uintptr_t addr = allocBase; addr < targetAddr + 0x70000000; addr += 0x10000) {
-        trampMem = (uint8_t*)VirtualAlloc((void*)addr, 4096,
-            MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-        if (trampMem) break;
-    }
+    uint8_t* trampMem = AllocateNear(targetAddr);
     if (!trampMem) {
         HookLog("CRITICAL: Could not allocate trampoline for " + std::string(label));
         return false;
@@ -575,7 +552,7 @@ void ThrottleHook::Uninstall() {
 }
 
 uintptr_t ThrottleHook::GetCandidate(int index) {
-    if (index < 0 || index >= 128) return 0;
+    if (index < 0 || index >= MAX_CANDIDATES) return 0;
     return (uintptr_t)g_candidates[index];
 }
 
@@ -661,7 +638,7 @@ void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool ena
 }
 
 
-// ---- Experimental: source-object aim injection ----
+// ---- Source-object aim injection ----
 void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
     g_sourceAimYawBits   = FloatToBits(yaw);
     g_sourceAimPitchBits = FloatToBits(pitch);

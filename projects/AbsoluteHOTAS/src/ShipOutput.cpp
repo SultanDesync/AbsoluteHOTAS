@@ -2,61 +2,21 @@
 #include "ShipOutput.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
+#include "StringUtils.h"
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
-#include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <string>
-#include <string_view>
-#include <vector>
 
 // ============================================================================
 // Internal helpers
 // ============================================================================
 
-static std::string TrimLower(std::string_view value) {
-    const auto begin = std::find_if_not(value.begin(), value.end(),
-        [](unsigned char ch) { return std::isspace(ch) != 0; });
-    const auto end = std::find_if_not(value.rbegin(), value.rend(),
-        [](unsigned char ch) { return std::isspace(ch) != 0; }).base();
-    if (begin >= end) return {};
-    std::string lowered(begin, end);
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return lowered;
-}
-
 static void ShipLog(const char* msg) {
     RuntimePaths::AppendLogAlways("[ShipOutput]", msg);
 }
 
-// ============================================================================
-// POV (HAT) switch support
-// Virtual buttons 129-144 → 4 POV switches × 4 directions
-// POV 0: Up=129, Right=130, Down=131, Left=132
-// POV 1: Up=133, Right=134, Down=135, Left=136
-// ============================================================================
-static bool IsPovButtonPressed(const DIJOYSTATE2* state, int virtualButton) {
-    if (!state || virtualButton < 129 || virtualButton > 144) return false;
-    int povIndex  = (virtualButton - 129) / 4;
-    int direction = (virtualButton - 129) % 4;
-    DWORD pov = state->rgdwPOV[povIndex];
-    if (LOWORD(pov) == 0xFFFF) return false;
-    static constexpr DWORD kDirAngles[4] = { 0, 9000, 18000, 27000 };
-    DWORD target = kDirAngles[direction];
-    DWORD diff = (pov > target) ? (pov - target) : (target - pov);
-    if (diff > 18000) diff = 36000 - diff;
-    return diff <= 4500;
-}
-
 static bool IsButtonPressedImpl(const BindingRef& ref) {
-    if (ref.value < 1) return false;
-    const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-    if (!st) return false;
-    if (ref.value <= 128) return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
-    if (ref.value <= 144) return IsPovButtonPressed(st, ref.value);
-    return false;
+    return DeviceManager::IsButtonPressed(ref);
 }
 
 // ============================================================================

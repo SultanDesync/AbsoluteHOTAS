@@ -3,8 +3,6 @@
 #include "ThrottleHook.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
-#include <algorithm>
-#include <cmath>
 #include <cstdio>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -54,11 +52,7 @@ static float NormBipolar(const ThrottleController::Config& cfg,
 }
 
 static bool IsButtonPressed(const BindingRef& ref) {
-    if (ref.value < 1) return false;
-    const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-    if (!st) return false;
-    if (ref.value <= 128) return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
-    return false;
+    return DeviceManager::IsButtonPressed(ref);
 }
 
 // ============================================================================
@@ -165,7 +159,6 @@ void Update(const ThrottleController::Config& cfg,
     // else: digital-only or no aim input — accumulators below will supply position
 
     // Digital aim: accumulator-style virtual cursor
-    bool digitalAimActive = false;
     {
         static float s_digitalAimYaw   = 0.0f;
         static float s_digitalAimPitch = 0.0f;
@@ -200,7 +193,7 @@ void Update(const ThrottleController::Config& cfg,
         if (hasSeparateAimInput && hasDigitalAimButtons) {
             aimYaw        = s_digitalAimYaw;
             aimPitch      = s_digitalAimPitch;
-            digitalAimActive = true;
+
         }
     }
 

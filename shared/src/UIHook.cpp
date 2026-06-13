@@ -122,12 +122,9 @@ static LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
         // Block all mouse messages
         if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) return 0;
-        if (msg == WM_MOUSEMOVE) return 0;
 
         // Block all keyboard messages
         if (msg >= WM_KEYFIRST && msg <= WM_KEYLAST) return 0;
-        if (msg == WM_CHAR || msg == WM_SYSCHAR) return 0;
-        if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) return 0;
 
         // Block activation/focus changes that the game might use
         if (msg == WM_ACTIVATEAPP || msg == WM_ACTIVATE) return 0;

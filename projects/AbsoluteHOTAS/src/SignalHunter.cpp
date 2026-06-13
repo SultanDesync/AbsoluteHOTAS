@@ -141,12 +141,7 @@ void ArmForReacquire(const char* reason) {
     ThrottleHook::SetCaptureEnabled(true);
 }
 
-// --- Arm from ThrottleController (AlwaysOn startup path) ---
-void ArmInitial() {
-    s_reacquireWatchdogEnabled = true;
-    s_discoveryArmed = true;
-    ThrottleHook::SetCaptureEnabled(true);
-}
+
 
 void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
     const auto& cfg = ThrottleController::GetConfig();

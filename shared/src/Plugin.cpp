@@ -12,8 +12,8 @@ SFSEPluginVersion = []() noexcept {
     data.IsLayoutDependent(false);
     data.HasNoStructUse(true);
     
-    // Explicitly target current tested Starfield/SFSE runtime pair.
-    data.CompatibleVersions({ REL::Version{ 1, 16, 242, 0 } });
+    // Target tested Starfield runtime versions.
+    data.CompatibleVersions({ REL::Version{ 1, 16, 242, 0 }, REL::Version{ 1, 16, 244, 0 } });
     data.MinimumRequiredXSEVersion(REL::Version{ 0, 2, 20, 0 });
 
     return data;

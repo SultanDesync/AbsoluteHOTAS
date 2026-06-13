@@ -1,14 +1,7 @@
 #include "PCH.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
-#include <algorithm>
-#include <cctype>
-#include <cstdio>
-#include <stdexcept>
-#include <format>
-
-#pragma comment(lib, "dinput8.lib")
-#pragma comment(lib, "dxguid.lib")
+#include "StringUtils.h"
 
 static LPDIRECTINPUT8 g_pDI = nullptr;
 static std::vector<DeviceInfo> g_devices;
@@ -19,20 +12,6 @@ static void DevLog(const std::string& msg) {
     RuntimePaths::AppendLog("[DeviceManager]", msg);
 }
 
-static std::string LowerAscii(std::string_view value) {
-    std::string lowered(value);
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return lowered;
-}
-
-static std::string TrimLower(std::string_view value) {
-    const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch) != 0; });
-    const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) { return std::isspace(ch) != 0; }).base();
-    if (begin >= end) return {};
-    return LowerAscii(std::string_view(begin, end));
-}
 
 // Callback to enumerate objects (axes, buttons) to count them
 static BOOL CALLBACK EnumObjectsCallback(const DIDEVICEOBJECTINSTANCE* pdidoi, VOID* pContext) {
@@ -186,8 +165,8 @@ int DeviceManager::ResolveDevice(const std::string& vidpid, const std::string& n
     // Priority 2: Name match (instance or product name)
     if (!targetName.empty()) {
         for (size_t i = 0; i < g_devices.size(); ++i) {
-            std::string instName = LowerAscii(g_devices[i].instanceName);
-            std::string prodName = LowerAscii(g_devices[i].productName);
+            std::string instName = TrimLower(g_devices[i].instanceName);
+            std::string prodName = TrimLower(g_devices[i].productName);
             if (instName.find(targetName) != std::string::npos || prodName.find(targetName) != std::string::npos) {
                 return static_cast<int>(i);
             }
@@ -290,6 +269,29 @@ long DeviceManager::GetAxisFromState(const DIJOYSTATE2* st, int usageId) {
         case 0x37: return st->rglSlider[1];
         default:   return 0;
     }
+}
+
+static bool IsPovDirectionActive(const DIJOYSTATE2* state, int povIndex, int direction) {
+    DWORD pov = state->rgdwPOV[povIndex];
+    if (LOWORD(pov) == 0xFFFF) return false;
+    static constexpr DWORD kDirAngles[4] = { 0, 9000, 18000, 27000 };
+    DWORD target = kDirAngles[direction];
+    DWORD diff = (pov > target) ? (pov - target) : (target - pov);
+    if (diff > 18000) diff = 36000 - diff;
+    return diff <= 4500;
+}
+
+bool DeviceManager::IsButtonPressed(const BindingRef& ref) {
+    if (ref.value < 1) return false;
+    const DIJOYSTATE2* st = GetCachedState(ref.deviceIndex);
+    if (!st) return false;
+    if (ref.value <= 128) return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
+    if (ref.value <= 144) {
+        int povIndex  = (ref.value - 129) / 4;
+        int direction = (ref.value - 129) % 4;
+        return IsPovDirectionActive(st, povIndex, direction);
+    }
+    return false;
 }
 
 LPDIRECTINPUT8 DeviceManager::GetDirectInputContext() {

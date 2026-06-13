@@ -8,18 +8,12 @@
 #include <windows.h>
 #include <format>
 
-static bool IsFileLoggingEnabled() {
-    return RuntimePaths::IsFileLoggingEnabled();
-}
-
 // Logging helper (also used by Prober/Hook modules)
 static void InitializeLog() {
-    if (!IsFileLoggingEnabled()) return;
     RuntimePaths::AppendLog("[AbsoluteHOTAS]", "Started Log Session");
 }
 
 static void MainLog(const std::string& msg) {
-    if (!IsFileLoggingEnabled()) return;
     RuntimePaths::AppendLog("[Main]", msg);
 }
 
@@ -95,7 +89,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
     RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v3.0 - Direct HID + In-Game UI");
-    RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242 / SFSE 0.2.20");
+    RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242+ / SFSE 0.2.20+");
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 
     // Plant the discovery beacon and zero game deadzones unless Signal Hunter fallback is enabled

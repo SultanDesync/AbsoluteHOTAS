@@ -5,6 +5,7 @@
 #include <dinput.h>
 #include <string>
 #include <vector>
+#include "BindingRef.h"
 
 struct DeviceInfo {
     GUID        guidInstance;
@@ -59,6 +60,18 @@ public:
 
     // Extract an axis value from DIJOYSTATE2 by HID usage ID (0x30-0x37)
     static long GetAxisFromState(const DIJOYSTATE2* st, int usageId);
+
+    // Read a raw axis value via BindingRef, returning 32768 (neutral) on failure.
+    static inline long GetRawAxis(const BindingRef& ref) {
+        if (ref.value > 0) {
+            const DIJOYSTATE2* st = GetCachedState(ref.deviceIndex);
+            if (st) return GetAxisFromState(st, ref.value);
+        }
+        return 32768;
+    }
+
+    // Check if a button (1-128 physical, 129-144 POV virtual) is pressed via BindingRef.
+    static bool IsButtonPressed(const BindingRef& ref);
     
     // DirectInput Context
     static LPDIRECTINPUT8 GetDirectInputContext();

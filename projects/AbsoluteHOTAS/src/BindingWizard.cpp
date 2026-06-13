@@ -593,7 +593,7 @@ static void DrawAimingTab(WizardState& s) {
 
     ImGui::Checkbox("Enable Aim System", &s.sourceObjectAim);
     if (!s.sourceObjectAim) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Aim system disabled. Ship steering uses cluster gates only (legacy mode).");
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Aim system disabled. Ship steering uses cluster gates only.");
         return;
     }
 
