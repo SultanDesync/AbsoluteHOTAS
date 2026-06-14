@@ -24,6 +24,7 @@ std::atomic<float> ThrottleController::s_currentThrottle{ 0.0f };
 std::thread        ThrottleController::s_thread;
 
 static bool g_verboseLog = false;
+static bool s_turnAssistRuntimeActive = false;
 
 // ---- Logging ----
 static void CtrlLog(const char* msg) {
@@ -241,10 +242,14 @@ void ThrottleController::LoadConfig() {
     s_config.fAccumulatorRate     = std::clamp((float)ini.GetDoubleValue("DualStick", "fAccumulatorRate",     1.0), 0.1f, 10.0f);
     s_config.fAccumulatorDecay    = std::clamp((float)ini.GetDoubleValue("DualStick", "fAccumulatorDecay",    0.0), 0.0f, 20.0f);
     s_config.fReverseGateVelocity = std::clamp((float)ini.GetDoubleValue("DualStick", "fReverseGateVelocity", 5.0), 0.0f, 100.0f);
+    s_config.bAccumulatorTurnAssist = ini.GetBoolValue("DualStick", "bAccumulatorTurnAssist", false);
+    s_config.iTurnAssistMode      = std::clamp((int)ini.GetLongValue("DualStick", "iTurnAssistMode", 0), 0, 2);
+    s_config.turnAssistButton     = ParseBindingRef(ini.GetValue("DualStick", "iTurnAssistButton", ""), -1);
     if (s_config.bAccumulatorThrottle) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "[DualStick] Accumulator ON: rate=%.2f decay=%.2f reverseGate=%.1f m/s",
-            s_config.fAccumulatorRate, s_config.fAccumulatorDecay, s_config.fReverseGateVelocity);
+        snprintf(buf, sizeof(buf), "[DualStick] Accumulator ON: rate=%.2f decay=%.2f reverseGate=%.1f m/s turnAssist=%s mode=%d",
+            s_config.fAccumulatorRate, s_config.fAccumulatorDecay, s_config.fReverseGateVelocity,
+            s_config.bAccumulatorTurnAssist ? "true" : "false", s_config.iTurnAssistMode);
         RuntimePaths::AppendLogAlways("[Controller]", buf);
     }
 
@@ -316,6 +321,7 @@ void ThrottleController::ControlLoop() {
         ResolveAndOpen(cfg.digitalAimDownButton);
         ResolveAndOpen(cfg.digitalAimCenterButton);
         ResolveAndOpen(cfg.toggleAimModeButton);
+        ResolveAndOpen(cfg.turnAssistButton);
 
         int count = ShipOutputSystem::GetShipButtonCount();
         for (int i = 0; i < count; i++)
@@ -602,6 +608,30 @@ void ThrottleController::ControlLoop() {
             bool suppressClusterForAim = suppressForHOSAM ||
                 (s_config.bSourceObjectAim && !hasSeparateAimInput);
 
+            // ---- Turn Assist Button State ----
+            // Compute whether turn assist is active this frame.
+            // bAccumulatorTurnAssist (INI) is the master switch.
+            // Mode 0=Always, 1=Hold (need button held), 2=Toggle (button toggles on/off).
+            static bool s_turnAssistToggled = false;
+            static bool s_prevTurnAssistBtn = false;
+            bool assistMasterEnabled = s_config.bAccumulatorTurnAssist;
+            if (assistMasterEnabled && s_config.iTurnAssistMode > 0) {
+                bool btnBound = s_config.turnAssistButton.IsValid()
+                    && s_config.turnAssistButton.value > 0
+                    && s_config.turnAssistButton.value <= 128;
+                bool btnHeld = btnBound && IsButtonPressed(s_config.turnAssistButton);
+                if (s_config.iTurnAssistMode == 1) {
+                    s_turnAssistRuntimeActive = btnHeld;
+                } else {
+                    if (btnHeld && !s_prevTurnAssistBtn) s_turnAssistToggled = !s_turnAssistToggled;
+                    s_turnAssistRuntimeActive = s_turnAssistToggled;
+                }
+                s_prevTurnAssistBtn = btnHeld;
+            } else {
+                // Mode 0 (Always): active whenever master switch is on
+                s_turnAssistRuntimeActive = assistMasterEnabled;
+            }
+
             // ---- SignalHunter ----
             int candCount = ThrottleHook::GetCandidateCount();
             SignalHunter::Tick(candCount, throttle, dt, iter);
@@ -647,6 +677,7 @@ void ThrottleController::Stop() {
 
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }
 float ThrottleController::GetCurrentThrottle() { return s_currentThrottle.load(std::memory_order_relaxed); }
+bool ThrottleController::IsTurnAssistActive() { return s_turnAssistRuntimeActive; }
 
 std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActionBindings() {
     static const char* labels[] = {

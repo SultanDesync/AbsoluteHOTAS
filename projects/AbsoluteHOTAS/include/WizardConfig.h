@@ -47,6 +47,9 @@ struct WizardState {
     float       accumulatorRate = 1.0f;
     float       accumulatorDecay = 0.0f;
     float       reverseGateVelocity = 5.0f;
+    bool        accumulatorTurnAssist = false;
+    int         turnAssistMode = 0;        // 0=Always, 1=Hold, 2=Toggle
+    std::string turnAssistBinding;         // Button binding for Hold/Toggle activation
     bool        symmetricalThrottleDz = true;
     bool        holdForBoost = true;
 

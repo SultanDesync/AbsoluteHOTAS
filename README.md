@@ -5,15 +5,18 @@ Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy
 ## Changelog
 ### v3.0
 - **Zero-Config Flight Control Discovery:** The plugin now finds the flight control cluster automatically at runtime using the engine's own Setting system — no `StarfieldCustom.ini` edit required. The discovery is version-independent (scans for Setting names rather than hardcoded memory offsets).
+- **Address Library Removed:** The plugin no longer requires the Starfield Address Library mod. All runtime addresses are resolved through the Setting beacon or AOB pattern scans.
 - **Game Deadzone Zeroing:** The engine's built-in `fRollDeadzone` (default 0.5 — half the axis range!) is automatically zeroed at plugin load. The plugin's own per-axis deadzones in the binding wizard remain in full effect, giving HOTAS users the full precision of their hardware.
+- **Throttle Authority Overhaul:** Both absolute and accumulator throttle modes now use a "silence gate" architecture that blocks all game writes to the throttle memory lanes. The hardware input is the single source of truth — no flicker, no fighting with the game engine.
+- **Pilot Turn Assist:** For accumulator throttle users, optionally re-enables the game's native rotation throttle assist during hard turns. The game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes with configurable button binding.
+- **Per-Offset Silence Gate:** The +0x68 (input target) and +0x6C (effective throttle) memory lanes are now independently silenceable, enabling the Pilot Turn Assist to let the game's native assist operate on +0x6C while the accumulator retains full authority over +0x68.
+- **Direct-Memory Reverse Flight:** Reverse flight no longer emulates the `S` key via keyboard injection. The plugin now writes directly to the flight control cluster's memory lanes, eliminating unintended keyboard inputs in menus, dialogue, and on-foot contexts.
+- **Improved Velocity Reading:** Ship velocity is now read directly from the validated flight control cluster, removing the dependency on a fragile HUD-based static address.
 - **Strafe Modifier Fix:** The Space modifier (which locks roll for strafing) now respects configured deadzone values. Previously a hardcoded 5% threshold caused minor stick noise to fire the modifier and steal roll authority.
 - **Deadzone UI Fix:** The per-axis deadzone graph now correctly represents the deadzone as a proportion of the full axis range. The slider range is expanded to 0–95% (was previously capped at 50%).
 - **Mouse Steering Defaults:** HOSAM alignment assist defaults tuned for real-world use — radius 130/200 (was 15), idle 50ms (was 80), decay 8.0 (was 4.0). Wizard slider maximums raised accordingly.
+- **Codebase Hygiene:** Consolidated duplicate code, removed redundant imports, extracted shared utilities (`StringUtils.h`, `DeviceManager.h`), and removed the legacy `version.rc` resource.
 - **Signal Hunter Fallback:** The original Signal Hunter discovery method is preserved as a fallback via `bSignalHunterFallback = true` in the INI.
-
-### v2.7.0-beta
-- **Direct-Memory Reverse Flight:** Reverse flight no longer emulates the `S` key via keyboard injection. The plugin now writes directly to the flight control cluster's memory lanes. This completely eliminates unintended keyboard inputs in menus, dialogue, and on-foot contexts when reverse is mapped to an axis or button.
-- **Improved Velocity Reading:** Removed the dependency on a fragile HUD-based static address. The ship's velocity is now read directly from the validated flight control cluster, improving stability across game updates.
 
 This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
 
@@ -49,7 +52,7 @@ fThrottleAtEngineStart = 0.0314
 * **Digital Axis Buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
 * **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
-* **Turn-Rate Throttle Respect** — The game's native turn-rate speed penalty is preserved during flight. During hard turns the throttle naturally reduces to match the game's effective speed, while feathering below 50% remains responsive.
+* **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
 * **Silent logging** — Diagnostic logging is disabled by default to minimize performance impact, and can be toggled on via `bLogThrottle = true` in the INI.
 
 ## Requirements
@@ -148,7 +151,7 @@ AbsoluteHOTAS allows you to divide a single physical throttle axis into up to **
 When configured via the Binding Wizard (`Ctrl+Alt+B`), the graph provides a live, multi-colored visualization of your zones:
 * **Reverse Zone (Red):** The bottom of your physical axis triggers reverse thrust.
 * **Dead Stop Range (Amber):** An absolute zero velocity point that is easy to find by feel.
-* **50% Cruise Plateau (Orange):** Locks your throttle to exactly 50% for optimal turn rate and combat maneuverability.
+* **50% Cruise Plateau (Orange):** Locks your throttle to exactly 50% for consistent combat maneuverability.
 * **100% Plateau (Silver):** Ensures you reach top speed without accidentally triggering your boosters.
 * **Boost Trigger (Purple):** The very top limit of your axis automatically engages ship boost.
 
@@ -201,6 +204,31 @@ To handle reverse thrust smoothly in Starfield's flight model, the accumulator u
    * **Reverse Gate Velocity**: The HUD speed threshold below which backward stick deflection engages reverse thrusters.
 7. Click **Save & Apply**.
 
+### Pilot Turn Assist
+
+With a hardware throttle (absolute mode), the game's built-in rotation throttle assist is fully silenced — your lever is the single source of truth. But with a self-centering stick (accumulator mode), you may want the game to help slow you down during hard turns for tighter maneuvering.
+
+**Pilot Turn Assist** re-enables the game's native assist selectively: during hard turns, the game reduces your effective speed to its optimal maneuvering zone. When you stop turning (or deactivate the assist), your throttle snaps back to its pre-turn value instantly — no gradual ramp, no lost speed.
+
+Three activation modes are available:
+
+| Mode | Behavior |
+|------|----------|
+| **Always** | Assist is active whenever you're turning hard with the throttle stick at neutral. |
+| **Hold** | Assist is only active while a bound button is held. |
+| **Toggle** | A button press toggles assist on/off. |
+
+Configure via the wizard under **Dual-Stick / Accumulator Mode → Pilot Turn Assist**, or via INI:
+
+```ini
+[DualStick]
+bAccumulatorTurnAssist = true    ; Enable pilot turn assist
+iTurnAssistMode = 0              ; 0=Always, 1=Hold, 2=Toggle
+iTurnAssistButton = -1           ; Button binding for Hold/Toggle (DeviceName@N)
+```
+
+> **How it works:** The plugin silences the game's writes to the throttle input target (+0x68) so the accumulator always owns your speed. When turn assist is active, it selectively un-silences the effective throttle lane (+0x6C), letting the game's native rotation assist write there while your input target is preserved. When the assist deactivates, a burst write pushes your original value back to both offsets.
+
 #### Option B: Manual INI Configuration
 Edit `AbsoluteHOTAS.ini` and configure the following sections:
 
@@ -215,6 +243,9 @@ bAccumulatorThrottle = true      ; Enable the accumulator
 fAccumulatorRate = 1.0           ; Seconds to reach 100% (1.0 = 1 sec)
 fAccumulatorDecay = 2.0          ; Decay speed on center (2.0 = 0.5 sec to 0%)
 fReverseGateVelocity = 5.0       ; Engage reverse under this HUD speed (m/s)
+bAccumulatorTurnAssist = false   ; Enable pilot turn assist
+iTurnAssistMode = 0              ; 0=Always, 1=Hold, 2=Toggle
+iTurnAssistButton = -1           ; Button for Hold/Toggle (-1 = unbound)
 ```
 
 ## Aiming

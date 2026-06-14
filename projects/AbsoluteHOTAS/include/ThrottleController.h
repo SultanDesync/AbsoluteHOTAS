@@ -143,6 +143,12 @@ public:
         float   fAccumulatorRate = 1.0f;       // Throttle units/second at full deflection
         float   fAccumulatorDecay = 0.0f;      // Throttle units/second decay toward 0 at neutral (0 = hold)
         float   fReverseGateVelocity = 5.0f;   // Velocity (m/s) below which reverse throttle is allowed
+
+        // Pilot turn assist: lifts +0x6C silence to let the game's native rotation
+        // throttle assist operate. Throttle resumes automatically when deactivated.
+        bool    bAccumulatorTurnAssist = false;  // Enable pilot turn assist
+        int     iTurnAssistMode = 0;             // 0=Always, 1=Hold, 2=Toggle
+        BindingRef turnAssistButton;             // Button binding for Hold/Toggle activation
     };
 
     static bool Initialize();
@@ -156,6 +162,10 @@ public:
 
     // Returns the last normalized throttle value (-1.0 to 1.0)
     static float GetCurrentThrottle();
+
+    // Runtime turn assist state (computed from INI master switch + button mode).
+    // Called by SignalHunter to decide whether to apply the turn assist decay.
+    static bool IsTurnAssistActive();
 
     // Ship action info for the binding wizard
     struct ShipActionInfo {

@@ -21,20 +21,19 @@ static void SHLog(const char* msg) {
 #pragma warning(push)
 #pragma warning(disable: 4733)
 
-static void SafeInjectThrottle(uintptr_t baseAddr, float throttle) {
+static void SafeInjectThrottle(uintptr_t baseAddr, float throttle, bool forceEffective = false) {
     if (!baseAddr) return;
     __try {
         *(float*)(baseAddr + 0x68) = throttle;
         
         float gameEffective = *(float*)(baseAddr + 0x6C);
         
-        // Organic penalty detection:
-        // If our requested throttle is lower than or equal to the game's effective throttle,
-        // we are decelerating or exiting a boost state. We force the effective
-        // throttle down to our stick position to organically break boost locks.
-        // If our input is higher, the game is penalizing our turn-rate (or naturally
-        // accelerating), so we don't touch +0x6C.
-        if (throttle <= gameEffective) {
+        // +0x6C write logic:
+        // forceEffective: always write both offsets (accumulator mode — we own everything).
+        // Otherwise: only write +0x6C downward (decelerating / exiting boost).
+        // When accelerating, the game's native rotation throttle assist may be
+        // managing +0x6C independently, so we don't override upward.
+        if (forceEffective || throttle <= gameEffective) {
             *(float*)(baseAddr + 0x6C) = throttle;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -122,6 +121,7 @@ void Disarm() {
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::SetSilence6CEnabled(false);
     ThrottleHook::SetCaptureEnabled(false);
     ThrottleHook::ClearCandidates();
 }
@@ -137,6 +137,7 @@ void ArmForReacquire(const char* reason) {
     ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::SetSilence6CEnabled(false);
     ThrottleHook::ClearCandidates();
     ThrottleHook::SetCaptureEnabled(true);
 }
@@ -181,6 +182,7 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
                 s_plausibilityFailCount    = 0;
                 ThrottleHook::SetCaptureEnabled(false);
                 ThrottleHook::SetSilenceEnabled(false);
+                ThrottleHook::SetSilence6CEnabled(false);
                 break;
             }
 
@@ -199,6 +201,7 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
                 s_plausibilityFailCount    = 0;
                 ThrottleHook::SetCaptureEnabled(false);
                 ThrottleHook::SetSilenceEnabled(false);
+                ThrottleHook::SetSilence6CEnabled(false);
                 break;
             }
         }
@@ -255,7 +258,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
     s_plausibilityFailCount = 0;
 
-    float gameTarget = SafeReadThrottle(s_activeThrottlePtr);
     constexpr float kThrottleDeltaAuthority = 0.015f;
     int throttleBurstFrameCount = (cfg.throttleBurstMs <= 0)
         ? 1 : std::max(1, (cfg.pollRateHz * cfg.throttleBurstMs) / 1000);
@@ -294,6 +296,11 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         float stickDeflection = throttle;
 
         if (!boostHeld) {
+            // Accumulator value is the single source of truth.
+            // Silence +0x68 writes so the accumulator always owns the input target.
+            // +0x6C silence is managed per-frame by the turn assist logic below.
+            ThrottleHook::SetSilenceEnabled(true);
+
             const float kDeadzone = std::max(cfg.fThrottleDeadzone, 0.05f);
 
             if (stickDeflection > kDeadzone) {
@@ -311,11 +318,11 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
                     if (gateOpen) {
                         ThrottleHook::SetReverseOverride(true);
-                        SafeInjectThrottle(s_activeThrottlePtr, -1.0f);
+                        SafeInjectThrottle(s_activeThrottlePtr, -1.0f, true);
                         s_lastInjectedThrottle = -1.0f;
                     } else {
                         ThrottleHook::SetReverseOverride(false);
-                        SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
+                        SafeInjectThrottle(s_activeThrottlePtr, 0.0f, true);
                     }
 
                     if (cfg.logThrottle) {
@@ -336,12 +343,29 @@ void Inject(float throttle, float pitch, float yaw, float roll,
                     }
                 }
             } else {
+                // Stick at neutral
                 ThrottleHook::SetReverseOverride(false);
                 if (cfg.fAccumulatorDecay > 0.0f && s_accumulatorThrottle > 0.0f) {
                     s_accumulatorThrottle -= cfg.fAccumulatorDecay * dt;
                     if (s_accumulatorThrottle < 0.0f) s_accumulatorThrottle = 0.0f;
                 }
             }
+
+            // ---- Turn Assist: Native game assist via selective +0x6C silence ----
+            // When active, we lift +0x6C silence so the game's built-in rotation
+            // throttle assist writes to effective throttle. Our accumulator value
+            // in +0x68 stays untouched. When assist deactivates, we re-silence +0x6C
+            // and trigger a burst to push our value back to both offsets.
+            static bool s_prevTurnAssistActive = false;
+            bool turnAssistActive = ThrottleController::IsTurnAssistActive();
+            ThrottleHook::SetSilence6CEnabled(!turnAssistActive);
+
+            if (s_prevTurnAssistActive && !turnAssistActive) {
+                // Transition: assist OFF → force burst to resume our throttle
+                s_accumBurstFrames = throttleBurstFrameCount;
+                s_lastAccumBurstValue = -999.0f; // force delta detection
+            }
+            s_prevTurnAssistActive = turnAssistActive;
 
             // Delta burst injection
             float accTarget = std::max(s_accumulatorThrottle, 0.0f);
@@ -353,11 +377,13 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             }
             if (s_accumBurstFrames > 0) {
                 s_lastInjectedThrottle = accTarget;
-                SafeInjectThrottle(s_activeThrottlePtr, accTarget);
+                SafeInjectThrottle(s_activeThrottlePtr, accTarget, true);
                 s_accumBurstFrames--;
             }
         } else {
-            // Boost held: game owns throttle
+            // Boost held: release all silence, game owns throttle
+            ThrottleHook::SetSilenceEnabled(false);
+            ThrottleHook::SetSilence6CEnabled(false);
             s_accumBurstFrames = 0;
         }
 
@@ -387,7 +413,9 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         }
 
     } else if (reverseHeld) {
-        // Direct-memory reverse
+        // Direct-memory reverse — release silence so the game can process reverse
+        ThrottleHook::SetSilenceEnabled(false);
+        ThrottleHook::SetSilence6CEnabled(false);
         float vel = ReadClusterVelocity(s_activeThrottlePtr);
         bool gateOpen = (vel < 0.0f) || (vel >= 0.0f && vel <= cfg.fReverseGateVelocity);
 
@@ -428,12 +456,21 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         s_lastInjectedThrottle = -999.0f;
 
     } else if (boostHeld) {
-        // Suppress throttle writes during boost
+        // Suppress throttle writes during boost — release silence so game owns throttle
+        ThrottleHook::SetSilenceEnabled(false);
+        ThrottleHook::SetSilence6CEnabled(false);
         ThrottleHook::SetReverseOverride(false);
         s_throttleBurstFrames = 0;
     } else {
         // Standard absolute throttle injection
+        // The hardware lever is the single source of truth. The game's
+        // "rotation throttle assist" (which auto-centers throttle for optimal
+        // turn rates on gamepad/keyboard) is not needed with a physical lever.
+        // We silence the game's writes to +0x68/+0x6C so the lever always wins,
+        // and use delta-burst injection for efficiency.
         ThrottleHook::SetReverseOverride(false);
+        ThrottleHook::SetSilenceEnabled(true);
+        ThrottleHook::SetSilence6CEnabled(true);
 
         bool firstCommand  = (s_lastInjectedThrottle == -999.0f);
         bool throttleMoved = firstCommand ||
@@ -445,10 +482,8 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             s_lastInjectedThrottle = throttle;
         }
 
-        float targetThrottle = (s_throttleBurstFrames > 0) ? s_throttleBurstValue : gameTarget;
-
         if (s_throttleBurstFrames > 0) {
-            SafeInjectThrottle(s_activeThrottlePtr, targetThrottle);
+            SafeInjectThrottle(s_activeThrottlePtr, s_throttleBurstValue, true);
             s_throttleBurstFrames--;
         }
 
@@ -460,7 +495,7 @@ void Inject(float throttle, float pitch, float yaw, float roll,
                 if (std::abs(pitch - lP) > 0.05f || std::abs(yaw - lY) > 0.05f || std::abs(roll - lR) > 0.05f) {
                     char tel[256];
                     sprintf_s(tel, "[Telemetry] P%+.3f Y%+.3f R%+.3f | T%+.3f",
-                        pitch, yaw, roll, targetThrottle);
+                        pitch, yaw, roll, throttle);
                     RuntimePaths::AppendLogAlways("[SignalHunter]", tel);
                     lP = pitch; lY = yaw; lR = roll; lastLogIter = iter;
                 }

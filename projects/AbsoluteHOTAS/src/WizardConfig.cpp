@@ -79,6 +79,9 @@ void LoadCurrentBindings() {
     s.accumulatorRate     = cfg.fAccumulatorRate;
     s.accumulatorDecay    = cfg.fAccumulatorDecay;
     s.reverseGateVelocity = cfg.fReverseGateVelocity;
+    s.accumulatorTurnAssist = cfg.bAccumulatorTurnAssist;
+    s.turnAssistMode      = cfg.iTurnAssistMode;
+    s.turnAssistBinding   = FormatBindingRef(cfg.turnAssistButton, false);
     s.symmetricalThrottleDz = (std::abs(cfg.idlePlateau - (1.0f - cfg.fThrottleSaturation)) < 0.01f);
     s.holdForBoost = cfg.bHoldForBoost;
 
@@ -269,6 +272,12 @@ void SaveBindingsToINI() {
     SetIniFloat(ini, "DualStick", "fAccumulatorRate", s.accumulatorRate, "%.1f");
     SetIniFloat(ini, "DualStick", "fAccumulatorDecay", s.accumulatorDecay, "%.1f");
     SetIniFloat(ini, "DualStick", "fReverseGateVelocity", s.reverseGateVelocity, "%.1f");
+    ini.SetBoolValue("DualStick", "bAccumulatorTurnAssist", s.accumulatorTurnAssist);
+    SetIniInt(ini, "DualStick", "iTurnAssistMode", s.turnAssistMode);
+    {
+        const char* val = (s.turnAssistBinding != "(unbound)") ? s.turnAssistBinding.c_str() : "-1";
+        ini.SetValue("DualStick", "iTurnAssistButton", val);
+    }
     ini.SetBoolValue("Injection", "bHoldForBoost", s.holdForBoost);
 
     // HOSAM

@@ -18,6 +18,7 @@ namespace CaptureSlot {
     constexpr int kAimAxisBase     = 600;   // 600..699
     constexpr int kDigitalAimBase  = 700;   // 700..704
     constexpr int kToggleAimMode   = 705;
+    constexpr int kTurnAssistBtn   = 706;
 
     inline bool IsAxis(int slot) {
         return (slot >= kAxisBase && slot < kButtonBase)

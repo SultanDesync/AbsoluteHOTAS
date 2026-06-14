@@ -20,6 +20,7 @@ static volatile uintptr_t g_candidates[ThrottleHook::MAX_CANDIDATES] = {};
 static volatile int g_candidateCount = 0;
 static volatile bool g_captureEnabled = true;
 static volatile bool g_silenceEnabled = false; // SILENCE FLAG: Skip original writes if true
+static volatile bool g_silence6CEnabled = false; // Per-offset: independently silence +0x6C stores
 static volatile uint8_t g_rotOverrideEnabled = 0;
 static volatile uint8_t g_rollOverrideEnabled = 0;
 static volatile uint8_t g_vertStrafeOverrideEnabled = 0;
@@ -350,7 +351,7 @@ static bool InstallRotationalGates(uintptr_t textStart, size_t textSize, uintptr
 }
 
 // ---- Install a 5-byte trampoline that captures RDI and stores in candidates ----
-static bool InstallTrampoline5(uintptr_t targetAddr, const uint8_t* savedBytes, const char* label, bool isStore = false) {
+static bool InstallTrampoline5(uintptr_t targetAddr, const uint8_t* savedBytes, const char* label, bool isStore = false, volatile bool* silenceFlag = nullptr) {
     // Allocate trampoline within ±2GB
     uint8_t* trampMem = AllocateNear(targetAddr);
     if (!trampMem) {
@@ -453,11 +454,13 @@ static bool InstallTrampoline5(uintptr_t targetAddr, const uint8_t* savedBytes, 
 
     // --- ABSOLUTE AUTHORITY: SILENCING Logic ---
     if (isStore) {
-        // if (g_silenceEnabled) skip original bytes
-        // mov rax, &g_silenceEnabled
+        // Use per-hook silence flag if provided, otherwise fall back to global
+        volatile bool* silAddr = silenceFlag ? silenceFlag : &g_silenceEnabled;
+        // if (*silAddr) skip original bytes
+        // mov rax, silAddr
         trampMem[idx++] = 0x48; trampMem[idx++] = 0xB8;
-        uintptr_t silAddr = (uintptr_t)&g_silenceEnabled;
-        memcpy(&trampMem[idx], &silAddr, 8); idx += 8;
+        uintptr_t silAddrVal = (uintptr_t)silAddr;
+        memcpy(&trampMem[idx], &silAddrVal, 8); idx += 8;
         // cmp byte ptr [rax], 0
         trampMem[idx++] = 0x80; trampMem[idx++] = 0x38; trampMem[idx++] = 0x00;
         // jne skip_original (short jump past original bytes)
@@ -583,6 +586,15 @@ void ThrottleHook::SetSilenceEnabled(bool enabled) {
 
 bool ThrottleHook::IsSilenceEnabled() {
     return g_silenceEnabled;
+}
+
+void ThrottleHook::SetSilence6CEnabled(bool enabled) {
+    if (g_silence6CEnabled == enabled) return;
+    g_silence6CEnabled = enabled;
+}
+
+bool ThrottleHook::IsSilence6CEnabled() {
+    return g_silence6CEnabled;
 }
 
 void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled, bool yawEnabled, bool pitchEnabled) {
@@ -787,6 +799,10 @@ bool ThrottleHook::Install() {
         {{0xC5, 0x00, 0x11, 0x00, 0x68}, "x?x?x", "VMOVSS-STORE-68"},
         {{0xF3, 0x0F, 0x11, 0x00, 0x68}, "xxxx?x", "MOVSS-STORE-68"},
 
+        // --- Throttle Effective (6C) — independently silenced via g_silence6CEnabled ---
+        {{0xC5, 0x00, 0x11, 0x00, 0x6C}, "x?x?x", "VMOVSS-STORE-6C"},
+        {{0xF3, 0x0F, 0x11, 0x00, 0x6C}, "xxxx?x", "MOVSS-STORE-6C"},
+
         // --- Aligned Block Stores (Sometimes used for shared structs) ---
         {{0xC5, 0x00, 0x29, 0x00, 0x50}, "x?x?x", "VMOVAPS-STORE-VEC50"},
         {{0xC5, 0x00, 0x29, 0x00, 0x60}, "x?x?x", "VMOVAPS-STORE-VEC60"},
@@ -830,7 +846,9 @@ bool ThrottleHook::Install() {
                     memcpy(orig, ptr, 5);
                     
                     bool isStore = (pat.name.find("STORE") != std::string::npos);
-                    if (InstallTrampoline5(textStart + i, orig, label, isStore)) {
+                    bool is6C = (pat.name.find("-6C") != std::string::npos);
+                    volatile bool* silFlag = (isStore && is6C) ? &g_silence6CEnabled : nullptr;
+                    if (InstallTrampoline5(textStart + i, orig, label, isStore, silFlag)) {
                         hookCount++;
                     }
                 }

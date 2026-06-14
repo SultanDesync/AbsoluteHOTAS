@@ -37,6 +37,8 @@ static void OnCaptureCommit(int slot, const char* binding) {
         s.digitalAimBindings[slot - CaptureSlot::kDigitalAimBase] = binding;
     } else if (slot == CaptureSlot::kToggleAimMode) {
         s.toggleAimModeBinding = binding;
+    } else if (slot == CaptureSlot::kTurnAssistBtn) {
+        s.turnAssistBinding = binding;
     }
 }
 
@@ -701,6 +703,27 @@ static void DrawAdvancedModesTab(WizardState& s) {
             ImGui::PopItemWidth();
             ImGui::Spacing();
             ImGui::TextWrapped("Push forward to accelerate. Pull back to decelerate; at zero throttle, pulling further triggers reverse braking.");
+
+            ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+            ImGui::Checkbox("Pilot Turn Assist", &s.accumulatorTurnAssist);
+            if (s.accumulatorTurnAssist) {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Lets the game's native turn-rate assist slow your ship during hard turns. Throttle resumes when you stop turning.");
+
+                ImGui::PushItemWidth(180);
+                const char* modeLabels[] = { "Always", "Hold", "Toggle" };
+                ImGui::Combo("Activation##turnMode", &s.turnAssistMode, modeLabels, 3);
+                ImGui::PopItemWidth();
+                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f),
+                    s.turnAssistMode == 0 ? "Active whenever turning" :
+                    s.turnAssistMode == 1 ? "Active while button is held" : "Button toggles on/off");
+
+                if (s.turnAssistMode > 0) {
+                    ImGui::PushID(8000);
+                    DrawBindingRow("Assist Button", s.turnAssistBinding, CaptureSlot::kTurnAssistBtn, false);
+                    ImGui::PopID();
+                }
+            }
         }
         ImGui::Unindent(12);
     }
