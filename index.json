@@ -17,7 +17,7 @@
       "path": "projects/AbsoluteHOTAS",
       "purpose": "Core plugin code including the main entry point, hooks, controller thread, and default configuration ini.",
       "subdirectories": {
-        "src": "C++ source files implementing Main, low-level throttle hooks, and DirectInput controller.",
+        "src": "C++ source files implementing Main, low-level memory hooks, setting beacon, UI binding wizard, and DirectInput controller.",
         "include": "C++ header files containing class declarations and struct definitions.",
         "config": "Contains standalone AbsoluteHOTAS.ini configuration file."
       }
@@ -26,31 +26,34 @@
       "path": "shared",
       "purpose": "Common headers, global variables, and utilities shared within the project.",
       "subdirectories": {
-        "src": "Global variable definitions, plugin info details, and runtime paths/logs configuration.",
-        "include": "Common headers, precompiled header (PCH.h), DirectInput/KBM utilities, and global synchronization variables."
+        "src": "Global variable definitions, plugin info details, D3D12 UI hook, and runtime paths/logs configuration.",
+        "include": "Common headers, precompiled header (PCH.h), DirectInput/KBM utilities, device manager, and global synchronization variables."
       }
     },
     "docs": {
       "path": "docs",
-      "purpose": "Technical documentation containing flight control cluster memory maps, hardware specifications, and output scancode reference charts."
+      "purpose": "Technical documentation containing flight control cluster memory maps, hardware specifications, and output scancode reference charts.",
+      "subdirectories": {
+        "reference": "Markdown reference files documenting key output scancodes, ini options, and control cluster architecture."
+      }
     }
   },
   "files": {
     "projects/AbsoluteHOTAS/src/Main.cpp": {
       "role": "Plugin Loader & Entry Point",
-      "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, and installs the low-level memory writer hooks via ThrottleHook."
+      "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, plants the Setting beacon, installs the low-level hooks, initializes the controller thread, and hooks D3D12 via UIHook."
     },
     "projects/AbsoluteHOTAS/src/ThrottleHook.cpp": {
       "role": "Low-level x86 Hook Manager",
-      "purpose": "Handles AOB signature scanning inside the game's .text section, allocates 2GB-near memory trampolines, hooks the critical flight writer path, registers manual camera/rotational gates, and provides safe override logic for ship roll, pitch, and yaw."
+      "purpose": "Handles AOB signature scanning inside the game's .text section, allocates 2GB-near memory trampolines, hooks the critical flight writer path, registers manual camera/rotational gates, and provides safe override logic for ship roll, pitch, yaw, and throttle (via per-offset silence gates)."
     },
     "projects/AbsoluteHOTAS/src/ThrottleController.cpp": {
       "role": "Orchestrator & DirectInput Polling Thread",
-      "purpose": "Manages the execution thread of the DirectInput controller, normalizes and deadzones axis inputs, and delegates processing to specific subsystems."
+      "purpose": "Manages the execution thread of the DirectInput controller, normalizes and deadzones axis inputs, handles ship button bindings, and delegates processing to specific subsystems."
     },
     "projects/AbsoluteHOTAS/src/SignalHunter.cpp": {
       "role": "Memory Signature & Injection",
-      "purpose": "Runs the 'Signal Hunter' algorithm to locate the dynamic control cluster, performs throttle injection, and manages reverse thrust and boost zones."
+      "purpose": "Runs the 'Signal Hunter' algorithm to locate the dynamic control cluster (leveraging the fThrottleAtEngineStart beacon), performs throttle injection, manages reverse thrust/boost zones, and handles turn assist silence gates."
     },
     "projects/AbsoluteHOTAS/src/ShipOutput.cpp": {
       "role": "Ship Action & Output Management",
@@ -60,9 +63,37 @@
       "role": "Aim & Source Object Reticle Injection",
       "purpose": "Drives the source-object reticle/cursor via DirectInput axes or buttons independently from steering, including HOSAM alignment assist logic."
     },
+    "projects/AbsoluteHOTAS/src/SettingBeacon.cpp": {
+      "role": "Bethesda Setting Scanner & Mod Beacon",
+      "purpose": "Scans the game module's .data and .rdata memory sections to locate the fThrottleAtEngineStart and fRollDeadzone settings, planting a signpost value (0.0314f) and disabling the native roll deadzone."
+    },
+    "projects/AbsoluteHOTAS/src/BindingWizard.cpp": {
+      "role": "ImGui Binding Wizard UI",
+      "purpose": "Implements the interactive in-game overlay wizard allowing users to dynamically bind controller axes and buttons, calibrate deadzones, and configure sensitivities."
+    },
+    "projects/AbsoluteHOTAS/src/WizardCapture.cpp": {
+      "role": "Binding Wizard Signal Capture",
+      "purpose": "Handles live input capture for physical joystick buttons/axes within the ImGui wizard UI."
+    },
+    "projects/AbsoluteHOTAS/src/WizardConfig.cpp": {
+      "role": "Binding Wizard Config Serializer",
+      "purpose": "Serializes and saves custom controller configurations directly to AbsoluteHOTAS.ini from the ImGui wizard."
+    },
     "projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini": {
       "role": "User Configuration File",
       "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, and idle deadzones."
+    },
+    "shared/src/DeviceManager.cpp": {
+      "role": "HID & DirectInput Device Discovery",
+      "purpose": "Manages low-level DirectInput 8 device enumeration, initialization, and capability polling for connected HOTAS/HOSAS controllers."
+    },
+    "shared/src/UIHook.cpp": {
+      "role": "D3D12 & ImGui Graphics Hook",
+      "purpose": "Hooks the game's D3D12 Present and ResizeBuffers calls using MinHook to inject and render the ImGui controller configuration overlay."
+    },
+    "shared/src/RuntimePaths.cpp": {
+      "role": "Path Resolver & Logger Utility",
+      "purpose": "Resolves documents, SFSE plugins, and logs paths, handling thread-safe append operations to the plugin log file."
     }
   },
   "technical_details": {
@@ -81,6 +112,12 @@
         "discovery_signal": "0.0314f (fThrottleAtEngineStart/fSignpostValue broadcasted on engine startup)",
         "corroboration": "Ensuring the read float values are finite, reasonable, and adjacent lanes scale together under isolated inputs."
       }
+    },
+    "zero_config_discovery": {
+      "setting_beacon": "The plugin dynamically plants a float beacon (0.0314f) into the fThrottleAtEngineStart setting in memory. This eliminates the need for StarfieldCustom.ini edits and resolves addresses dynamically without Address Library."
+    },
+    "pilot_turn_assist": {
+      "silence_gate_override": "Per-offset silence gates independently silence +0x68 (input target) and +0x6C (effective throttle). When pilot turn assist is active, the +0x6C gate is lifted, allowing the game's native rotation-deceleration assist to function, while the hardware input preserves target throttle on +0x68."
     },
     "shipping_paradigm": {
       "standalone_mode": "The mod compiles into AbsoluteHOTAS.dll and AbsoluteHOTAS.ini. Legacy scripting components (Papyrus, .esm, quest seat-trackers) have been removed from the release path, ensuring direct and standalone flight controller execution on DLL load."

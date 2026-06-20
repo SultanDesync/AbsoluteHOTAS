@@ -26,8 +26,6 @@ find_package(minhook CONFIG REQUIRED)
 find_path(SIMPLEINI_INCLUDE_DIRS SimpleIni.h)
 
 set(shared_sources
-  ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/AbsoluteGlobals.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/AbsoluteGlobals.h
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/RuntimePaths.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/RuntimePaths.h
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/Plugin.cpp
@@ -129,6 +127,26 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini
     ${PACKAGE_PLUGIN_DIR}
 )
+
+# Optional direct deploy into a local mod-manager folder for quick smoke tests.
+# Opt-in: set ABSOLUTEHOTAS_DEPLOY_DIR (e.g. in your gitignored CMakeUserPresets.json)
+# to the SFSE/Plugins folder of your test mod. The DLL is refreshed every build;
+# the INI is only seeded if absent, so your tuned bindings survive rebuilds
+# (delete the deployed INI to re-seed the default).
+if(ABSOLUTEHOTAS_DEPLOY_DIR)
+  add_custom_command(
+    TARGET AbsoluteHOTAS
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ABSOLUTEHOTAS_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:AbsoluteHOTAS> "${ABSOLUTEHOTAS_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND}
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini
+      -DDST=${ABSOLUTEHOTAS_DEPLOY_DIR}/AbsoluteHOTAS.ini
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/deploy_ini.cmake
+    COMMENT "Deploying AbsoluteHOTAS.dll -> ${ABSOLUTEHOTAS_DEPLOY_DIR}"
+    VERBATIM
+  )
+endif()
 
 set(RELEASE_ARCHIVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/releases")
 set(RELEASE_ARCHIVE_NAME "${PROJECT_NAME}-v${PROJECT_VERSION}-${BUILD_NAME}.zip")

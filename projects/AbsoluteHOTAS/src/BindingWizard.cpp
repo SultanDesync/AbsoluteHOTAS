@@ -550,6 +550,37 @@ static void DrawAxesTab(WizardState& s) {
                 dl->AddLine(ImVec2(pos.x + barWidth * 0.5f, pos.y), ImVec2(pos.x + barWidth * 0.5f, pos.y + barHeight),
                     IM_COL32(80, 220, 240, 220), 2.0f);
 
+                // Live axis position (yellow marker) — same bipolar normalization
+                // the runtime uses (calibration range + invert), so the user can
+                // see exactly where the stick sits relative to the deadzone and
+                // saturation zones and feel how each maps to output.
+                {
+                    BindingRef ab = ParseBindingRef(s.axisBindings[i].c_str(), -1);
+                    int axDevIdx = -1;
+                    if (ab.value > 0) {
+                        if (ab.deviceIndex >= 0)            axDevIdx = ab.deviceIndex;
+                        else if (!ab.deviceName.empty())    axDevIdx = DeviceManager::ResolveByName(ab.deviceName);
+                        else if (DeviceManager::GetDeviceCount() > 0) axDevIdx = 0;
+                    }
+                    const auto* st = (axDevIdx >= 0) ? DeviceManager::GetCachedState(axDevIdx) : nullptr;
+                    if (st) {
+                        long rawVal = DeviceManager::GetAxisFromState(st, ab.value);
+                        float aMin = 0.0f, aMax = 65535.0f;
+                        auto calibIt = s.calibData.find((axDevIdx << 8) | ab.value);
+                        if (calibIt != s.calibData.end() && calibIt->second.second > calibIt->second.first) {
+                            aMin = (float)calibIt->second.first;
+                            aMax = (float)calibIt->second.second;
+                        }
+                        float center = (aMin + aMax) * 0.5f, half = (aMax - aMin) * 0.5f;
+                        float v = (half > 0.0f) ? (rawVal - center) / half : 0.0f;
+                        if (s.axisInvert[i]) v = -v;
+                        v = std::clamp(v, -1.0f, 1.0f);
+                        float liveX = (0.5f + v * 0.5f) * barWidth;
+                        dl->AddLine(ImVec2(pos.x + liveX, pos.y - 1), ImVec2(pos.x + liveX, pos.y + barHeight + 1),
+                            IM_COL32(255, 220, 50, 255), 2.0f);
+                    }
+                }
+
                 dl->AddRect(pos, ImVec2(pos.x + barWidth, pos.y + barHeight), IM_COL32(120, 120, 120, 180), 3.0f);
                 ImGui::Dummy(ImVec2(barWidth, barHeight));
                 ImGui::SameLine();

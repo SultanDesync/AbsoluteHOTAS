@@ -4,7 +4,6 @@
 #include "ShipOutput.h"
 #include "SignalHunter.h"
 #include "AimController.h"
-#include "AbsoluteGlobals.h"
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
 #include "UIHook.h"
@@ -144,6 +143,7 @@ void ThrottleController::LoadConfig() {
     s_config.stopButton         = ParseBindingRef(ini.GetValue("Buttons", "iStopButtonId",       ""), -1);
     s_config.toggleWizardButton = ParseBindingRef(ini.GetValue("Buttons", "iToggleWizardButton", ""), -1);
     s_config.alwaysOn           = ini.GetBoolValue("Buttons", "bAlwaysOn", true);
+    s_config.toggleActiveKey    = (int)ini.GetLongValue("Buttons", "iToggleActiveKey", 0x91);
 
     s_config.detentCenter     = ini.GetLongValue("Normalization", "iDetentCenter",     32768);
     s_config.detentDeadzone   = ini.GetLongValue("Normalization", "iDetentDeadzone",   500);
@@ -369,7 +369,13 @@ void ThrottleController::ControlLoop() {
     auto sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
     uint64_t iter = 0;
     float lastInjectedHardwareValue = -999.0f;
-    bool wasPiloting = false;
+    // Master runtime gate. When false, ALL SendInput outputs and axis injection
+    // are suppressed; driven by the activate/stop bindings (and Ctrl+Alt+F8).
+    // Initialized from bAlwaysOn so default users come up active, while users who
+    // want manual control (bAlwaysOn=false) come up deactivated until they press
+    // the activate binding.
+    bool active = s_config.alwaysOn;
+    bool wasActive = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
 
     // Inline axis reading helper — delegates to DeviceManager
@@ -400,62 +406,74 @@ void ThrottleController::ControlLoop() {
 
         DeviceManager::PollAll();
 
-        // Suppress ship button outputs while wizard overlay is open
-        if (!UIHook::IsUIOpen())
-            ShipOutputSystem::UpdateShipButtonBindings();
-        else
-            ShipOutputSystem::ReleaseAllShipButtonOutputs();
-
-        const bool isPiloting = AbsoluteGlobals::g_isPilotState.load(std::memory_order_acquire);
-        if (!isPiloting) {
-            if (wasPiloting) CtrlLog("[PilotState] Pilot seat exited; injection disarmed.");
-            SignalHunter::Disarm();
-            lastInjectedHardwareValue = -999.0f;
-            wasPiloting = false;
-            std::this_thread::sleep_for(sleepDuration);
-            continue;
-        }
-
-        if (!wasPiloting) {
-            SignalHunter::Disarm();
-            lastInjectedHardwareValue = -999.0f;
-            if (s_config.alwaysOn) {
-                CtrlLog("[PilotState] Standalone mode active; discovery armed automatically.");
-                SignalHunter::ArmForReacquire(nullptr);
-            } else {
-                CtrlLog("[PilotState] Standalone mode active; waiting for activate button.");
-            }
-            wasPiloting = true;
-        }
-
-        // ---- Control buttons ----
+        // ---- Control buttons (always processed, even while deactivated, so the
+        //      activate binding and wizard overlay can always be reached) ----
         bool curActivate    = IsButtonPressed(s_config.activateButton);
         bool curStop        = IsButtonPressed(s_config.stopButton);
         bool curToggleWizard = IsButtonPressed(s_config.toggleWizardButton);
         static bool prevActivate = false, prevStop = false, prevToggleWizard = false;
 
-        bool curFailsafe = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
-                           ((GetAsyncKeyState(VK_MENU)    & 0x8000) != 0) &&
-                           ((GetAsyncKeyState(VK_F8)      & 0x8000) != 0);
-        static bool prevFailsafe = false;
+        // Keyboard master on/off toggle (single configurable key; default ScrollLock).
+        bool curToggleKey = s_config.toggleActiveKey != 0 &&
+                            (GetAsyncKeyState(s_config.toggleActiveKey) & 0x8000) != 0;
+        static bool prevToggleKey = false;
+        const bool toggleEdge = curToggleKey && !prevToggleKey;
+        prevToggleKey = curToggleKey;
 
-        if ((curActivate && !prevActivate) || (curFailsafe && !prevFailsafe)) {
-            CtrlLog("[SignalHunter] MANUAL TRIGGER: activate/failsafe reset pressed.");
+        // Activate: enable injection + outputs and (re)arm discovery. Triggered by
+        // the activate binding or the keyboard toggle when currently deactivated.
+        if ((curActivate && !prevActivate) || (toggleEdge && !active)) {
+            CtrlLog("[Master] ACTIVATE: enabling injection and outputs.");
+            active = true;
             SignalHunter::ArmForReacquire("manual activate");
             lastInjectedHardwareValue = -999.0f;
         }
-        if (curStop && !prevStop) {
-            CtrlLog("[SignalHunter] MANUAL STOP pressed. Disarming.");
+        // Deactivate: full shutdown — release every held SendInput output AND stop
+        // axis injection. Triggered by the stop binding or the keyboard toggle when
+        // currently active. Lets the user kill all ghost inputs on foot.
+        else if ((curStop && !prevStop) || (toggleEdge && active)) {
+            CtrlLog("[Master] DEACTIVATE: releasing all outputs and axis injection.");
+            active = false;
+            ShipOutputSystem::ReleaseAllShipButtonOutputs();
             SignalHunter::Disarm();
             lastInjectedHardwareValue = -999.0f;
-            ThrottleHook::SetCaptureEnabled(true); // Passive monitoring only
         }
         if (curToggleWizard && !prevToggleWizard) UIHook::ToggleUI();
 
-        prevFailsafe     = curFailsafe;
         prevActivate     = curActivate;
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
+
+        // ---- Master active gate ----
+        // While deactivated, suppress ALL SendInput outputs and axis injection.
+        // The deactivate edge above already released held keys; this transition
+        // guard is a safety net for any other path that clears `active`.
+        if (!active) {
+            if (wasActive) {
+                ShipOutputSystem::ReleaseAllShipButtonOutputs();
+                SignalHunter::Disarm();
+                lastInjectedHardwareValue = -999.0f;
+                wasActive = false;
+            }
+            std::this_thread::sleep_for(sleepDuration);
+            continue;
+        }
+
+        // ---- Entering active state (covers bAlwaysOn startup auto-arm) ----
+        if (!wasActive) {
+            if (s_config.alwaysOn) {
+                CtrlLog("[Master] Active; discovery armed automatically.");
+                SignalHunter::ArmForReacquire(nullptr);
+            }
+            lastInjectedHardwareValue = -999.0f;
+            wasActive = true;
+        }
+
+        // Suppress ship button outputs while wizard overlay is open
+        if (!UIHook::IsUIOpen())
+            ShipOutputSystem::UpdateShipButtonBindings();
+        else
+            ShipOutputSystem::ReleaseAllShipButtonOutputs();
 
         // ---- Reverse input ----
         const bool digitalReverseBound = s_config.digitalReverseButton.IsValid()
@@ -531,7 +549,11 @@ void ThrottleController::ControlLoop() {
         }
 
         // ---- Rotation axes ----
-        auto NormBipolar = [&](const BindingRef& ref, float sens, bool invert, float sat = 1.0f) {
+        // Raw bipolar normalization: maps the calibrated axis range to [-1,+1]
+        // with center at 0. NO sensitivity/saturation/deadzone — that shaping is
+        // done by ShapeAxis so the deadzone and saturation behave as ABSOLUTE
+        // positions on the physical axis, matching exactly what the wizard draws.
+        auto NormRaw = [&](const BindingRef& ref, bool invert) -> float {
             if (!ref.IsValid() || ref.value <= 0) return 0.0f;
             float raw  = static_cast<float>(DeviceManager::GetRawAxis(ref));
             float aMin = 0.0f, aMax = 65535.0f;
@@ -545,41 +567,64 @@ void ThrottleController::ControlLoop() {
             }
             float center = (aMin + aMax) / 2.0f, halfRange = (aMax - aMin) / 2.0f;
             if (halfRange <= 0.0f) return 0.0f;
-            float val = (raw - center) / halfRange * sens;
-            val = invert ? -val : val;
-            return std::clamp(val / std::clamp(sat, 0.05f, 1.0f), -1.0f, 1.0f);
+            float n = (raw - center) / halfRange;
+            return invert ? -n : n;
         };
 
-        auto ApplyDeadzone = [](float v, float dz) {
+        // Shape a raw normalized value [-1,1] into output [-1,1] using absolute
+        // axis zones:
+        //   |n| <= dz        -> 0          (deadzone edge sits at dz of the axis)
+        //   dz < |n| < sat   -> linear ramp 0..1
+        //   |n| >= sat       -> +/-1       (saturation edge sits at sat of the axis)
+        // Because dz and sat are absolute axis fractions (no cross-multiplication),
+        // the wizard's drawn zones are literally where these activate in flight.
+        // Sensitivity is a final output gain.
+        auto ShapeAxis = [](float n, float sens, float sat, float dz) -> float {
             const float d = std::clamp(dz, 0.0f, 0.95f);
-            if (std::abs(v) <= d) return 0.0f;
-            const float sign = v < 0.0f ? -1.0f : 1.0f;
-            return sign * ((std::abs(v) - d) / (1.0f - d));
+            const float s = std::clamp(sat, 0.05f, 1.0f);
+            const float mag = std::abs(n);
+            if (mag <= d) return 0.0f;
+            const float span = std::max(s - d, 1e-4f);   // guard against sat <= dz
+            const float ramp = std::clamp((mag - d) / span, 0.0f, 1.0f);
+            const float sign = n < 0.0f ? -1.0f : 1.0f;
+            return std::clamp(sign * ramp * sens, -1.0f, 1.0f);
         };
 
-        float pitch  = ApplyDeadzone(NormBipolar(s_config.pitchAxis,  s_config.fPitchSensitivity,  s_config.bInvertPitch,     s_config.fPitchSaturation),  s_config.fPitchDeadzone);
-        float yaw    = ApplyDeadzone(NormBipolar(s_config.yawAxis,    s_config.fYawSensitivity,    s_config.bInvertYaw,       s_config.fYawSaturation),    s_config.fYawDeadzone);
-        float roll   = ApplyDeadzone(NormBipolar(s_config.rollAxis,   s_config.fRollSensitivity,   s_config.bInvertRoll,      s_config.fRollSaturation),   s_config.fRollDeadzone);
+        float pitch  = ShapeAxis(NormRaw(s_config.pitchAxis, s_config.bInvertPitch), s_config.fPitchSensitivity, s_config.fPitchSaturation, s_config.fPitchDeadzone);
+        float yaw    = ShapeAxis(NormRaw(s_config.yawAxis,   s_config.bInvertYaw),   s_config.fYawSensitivity,   s_config.fYawSaturation,   s_config.fYawDeadzone);
+        float roll   = ShapeAxis(NormRaw(s_config.rollAxis,  s_config.bInvertRoll),  s_config.fRollSensitivity,  s_config.fRollSaturation,  s_config.fRollDeadzone);
         if (IsButtonPressed(s_config.digitalRollLeftButton))  roll -= s_config.digitalRollValue;
         if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
         roll = std::clamp(roll, -1.0f, 1.0f);
 
-        float strafeX = ApplyDeadzone(NormBipolar(s_config.strafeLatAxis,  s_config.fStrafeSensitivity, s_config.bInvertStrafeLat,  s_config.fStrafeSaturation),    s_config.fStrafeDeadzone);
-        float strafeY = ApplyDeadzone(NormBipolar(s_config.strafeVertAxis, s_config.fStrafeSensitivity, s_config.bInvertStrafeVert, s_config.fStrafeVertSaturation), s_config.fStrafeVertDeadzone);
-        if (IsButtonPressed(s_config.digitalStrafeLeftButton))  strafeX -= s_config.digitalStrafeValue;
-        if (IsButtonPressed(s_config.digitalStrafeRightButton)) strafeX += s_config.digitalStrafeValue;
-        if (IsButtonPressed(s_config.digitalStrafeUpButton))    strafeY += s_config.digitalStrafeValue;
-        if (IsButtonPressed(s_config.digitalStrafeDownButton))  strafeY -= s_config.digitalStrafeValue;
+        // Raw normalized magnitudes drive the strafe ACTIVATION gate; ShapeAxis
+        // turns the same raw value into the strafe amount. Both reference the
+        // deadzone as an absolute axis position, so they engage together.
+        const float strafeLatNorm  = NormRaw(s_config.strafeLatAxis,  s_config.bInvertStrafeLat);
+        const float strafeVertNorm = NormRaw(s_config.strafeVertAxis, s_config.bInvertStrafeVert);
+        float strafeX = ShapeAxis(strafeLatNorm,  s_config.fStrafeSensitivity, s_config.fStrafeSaturation,     s_config.fStrafeDeadzone);
+        float strafeY = ShapeAxis(strafeVertNorm, s_config.fStrafeSensitivity, s_config.fStrafeVertSaturation, s_config.fStrafeVertDeadzone);
+
+        const bool digStrafeLeft  = IsButtonPressed(s_config.digitalStrafeLeftButton);
+        const bool digStrafeRight = IsButtonPressed(s_config.digitalStrafeRightButton);
+        const bool digStrafeUp    = IsButtonPressed(s_config.digitalStrafeUpButton);
+        const bool digStrafeDown  = IsButtonPressed(s_config.digitalStrafeDownButton);
+        if (digStrafeLeft)  strafeX -= s_config.digitalStrafeValue;
+        if (digStrafeRight) strafeX += s_config.digitalStrafeValue;
+        if (digStrafeUp)    strafeY += s_config.digitalStrafeValue;
+        if (digStrafeDown)  strafeY -= s_config.digitalStrafeValue;
         strafeX = std::clamp(strafeX, -1.0f, 1.0f);
         strafeY = std::clamp(strafeY, -1.0f, 1.0f);
 
-        // Strafe modifier key (Space) for lateral/vertical strafe
-        // Use configured deadzones as the modifier threshold so noise below
-        // the deadzone never fires the Space modifier (which locks roll).
-        const float modThreshX = std::max(0.05f, s_config.fStrafeDeadzone);
-        const float modThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
-        const bool strafeModifierHeld = std::abs(strafeX) > modThreshX || std::abs(strafeY) > modThreshY;
-        ShipOutputSystem::SetOutputHeld(SpaceOutput, OwnerStrafeModifier, strafeModifierHeld);
+        // Strafe activation gate. Tested against the PRE-deadzone magnitude (or a
+        // digital button) so the deadzone isn't double-counted; the 0.05 floor is a
+        // fixed noise gate so jitter never fires the Space modifier (which locks
+        // roll) even when the configured deadzone is 0.
+        const float strafeActThreshX = std::max(0.05f, s_config.fStrafeDeadzone);
+        const float strafeActThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
+        const bool strafeLatActive  = std::abs(strafeLatNorm)  > strafeActThreshX || digStrafeLeft || digStrafeRight;
+        const bool strafeVertActive = std::abs(strafeVertNorm) > strafeActThreshY || digStrafeUp   || digStrafeDown;
+        ShipOutputSystem::SetOutputHeld(SpaceOutput, OwnerStrafeModifier, strafeLatActive || strafeVertActive);
 
         s_currentThrottle.store(throttle);
 
@@ -635,7 +680,8 @@ void ThrottleController::ControlLoop() {
             // ---- SignalHunter ----
             int candCount = ThrottleHook::GetCandidateCount();
             SignalHunter::Tick(candCount, throttle, dt, iter);
-            SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim);
+            SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim,
+                                 strafeLatActive, strafeVertActive);
 
             // ---- AimController ----
             AimController::Update(s_config, yaw, pitch,

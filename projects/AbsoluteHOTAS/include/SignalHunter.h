@@ -26,7 +26,8 @@ void Tick(int candCount, float throttle, float dt, uint64_t iter);
 //                    gates so the game's native mouse pipeline owns steering.
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t iter,
-            bool reverseHeld, bool suppressPitchYaw = false);
+            bool reverseHeld, bool suppressPitchYaw = false,
+            bool strafeLatActive = false, bool strafeVertActive = false);
 
 // Disarm all state (called on pilot-seat exit).
 void Disarm();

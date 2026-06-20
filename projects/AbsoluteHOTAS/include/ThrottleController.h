@@ -54,6 +54,7 @@ public:
         BindingRef stopButton;
         BindingRef toggleWizardButton;
         bool    alwaysOn = true;          // Auto-arm discovery when the standalone controller starts
+        int     toggleActiveKey = 0x91;   // Keyboard VK code that toggles the master on/off gate (0=disabled, default ScrollLock)
 
         // [Normalization]
         long    detentCenter = 32768;   // Raw axis value at physical detent center

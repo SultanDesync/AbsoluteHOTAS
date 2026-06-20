@@ -239,7 +239,8 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
 
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t iter,
-            bool reverseHeld, bool suppressPitchYaw)
+            bool reverseHeld, bool suppressPitchYaw,
+            bool strafeLatActive, bool strafeVertActive)
 {
     if (!s_activeThrottlePtr) return;
 
@@ -262,10 +263,13 @@ void Inject(float throttle, float pitch, float yaw, float roll,
     int throttleBurstFrameCount = (cfg.throttleBurstMs <= 0)
         ? 1 : std::max(1, (cfg.pollRateHz * cfg.throttleBurstMs) / 1000);
 
-    // Rotational override
-    bool rollOverrideActive      = cfg.rollEnabled && (std::abs(roll) > 0.05f);
-    bool strafeLatOverrideActive = std::abs(strafeX) > std::max(0.05f, cfg.fStrafeDeadzone);
-    bool strafeVertOverrideActive = std::abs(strafeY) > std::max(0.05f, cfg.fStrafeVertDeadzone);
+    // Rotational override.
+    // Strafe activation is decided by the controller from the pre-deadzone axis
+    // magnitude (so the deadzone is not applied twice) and passed in here; the
+    // value written (strafeX/strafeY) is still the single-deadzoned value.
+    bool rollOverrideActive       = cfg.rollEnabled && (std::abs(roll) > 0.05f);
+    bool strafeLatOverrideActive  = strafeLatActive;
+    bool strafeVertOverrideActive = strafeVertActive;
     float lateral = strafeLatOverrideActive ? strafeX : roll;
 
     // HOSAM mode: release yaw/pitch gates so the game's native mouse pipeline
