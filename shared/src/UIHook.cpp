@@ -15,6 +15,9 @@
 
 #include <atomic>
 #include <mutex>
+#include <string>
+#include <format>
+#include <tlhelp32.h>   // module enumeration for the [Compat] diagnostic layer
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -25,6 +28,73 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 static void UILog(const std::string& msg) {
     // Always log UIHook messages — these are diagnostics, not per-frame spam
     RuntimePaths::AppendLogAlways("[UIHook]", msg);
+}
+
+// ============================================================================
+// Compatibility Diagnostic Layer ([Compat])
+// ============================================================================
+// Ported forward from diag/compat. Emits a render-chain fingerprint to the log
+// so users on exotic setups (capture/streaming suites, frame-gen proxies,
+// ReShade/ENB, competing overlays) can share a single log that identifies what
+// is hooking or wrapping the swapchain. Runs once at install + on swapchain
+// changes; no per-frame spam.
+static void CompatLog(const std::string& msg) {
+    RuntimePaths::AppendLogAlways("[Compat]", msg);
+}
+
+// Resolve a code/data pointer back to the full DLL path that owns it. Full path
+// (not basename) so a game-directory proxy dxgi.dll is distinguishable from the
+// system one. Returns "<unknown>"/"<no module>" on failure.
+static std::string ModuleOf(const void* addr) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(addr, &mbi, sizeof(mbi)) || !mbi.AllocationBase)
+        return "<unknown>";
+    char path[MAX_PATH]{};
+    if (!GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), path, MAX_PATH))
+        return "<no module>";
+    return path;
+}
+
+// Log every DLL loaded in the process — captures capture/overlay injectors,
+// frame-gen DLLs, ReShade/ENB proxies, competing SFSE UI plugins, etc.
+static void LogLoadedModules() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        CompatLog("WARNING: CreateToolhelp32Snapshot failed — cannot enumerate modules.");
+        return;
+    }
+    MODULEENTRY32W me{ sizeof(me) };
+    CompatLog("--- Loaded modules at hook install time ---");
+    if (Module32FirstW(snap, &me)) {
+        do {
+            char name[MAX_PATH]{};
+            WideCharToMultiByte(CP_UTF8, 0, me.szModule, -1, name, MAX_PATH, nullptr, nullptr);
+            char path[MAX_PATH]{};
+            WideCharToMultiByte(CP_UTF8, 0, me.szExePath, -1, path, MAX_PATH, nullptr, nullptr);
+            CompatLog(std::string("  ") + name + "  [" + path + "]");
+        } while (Module32NextW(snap, &me));
+    }
+    CompatLog("--- End module list ---");
+    CloseHandle(snap);
+}
+
+// Inspect the first bytes of a function BEFORE MinHook patches it. If another
+// inline hooker already placed a JMP at the entry, we see a jump opcode rather
+// than the real prologue — more reliable than chasing the trampoline address.
+static void CheckForPriorInlineHook(const char* name, const void* fnAddr) {
+    if (!fnAddr) return;
+    const auto* b = reinterpret_cast<const uint8_t*>(fnAddr);
+    bool hooked = (b[0] == 0xE9) ||
+                  (b[0] == 0xFF && b[1] == 0x25) ||
+                  (b[0] == 0x48 && b[1] == 0xB8) ||
+                  (b[0] == 0x49 && b[1] == 0xBB);
+    if (hooked) {
+        CompatLog(std::string("  PRIOR HOOK DETECTED on ") + name + " — first bytes: "
+            + std::format("{:02X} {:02X} {:02X}", b[0], b[1], b[2])
+            + " (another injector already patched this entry point)");
+    } else {
+        CompatLog(std::string("  ") + name + " entry point appears unhooked (clean)");
+    }
 }
 
 // ============================================================================
@@ -559,6 +629,25 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
 // Present Hook
 // ============================================================================
 static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    // ── Compatibility Diagnostic ─────────────────────────────────────────────
+    // Log each distinct swapchain that reaches our Present hook (deduped, no
+    // per-frame spam). If two+ swapchains appear, a proxy is in play (frame gen /
+    // injector). If NONE ever appear, our hook isn't on the presented path at all
+    // (e.g. an injector wraps Present upstream) — a different root cause entirely.
+    static IDXGISwapChain* s_lastLoggedPresentSwap = nullptr;
+    if (pSwapChain != s_lastLoggedPresentSwap) {
+        s_lastLoggedPresentSwap = pSwapChain;
+        DXGI_SWAP_CHAIN_DESC d{};
+        if (SUCCEEDED(pSwapChain->GetDesc(&d))) {
+            CompatLog(std::format(
+                "Present on swapchain {} | {}x{} fmt={} buffers={} flags=0x{:X} windowed={} hwnd={} | Present owned by {}",
+                static_cast<const void*>(pSwapChain), d.BufferDesc.Width, d.BufferDesc.Height,
+                static_cast<int>(d.BufferDesc.Format), d.BufferCount, d.Flags,
+                d.Windowed ? 1 : 0, static_cast<const void*>(d.OutputWindow),
+                ModuleOf(*reinterpret_cast<void**>(pSwapChain))));
+        }
+    }
+
     // Monitor swap chain state every frame — catches display mode changes that
     // bypass our ResizeBuffers hook (e.g., ResizeBuffers1, swap chain recreation).
     if (g_initialized.load(std::memory_order_relaxed)) {
@@ -798,6 +887,12 @@ static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void**
 bool UIHook::Install() {
     UILog("Installing D3D12 hooks...");
 
+    // ── Compatibility Diagnostic ─────────────────────────────────────────────
+    // Dump every loaded DLL so a user's log identifies conflicting graphics
+    // injectors / capture suites / frame-gen proxies before we touch anything.
+    CompatLog("AbsoluteHOTAS diagnostic build (render-chain compatibility logging enabled).");
+    LogLoadedModules();
+
     void* pPresent = nullptr;
     void* pResizeBuffers = nullptr;
     void* pExecuteCommandLists = nullptr;
@@ -842,6 +937,22 @@ bool UIHook::Install() {
         UILog("ERROR: Failed to enable hooks.");
         return false;
     }
+
+    // ── Compatibility Diagnostic ─────────────────────────────────────────────
+    // Log which module owns each hooked vtable entry (full path → game-dir proxy
+    // vs system DLL), and whether anything had already inline-hooked it. If
+    // Present resolves to a capture tool / wrapper rather than dxgi.dll, that is
+    // the smoking gun for the "cursor but no panel" class of report.
+    CompatLog("Vtable entry modules and hook state at install:");
+    CompatLog("  IDXGISwapChain::Present                  -> " + ModuleOf(pPresent));
+    CompatLog("  IDXGISwapChain::ResizeBuffers            -> " + ModuleOf(pResizeBuffers));
+    CompatLog("  ID3D12CommandQueue::ExecuteCommandLists  -> " + ModuleOf(pExecuteCommandLists));
+    CompatLog("  IDXGIFactory2::CreateSwapChainForHwnd    -> " + ModuleOf(pCreateSwapChainForHwnd));
+    CompatLog("Pre-patch entry point inspection:");
+    CheckForPriorInlineHook("IDXGISwapChain::Present",                 pPresent);
+    CheckForPriorInlineHook("IDXGISwapChain::ResizeBuffers",           pResizeBuffers);
+    CheckForPriorInlineHook("ID3D12CommandQueue::ExecuteCommandLists", pExecuteCommandLists);
+    CheckForPriorInlineHook("IDXGIFactory2::CreateSwapChainForHwnd",   pCreateSwapChainForHwnd);
 
     UILog("D3D12 hooks installed successfully. Press Ctrl+Alt+B to toggle overlay.");
     return true;
