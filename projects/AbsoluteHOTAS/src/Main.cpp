@@ -4,6 +4,7 @@
 #include "SettingBeacon.h"
 #include "UIHook.h"
 #include "BindingWizard.h"
+#include "Plugin.h"
 #include <SFSE/Interfaces.h>
 #include <windows.h>
 #include <format>
@@ -88,8 +89,7 @@ SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
 
     // Startup banner always writes so the user can confirm the plugin loaded.
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", "AbsoluteHOTAS v3.0 - Direct HID + In-Game UI");
-    RuntimePaths::AppendLogAlways("[Main]", "Target: Starfield 1.16.242+ / SFSE 0.2.20+");
+    RuntimePaths::AppendLogAlways("[Main]", std::format("AbsoluteHOTAS v{} - Direct HID + In-Game UI", Plugin::Version.string()));
     RuntimePaths::AppendLogAlways("[Main]", "======================================================");
 
     // Plant the discovery beacon and zero game deadzones unless Signal Hunter fallback is enabled
