@@ -69,11 +69,9 @@ static float ReadClusterVelocity(uintptr_t clusterBase) {
 // State
 // ============================================================================
 static constexpr int kMaxCandidates   = 2048;
-static constexpr int kScoreThreshold  = 250;
 
 static int       s_candidateAges[kMaxCandidates]     = {};
 static uintptr_t s_lastFrameCandidates[kMaxCandidates] = {};
-static float     s_lastFrameValues[kMaxCandidates]   = {};
 
 static bool      s_discoveryLocked      = false;
 static bool      s_discoveryArmed       = false;
@@ -165,7 +163,6 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
             } else {
                 s_candidateAges[i]        = 0;
                 s_lastFrameCandidates[i]  = cand;
-                s_lastFrameValues[i]      = memVal;
             }
 
             // Magic-number lock: game signals with 0.0314f

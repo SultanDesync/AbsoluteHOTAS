@@ -210,6 +210,12 @@ void ReleaseAllShipButtonOutputs() {
     for (auto& b : s_shipButtonBindings) b.previousPressed = false;
 }
 
+void ReleaseShipButtonBindingOutputs() {
+    for (size_t i = 0; i < s_shipButtonBindings.size(); ++i)
+        ReleaseOwnerOutputs(ShipOwnerIdForIndex(i));
+    for (auto& b : s_shipButtonBindings) b.previousPressed = false;
+}
+
 bool IsBoostOutputHeld() {
     if (s_shipButtonBindings.empty()) return false;
     const auto& boostBinding = s_shipButtonBindings[0];

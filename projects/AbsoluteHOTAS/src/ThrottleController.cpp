@@ -469,11 +469,13 @@ void ThrottleController::ControlLoop() {
             wasActive = true;
         }
 
-        // Suppress ship button outputs while wizard overlay is open
-        if (!UIHook::IsUIOpen())
+        // Ship action buttons: gated by bShipButtonsEnabled and suppressed while
+        // the wizard overlay is open. Releases only ship-button-owned outputs so
+        // the axis-driven strafe/boost modifiers below are left untouched.
+        if (s_config.shipButtonsEnabled && !UIHook::IsUIOpen())
             ShipOutputSystem::UpdateShipButtonBindings();
         else
-            ShipOutputSystem::ReleaseAllShipButtonOutputs();
+            ShipOutputSystem::ReleaseShipButtonBindingOutputs();
 
         // ---- Reverse input ----
         const bool digitalReverseBound = s_config.digitalReverseButton.IsValid()

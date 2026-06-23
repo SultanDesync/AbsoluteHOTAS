@@ -45,7 +45,7 @@ static ID3D12GraphicsCommandList*   g_cmdList = nullptr;
 
 // The game's command queue — captured via CreateSwapChainForHwnd (primary) or
 // ExecuteCommandLists (fallback). Held as a non-owning reference; the game retains ownership.
-static ID3D12CommandQueue*          g_gameCommandQueue = nullptr;
+static std::atomic<ID3D12CommandQueue*> g_gameCommandQueue{nullptr};
 
 // Fence for GPU synchronization
 static ID3D12Fence*                 g_fence = nullptr;
@@ -60,6 +60,10 @@ static ID3D12DescriptorHeap*        g_rtvDescHeap = nullptr;
 static DXGI_FORMAT                  g_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 static UINT                         g_lastSwapWidth = 0;
 static UINT                         g_lastSwapHeight = 0;
+// Non-owning pointer to the swapchain our current render targets were built from.
+// Under frame generation / proxy swapchains the presented swapchain can differ
+// from the one we initialized on; we rebind targets to whichever is presenting.
+static IDXGISwapChain*              g_targetSwapChain = nullptr;
 
 // WndProc
 static HWND    g_hWnd = nullptr;
@@ -67,6 +71,10 @@ static WNDPROC g_origWndProc = nullptr;
 
 // Hook function pointers
 using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
+// IDXGISwapChain1::Present1 (vtable index 22). Games and injected layers (capture
+// suites, frame-gen/proxy swapchains) may present through Present1 instead of
+// Present; hooking only Present would miss them, leaving the overlay invisible.
+using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters);
 using ResizeBuffersFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags);
 using ExecuteCommandListsFn = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
 // IDXGIFactory2::CreateSwapChainForHwnd — pDevice (2nd arg) is required by D3D12 spec to be
@@ -80,6 +88,7 @@ using CreateSwapChainForHwndFn = HRESULT(STDMETHODCALLTYPE*)(
     IDXGIOutput*, IDXGISwapChain1**);
 
 static PresentFn                g_origPresent = nullptr;
+static Present1Fn               g_origPresent1 = nullptr;
 static ResizeBuffersFn          g_origResizeBuffers = nullptr;
 static ExecuteCommandListsFn    g_origExecuteCommandLists = nullptr;
 static CreateSwapChainForHwndFn g_origCreateSwapChainForHwnd = nullptr;
@@ -143,9 +152,10 @@ static LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 // GPU Fence Wait
 // ============================================================================
 static void WaitForGpu() {
-    if (!g_gameCommandQueue || !g_fence || !g_fenceEvent) return;
+    ID3D12CommandQueue* pQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
+    if (!pQueue || !g_fence || !g_fenceEvent) return;
     g_fenceValue++;
-    g_gameCommandQueue->Signal(g_fence, g_fenceValue);
+    pQueue->Signal(g_fence, g_fenceValue);
     if (g_fence->GetCompletedValue() < g_fenceValue) {
         g_fence->SetEventOnCompletion(g_fenceValue, g_fenceEvent);
         WaitForSingleObject(g_fenceEvent, 2000); // 2s timeout
@@ -171,6 +181,8 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
 
     g_numBackBuffers = desc.BufferCount;
     g_backBufferFormat = desc.BufferDesc.Format;
+    g_lastSwapWidth = desc.BufferDesc.Width;
+    g_lastSwapHeight = desc.BufferDesc.Height;
 
     // Allocate arrays if needed
     if (g_backBuffers) delete[] g_backBuffers;
@@ -219,6 +231,7 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
         }
     }
 
+    g_targetSwapChain = pSwapChain;
     UILog("Render targets created: " + std::to_string(g_numBackBuffers) + " back buffers, format=" + std::to_string((int)g_backBufferFormat));
     return true;
 }
@@ -240,14 +253,18 @@ static HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
     IDXGIOutput*   pRestrictToOutput,
     IDXGISwapChain1** ppSwapChain)
 {
-    if (!g_gameCommandQueue && pDevice) {
+    if (!g_gameCommandQueue.load(std::memory_order_relaxed) && pDevice) {
         ID3D12CommandQueue* pQueue = nullptr;
         if (SUCCEEDED(pDevice->QueryInterface(IID_PPV_ARGS(&pQueue)))) {
-            g_gameCommandQueue = pQueue;
-            // Release our QueryInterface ref — the game retains ownership; we hold a non-owning ref.
-            pQueue->Release();
-            UILog("Captured game command queue from CreateSwapChainForHwnd: 0x"
-                + std::format("{:X}", reinterpret_cast<uintptr_t>(g_gameCommandQueue)));
+            ID3D12CommandQueue* expected = nullptr;
+            if (g_gameCommandQueue.compare_exchange_strong(expected, pQueue)) {
+                // Release our QueryInterface ref — the game retains ownership; we hold a non-owning ref.
+                pQueue->Release();
+                UILog("Captured game command queue from CreateSwapChainForHwnd: 0x"
+                    + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
+            } else {
+                pQueue->Release();
+            }
         } else {
             // pDevice was not an ID3D12CommandQueue — unusual configuration.
             // The ExecuteCommandLists fallback will capture the queue instead.
@@ -269,15 +286,39 @@ static HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
 //      submit the overlay command list; g_inOverlaySubmit prevents that from
 //      overwriting the captured queue or emitting spurious fallback log entries.
 static void STDMETHODCALLTYPE HookedExecuteCommandLists(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
-    if (!g_inOverlaySubmit && !g_gameCommandQueue) {
+    if (!g_inOverlaySubmit && !g_gameCommandQueue.load(std::memory_order_relaxed)) {
         D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
         if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-            g_gameCommandQueue = pQueue;
-            UILog("Captured game command queue from ExecuteCommandLists (fallback): 0x"
-                + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
+            ID3D12CommandQueue* expected = nullptr;
+            if (g_gameCommandQueue.compare_exchange_strong(expected, pQueue)) {
+                UILog("Captured game command queue from ExecuteCommandLists (fallback): 0x"
+                    + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
+            }
         }
     }
     g_origExecuteCommandLists(pQueue, NumCommandLists, ppCommandLists);
+}
+
+// ============================================================================
+// ImGui Safe Teardown
+// ============================================================================
+static bool TryImGuiBackendShutdown() {
+    __try {
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static void SafeShutdownStaleImGui() {
+    if (ImGui::GetCurrentContext()) {
+        if (!TryImGuiBackendShutdown()) {
+            RuntimePaths::AppendLogAlways("[UIHook]", "Exception in ImGui_ImplDX12_Shutdown. Forcing context destruction.");
+        }
+        ImGui::DestroyContext();
+    }
 }
 
 // ============================================================================
@@ -293,13 +334,10 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
     UILog("Initializing ImGui D3D12 overlay...");
 
     // Clean up any stale ImGui context from a previous session that was
-    // abandoned by HandleRenderException (which nulls D3D12 resources
-    // without calling ImGui shutdown to avoid secondary crashes).
+    // abandoned by HandleRenderException.
     if (ImGui::GetCurrentContext()) {
         UILog("Cleaning up stale ImGui context from previous session.");
-        ImGui_ImplDX12_Shutdown();
-        ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext();
+        SafeShutdownStaleImGui();
     }
 
     // Restore old WndProc if we previously hooked it (prevents double-hooking)
@@ -356,6 +394,9 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
     if (FAILED(g_d3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence)))) {
         UILog("ERROR: Failed to create fence.");
         return false;
+    }
+    if (g_fenceEvent) {
+        CloseHandle(g_fenceEvent);
     }
     g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     g_fenceValue = 0;
@@ -419,6 +460,33 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
 // ============================================================================
 // RenderOverlayFrame — Exception Recovery
 // ============================================================================
+static bool TryReleaseResources() {
+    __try {
+        if (g_backBuffers) {
+            for (UINT i = 0; i < g_numBackBuffers; i++) {
+                if (g_backBuffers[i]) g_backBuffers[i]->Release();
+            }
+            delete[] g_backBuffers;
+        }
+        if (g_rtvHandles) delete[] g_rtvHandles;
+        if (g_rtvDescHeap) g_rtvDescHeap->Release();
+        if (g_srvDescHeap) g_srvDescHeap->Release();
+        if (g_cmdList) g_cmdList->Release();
+        if (g_cmdAllocators) {
+            for (UINT i = 0; i < g_numBackBuffers; i++) {
+                if (g_cmdAllocators[i]) g_cmdAllocators[i]->Release();
+            }
+            delete[] g_cmdAllocators;
+        }
+        if (g_fence) g_fence->Release();
+        if (g_fenceEvent) CloseHandle(g_fenceEvent);
+        if (g_d3dDevice) g_d3dDevice->Release();
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 // Separated so the __try function (RenderOverlayFrame) has zero C++ objects
 // requiring unwinding, satisfying MSVC's C2712 constraint.
 static void HandleRenderException() {
@@ -450,9 +518,12 @@ static void HandleRenderException() {
     g_isOpen.store(false);
     g_initialized.store(false);
 
-    // Null out all resource pointers WITHOUT releasing them.
-    // The OS/driver will reclaim GPU resources when the process exits or
-    // when InitImGui creates new ones (old refs get orphaned).
+    // Attempt safe COM release in a separate block. Releasing references
+    // is valid even if device is lost, but proxy objects might crash.
+    if (!TryReleaseResources()) {
+        RuntimePaths::AppendLogAlways("[UIHook]", "Exception during resource release, proxy object is dead. Leaking remaining resources.");
+    }
+
     g_backBuffers = nullptr;
     g_rtvHandles = nullptr;
     g_rtvDescHeap = nullptr;
@@ -463,9 +534,10 @@ static void HandleRenderException() {
     g_fenceEvent = nullptr;
     g_d3dDevice = nullptr;
     g_numBackBuffers = 0;
+    g_targetSwapChain = nullptr;
     // Clear the captured queue — it is stale after a render exception and must
     // be recaptured before InitImGui is called again.
-    g_gameCommandQueue = nullptr;
+    g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);
 }
 
 // ============================================================================
@@ -473,8 +545,29 @@ static void HandleRenderException() {
 // ============================================================================
 // __try requires no C++ objects with destructors in the function scope.
 // All cleanup is delegated to HandleRenderException().
+// Rebind render targets to the swapchain currently being presented. Under frame
+// generation (FSR3 FG, DLSS-G) or any injector that wraps the swapchain, the
+// presented one can differ from the one we initialized on, which would draw the
+// overlay into an off-screen buffer. Kept out of RenderOverlayFrame so its
+// std::string logging doesn't live in that function's __try scope (MSVC C2712).
+// Only reached while the overlay is open (a menu), so rebuild churn never touches
+// gameplay.
+static bool RebindRenderTargetsIfNeeded(IDXGISwapChain* pSwapChain) {
+    if (pSwapChain == g_targetSwapChain) return true;
+    WaitForGpu();
+    CleanupRenderTargets();
+    if (!CreateRenderTargets(pSwapChain)) {
+        UILog("Failed to rebind render targets to presented swapchain.");
+        return false;
+    }
+    UILog("Rebound overlay render targets to the presented swapchain.");
+    return true;
+}
+
 static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
     __try {
+        if (!RebindRenderTargetsIfNeeded(pSwapChain)) return;
+
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -518,7 +611,10 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
             ID3D12CommandList* ppCmdLists[] = { g_cmdList };
             // Set re-entrancy flag so HookedExecuteCommandLists ignores this submission.
             g_inOverlaySubmit = true;
-            g_gameCommandQueue->ExecuteCommandLists(1, ppCmdLists);
+            ID3D12CommandQueue* pQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
+            if (pQueue) {
+                pQueue->ExecuteCommandLists(1, ppCmdLists);
+            }
             g_inOverlaySubmit = false;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -529,7 +625,10 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
 // ============================================================================
 // Present Hook
 // ============================================================================
-static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+// Shared overlay handling for every present path (Present and Present1). Runs the
+// swap-chain state monitor, lazy init, and overlay render. The caller forwards to
+// the appropriate original function afterward.
+static void HandlePresent(IDXGISwapChain* pSwapChain) {
     // Monitor swap chain state every frame — catches display mode changes that
     // bypass our ResizeBuffers hook (e.g., ResizeBuffers1, swap chain recreation).
     if (g_initialized.load(std::memory_order_relaxed)) {
@@ -565,7 +664,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
     // which MSVC /EHsc may not route to the __try/__except in RenderOverlayFrame.
     try {
         if (!g_initialized.load(std::memory_order_relaxed)) {
-            if (g_gameCommandQueue) {
+            if (g_gameCommandQueue.load(std::memory_order_relaxed)) {
                 InitImGui(pSwapChain);
             }
         }
@@ -576,8 +675,18 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT 
     } catch (...) {
         HandleRenderException();
     }
+}
 
+static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    HandlePresent(pSwapChain);
     return g_origPresent(pSwapChain, SyncInterval, Flags);
+}
+
+// IDXGISwapChain1::Present1 — same overlay handling, different present entry point.
+// IDXGISwapChain1 derives from IDXGISwapChain, so the upcast to HandlePresent is safe.
+static HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
+    HandlePresent(pSwapChain);
+    return g_origPresent1(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
 }
 
 // ============================================================================
@@ -614,7 +723,7 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
     // Frame Generation reconfigures the presentation pipeline on enable/disable,
     // invalidating both our D3D12 resources and the command queue pointer.
     g_isOpen.store(false);
-    g_gameCommandQueue = nullptr;  // force fresh recapture on next Present
+    g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);  // force fresh recapture on next Present
 
     if (g_initialized.load()) {
         g_initialized.store(false);
@@ -638,7 +747,7 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
         g_cmdList       = nullptr;
         g_cmdAllocators = nullptr;
         g_fence         = nullptr;
-        g_fenceEvent    = nullptr;
+        if (g_fenceEvent) { CloseHandle(g_fenceEvent); g_fenceEvent = nullptr; }
         g_d3dDevice     = nullptr;
         g_numBackBuffers = 0;
 
@@ -676,7 +785,7 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
 // ============================================================================
 // Vtable Discovery via Dummy Device
 // ============================================================================
-static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void** outExecuteCommandLists, void** outCreateSwapChainForHwnd) {
+static bool GetVtablePointers(void** outPresent, void** outPresent1, void** outResizeBuffers, void** outExecuteCommandLists, void** outCreateSwapChainForHwnd) {
     // Create a temporary DXGI factory + device + swap chain to harvest vtable pointers
     IDXGIFactory4* factory = nullptr;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
@@ -748,6 +857,7 @@ static bool GetVtablePointers(void** outPresent, void** outResizeBuffers, void**
     // Harvest Present and ResizeBuffers vtable pointers
     void** swapVtable = *reinterpret_cast<void***>(tempSwapChain1);
     *outPresent = swapVtable[8];        // IDXGISwapChain::Present
+    *outPresent1 = swapVtable[22];      // IDXGISwapChain1::Present1
     *outResizeBuffers = swapVtable[13]; // IDXGISwapChain::ResizeBuffers
 
     UILog("Vtable discovery complete.");
@@ -770,11 +880,12 @@ bool UIHook::Install() {
     UILog("Installing D3D12 hooks...");
 
     void* pPresent = nullptr;
+    void* pPresent1 = nullptr;
     void* pResizeBuffers = nullptr;
     void* pExecuteCommandLists = nullptr;
     void* pCreateSwapChainForHwnd = nullptr;
 
-    if (!GetVtablePointers(&pPresent, &pResizeBuffers, &pExecuteCommandLists, &pCreateSwapChainForHwnd)) {
+    if (!GetVtablePointers(&pPresent, &pPresent1, &pResizeBuffers, &pExecuteCommandLists, &pCreateSwapChainForHwnd)) {
         UILog("ERROR: Vtable discovery failed. UI overlay disabled.");
         return false;
     }
@@ -795,6 +906,13 @@ bool UIHook::Install() {
     if (MH_CreateHook(pPresent, &HookedPresent, reinterpret_cast<void**>(&g_origPresent)) != MH_OK) {
         UILog("ERROR: Failed to create Present hook.");
         return false;
+    }
+
+    // Present1 shares its vtable slot across all IDXGISwapChain1 instances, so this
+    // one hook covers any swapchain that presents via Present1. Non-fatal if it
+    // fails — Present-only hooking still works for the common case.
+    if (MH_CreateHook(pPresent1, &HookedPresent1, reinterpret_cast<void**>(&g_origPresent1)) != MH_OK) {
+        UILog("WARNING: Failed to create Present1 hook (Present-only overlay still active).");
     }
 
     if (MH_CreateHook(pResizeBuffers, &HookedResizeBuffers, reinterpret_cast<void**>(&g_origResizeBuffers)) != MH_OK) {

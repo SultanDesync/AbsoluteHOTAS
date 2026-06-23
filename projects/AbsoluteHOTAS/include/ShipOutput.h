@@ -65,6 +65,12 @@ void UpdateShipButtonBindings();
 // Release all held outputs (called on disarm or stop).
 void ReleaseAllShipButtonOutputs();
 
+// Release only outputs held by ship-button bindings (leaves axis-driven owners
+// such as the strafe modifier and boost zone intact). Used to suppress ship
+// buttons per-tick (wizard open, or bShipButtonsEnabled = false) without
+// disturbing flight modifiers.
+void ReleaseShipButtonBindingOutputs();
+
 // Emit/release a held output with reference-counted ownership.
 void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held);
 void ReleaseOwnerOutputs(uint32_t ownerId);
