@@ -1,8 +1,14 @@
-# AbsoluteHOTAS v3.0
+# AbsoluteHOTAS v3.0.1-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Changelog
+### v3.0.1-beta
+- **On-Foot Input Control:** Fixed phantom movement/sprint interference after flying. Added a master ON/OFF gate (default ScrollLock) to instantly kill all injected inputs while on foot.
+- **Axis Scaling / Deadzone Fix:** Deadzones and saturation are now absolute positions on the axis, exactly as drawn in the binding wizard.
+- **Overlay Crash Prevention:** Hardened the ImGui overlay hook with comprehensive exception handling to gracefully survive rendering pipeline shifts (like alt-tabbing or changing resolution) without crashing the game.
+- **Log Versioning:** Cleaned up the diagnostic log version header to use dynamic plugin version data.
+
 ### v3.0
 - **Zero-Config Flight Control Discovery:** The plugin now finds the flight control cluster automatically at runtime using the engine's own Setting system — no `StarfieldCustom.ini` edit required. The discovery is version-independent (scans for Setting names rather than hardcoded memory offsets).
 - **Address Library Removed:** The plugin no longer requires the Starfield Address Library mod. All runtime addresses are resolved through the Setting beacon or AOB pattern scans.
