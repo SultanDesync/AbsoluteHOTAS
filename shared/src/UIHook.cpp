@@ -60,6 +60,10 @@ static ID3D12DescriptorHeap*        g_rtvDescHeap = nullptr;
 static DXGI_FORMAT                  g_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 static UINT                         g_lastSwapWidth = 0;
 static UINT                         g_lastSwapHeight = 0;
+// Non-owning pointer to the swapchain our current render targets were built from.
+// Under frame generation / proxy swapchains the presented swapchain can differ
+// from the one we initialized on; we rebind targets to whichever is presenting.
+static IDXGISwapChain*              g_targetSwapChain = nullptr;
 
 // WndProc
 static HWND    g_hWnd = nullptr;
@@ -171,6 +175,8 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
 
     g_numBackBuffers = desc.BufferCount;
     g_backBufferFormat = desc.BufferDesc.Format;
+    g_lastSwapWidth = desc.BufferDesc.Width;
+    g_lastSwapHeight = desc.BufferDesc.Height;
 
     // Allocate arrays if needed
     if (g_backBuffers) delete[] g_backBuffers;
@@ -219,6 +225,7 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
         }
     }
 
+    g_targetSwapChain = pSwapChain;
     UILog("Render targets created: " + std::to_string(g_numBackBuffers) + " back buffers, format=" + std::to_string((int)g_backBufferFormat));
     return true;
 }
@@ -463,6 +470,7 @@ static void HandleRenderException() {
     g_fenceEvent = nullptr;
     g_d3dDevice = nullptr;
     g_numBackBuffers = 0;
+    g_targetSwapChain = nullptr;
     // Clear the captured queue — it is stale after a render exception and must
     // be recaptured before InitImGui is called again.
     g_gameCommandQueue = nullptr;
@@ -473,8 +481,29 @@ static void HandleRenderException() {
 // ============================================================================
 // __try requires no C++ objects with destructors in the function scope.
 // All cleanup is delegated to HandleRenderException().
+// Rebind render targets to the swapchain currently being presented. Under frame
+// generation (FSR3 FG, DLSS-G) or any injector that wraps the swapchain, the
+// presented one can differ from the one we initialized on, which would draw the
+// overlay into an off-screen buffer. Kept out of RenderOverlayFrame so its
+// std::string logging doesn't live in that function's __try scope (MSVC C2712).
+// Only reached while the overlay is open (a menu), so rebuild churn never touches
+// gameplay.
+static bool RebindRenderTargetsIfNeeded(IDXGISwapChain* pSwapChain) {
+    if (pSwapChain == g_targetSwapChain) return true;
+    WaitForGpu();
+    CleanupRenderTargets();
+    if (!CreateRenderTargets(pSwapChain)) {
+        UILog("Failed to rebind render targets to presented swapchain.");
+        return false;
+    }
+    UILog("Rebound overlay render targets to the presented swapchain.");
+    return true;
+}
+
 static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
     __try {
+        if (!RebindRenderTargetsIfNeeded(pSwapChain)) return;
+
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
