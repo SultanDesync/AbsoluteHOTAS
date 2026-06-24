@@ -5,7 +5,7 @@ set(X_VCPKG_APPLOCAL_DEPS_INSTALL OFF)
 
 project(
   AbsoluteHOTAS
-  VERSION 3.0.1
+  VERSION 3.1.0
   LANGUAGES CXX C
 )
 
@@ -32,6 +32,8 @@ set(shared_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/Plugin.h
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/DeviceManager.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/DeviceManager.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/ControlMapReader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/ControlMapReader.h
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/UIHook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/UIHook.h
 )
@@ -83,6 +85,9 @@ foreach(target ${all_targets})
     SPDLOG_NO_EXCEPTIONS
     FMT_ENFORCE_COMPILE_STRING=0
     SPDLOG_COMPILED_LIB
+    PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    PLUGIN_VERSION_PATCH=${PROJECT_VERSION_PATCH}
   )
   target_precompile_headers(${target} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/shared/include/PCH.h
@@ -159,3 +164,20 @@ add_custom_target(
   DEPENDS AbsoluteHOTAS
   COMMENT "Creating MO2 deployable archive: ${RELEASE_ARCHIVE_NAME}"
 )
+
+# ---- Unit tests (opt-in: -DABSOLUTEHOTAS_BUILD_TESTS=ON) ----
+# ControlMapReader is self-contained (std + <windows.h> for MapVirtualKey), so it
+# builds into a standalone test exe with the same MSVC toolchain as the plugin.
+option(ABSOLUTEHOTAS_BUILD_TESTS "Build unit tests" OFF)
+if(ABSOLUTEHOTAS_BUILD_TESTS)
+  enable_testing()
+  add_executable(control_map_reader_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/control_map_reader_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/shared/src/ControlMapReader.cpp
+  )
+  target_include_directories(control_map_reader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shared/include)
+  target_compile_definitions(control_map_reader_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(control_map_reader_test PRIVATE user32)
+  add_test(NAME control_map_reader
+    COMMAND control_map_reader_test ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+endif()

@@ -42,12 +42,9 @@ struct ShipButtonBinding {
 // Well-known output constants
 inline constexpr ShipOutput NoOutput    { ShipOutputKind::None,     0,    false };
 inline constexpr ShipOutput SpaceOutput { ShipOutputKind::Keyboard, 0x39, false };
-inline constexpr ShipOutput ReverseOutput { ShipOutputKind::Keyboard, 0x1F, false };
 
 // Owner-ID constants for SetOutputHeld
 inline constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
-inline constexpr uint32_t OwnerDigitalReverse = 0x00000002u;
-inline constexpr uint32_t OwnerBoostCancel    = 0x00000003u;
 inline constexpr uint32_t OwnerBoostZone      = 0x00000004u;
 inline constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 
@@ -81,5 +78,10 @@ bool IsBoostOutputHeld();
 // Direct access to ship button bindings (for BindingWizard and ControlLoop).
 ShipButtonBinding* GetShipButtonBindings();
 int                GetShipButtonCount();
+
+// Resolved (control-map-aware) output for a named ship action. Lets the axis-
+// driven paths — throttle boost zone, strafe/flight-mode modifier — follow
+// in-game rebinds the same way the button path does. NoOutput if not found.
+ShipOutput GetShipButtonOutput(std::string_view actionId);
 
 } // namespace ShipOutputSystem

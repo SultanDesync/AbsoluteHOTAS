@@ -1,8 +1,11 @@
-# AbsoluteHOTAS v3.0.1-beta
+# AbsoluteHOTAS v3.1.0-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Changelog
+### v3.1.0-beta (in development)
+- _In progress on the `3.1-beta` branch._
+
 ### v3.0.1-beta
 - **On-Foot Input Control:** Fixed phantom movement/sprint interference after flying. Added a master ON/OFF gate (default ScrollLock) to instantly kill all injected inputs while on foot.
 - **Axis Scaling / Deadzone Fix:** Deadzones and saturation are now absolute positions on the axis, exactly as drawn in the binding wizard.
@@ -125,6 +128,15 @@ fYawSensitivity = 1.0
 ```
 
 Device names are matched case-insensitively against DirectInput instance or product names. If no device name is prefixed, the plugin uses the first device with that usage.
+
+### Finding Device Names and IDs
+
+The wizard's **Devices** tab is the easy way to read these off. If you can't use the overlay (it won't open on your system, or you prefer hand-editing), discover them two other ways:
+
+- **Windows joystick panel** — press `Win+R`, run `joy.cpl`, select your device, and click **Properties**. Move an axis to see which one responds (X/Y/Z/…) and press a button to see which number lights up. Hat/POV directions usually appear as **high button numbers** (often around 129–132).
+- **The plugin log** — `AbsoluteHOTAS.log` (next to the plugin DLL) prints an `[DeviceManager] === Attached HID Devices ===` block at startup, listing every device's exact name and its axis/button counts.
+
+The device-name prefix is matched as a **case-insensitive substring**, so a short distinctive chunk is enough — `VKB Gunfighter`, `CH PRO`, `T.16000M`. Avoid generic words like `Throttle` or `USB` that several devices share.
 
 ## Ship Buttons
 

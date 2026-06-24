@@ -874,6 +874,27 @@ static bool GetVtablePointers(void** outPresent, void** outPresent1, void** outR
 }
 
 // ============================================================================
+// Prior-hook detection
+// ============================================================================
+// Detect whether a render entry point has already been inline-hooked by another
+// injector (frame generation, upscaler, capture, or overlay software) before we
+// install our own. Inline hooks open the function with a jmp — E9 (rel32), EB
+// (rel8), or FF 25 (indirect [rip]) — whereas a normal prologue does not.
+// Vtable-swizzle / proxy-object hooks are not visible this way; this is a
+// best-effort self-serve diagnostic, not a guarantee. See
+// docs/reference/overlay-hook-compatibility.md.
+static bool LooksHooked(void* fn, std::string& firstBytesOut) {
+    if (!fn) return false;
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(fn);
+    firstBytesOut = std::format("{:02X} {:02X} {:02X}",
+        static_cast<unsigned>(p[0]), static_cast<unsigned>(p[1]), static_cast<unsigned>(p[2]));
+    if (p[0] == 0xE9) return true;                  // jmp rel32
+    if (p[0] == 0xEB) return true;                  // jmp rel8
+    if (p[0] == 0xFF && p[1] == 0x25) return true;  // jmp qword ptr [rip+disp32]
+    return false;
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 bool UIHook::Install() {
@@ -888,6 +909,37 @@ bool UIHook::Install() {
     if (!GetVtablePointers(&pPresent, &pPresent1, &pResizeBuffers, &pExecuteCommandLists, &pCreateSwapChainForHwnd)) {
         UILog("ERROR: Vtable discovery failed. UI overlay disabled.");
         return false;
+    }
+
+    // Diagnose prior render-chain hooks BEFORE we patch anything ourselves.
+    // Another layer hooking these entry points first is the common cause of
+    // "cursor works but the overlay never renders." We still install normally;
+    // this just turns a silent failure into an actionable log line.
+    {
+        struct HookTarget { const char* name; void* fn; };
+        const HookTarget targets[] = {
+            { "IDXGISwapChain::Present",                 pPresent },
+            { "IDXGISwapChain1::Present1",               pPresent1 },
+            { "IDXGISwapChain::ResizeBuffers",           pResizeBuffers },
+            { "ID3D12CommandQueue::ExecuteCommandLists", pExecuteCommandLists },
+            { "IDXGIFactory2::CreateSwapChainForHwnd",   pCreateSwapChainForHwnd },
+        };
+        int priorHooks = 0;
+        std::string firstBytes;
+        for (const auto& t : targets) {
+            if (LooksHooked(t.fn, firstBytes)) {
+                ++priorHooks;
+                UILog(std::string("Note: render entry already hooked by another layer: ") + t.name + " (first bytes: " + firstBytes + ").");
+            }
+        }
+        if (priorHooks > 0) {
+            UILog("Note: " + std::to_string(priorHooks) + " D3D12/DXGI render entry point(s) are already hooked "
+                  "by another layer. This is usually harmless — Steam/Discord/RTSS overlays and frame-gen layers "
+                  "commonly coexist with the overlay. It only matters if Ctrl+Alt+B shows a cursor but no UI; in "
+                  "that case disable frame generation (NVIDIA Smooth Motion / DLSS-G, AMD AFMF / FSR Frame "
+                  "Generation), capture/overlay tools, or driver filters. "
+                  "See docs/reference/overlay-hook-compatibility.md.");
+        }
     }
 
     if (MH_Initialize() != MH_OK) {

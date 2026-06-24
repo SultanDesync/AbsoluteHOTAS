@@ -519,7 +519,7 @@ void ThrottleController::ControlLoop() {
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             bool inBoostZone = rawThrottle > s_config.boostZoneCenter + s_config.boostZoneDeadzone;
             ShipOutputSystem::SetOutputHeld(
-                ShipOutputSystem::GetShipButtonBindings()[0].output, OwnerBoostZone, inBoostZone);
+                ShipOutputSystem::GetShipButtonOutput("FireBoosters"), OwnerBoostZone, inBoostZone);
         }
 
         // ---- Throttle ----
@@ -626,7 +626,7 @@ void ThrottleController::ControlLoop() {
         const float strafeActThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
         const bool strafeLatActive  = std::abs(strafeLatNorm)  > strafeActThreshX || digStrafeLeft || digStrafeRight;
         const bool strafeVertActive = std::abs(strafeVertNorm) > strafeActThreshY || digStrafeUp   || digStrafeDown;
-        ShipOutputSystem::SetOutputHeld(SpaceOutput, OwnerStrafeModifier, strafeLatActive || strafeVertActive);
+        ShipOutputSystem::SetOutputHeld(ShipOutputSystem::GetShipButtonOutput("SwitchFlightModes"), OwnerStrafeModifier, strafeLatActive || strafeVertActive);
 
         s_currentThrottle.store(throttle);
 
