@@ -470,22 +470,35 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         // We silence the game's writes to +0x68/+0x6C so the lever always wins,
         // and use delta-burst injection for efficiency.
         ThrottleHook::SetReverseOverride(false);
-        ThrottleHook::SetSilenceEnabled(true);
-        ThrottleHook::SetSilence6CEnabled(true);
 
-        bool firstCommand  = (s_lastInjectedThrottle == -999.0f);
-        bool throttleMoved = firstCommand ||
-            (std::abs(throttle - s_lastInjectedThrottle) > kThrottleDeltaAuthority);
+        // Throttle-release rule: when no throttle axis is bound the plugin is not
+        // managing throttle, so hand the channel back to the game's vanilla input
+        // (keyboard accelerate/decelerate) instead of silencing it. Silencing with
+        // no source mutes those keys AND pins the lever at 0; lifting the silence is
+        // what actually releases the channel. Unbinding the axis alone used to leave
+        // it muted, which is what users hit when they tried to fall back to keyboard.
+        const bool throttleBound = cfg.throttleAxis.IsValid() && cfg.throttleAxis.value > 0;
+        ThrottleHook::SetSilenceEnabled(throttleBound);
+        ThrottleHook::SetSilence6CEnabled(throttleBound);
 
-        if (throttleMoved) {
-            s_throttleBurstFrames = throttleBurstFrameCount;
-            s_throttleBurstValue  = throttle;
-            s_lastInjectedThrottle = throttle;
-        }
+        if (!throttleBound) {
+            s_throttleBurstFrames  = 0;
+            s_lastInjectedThrottle = -999.0f;
+        } else {
+            bool firstCommand  = (s_lastInjectedThrottle == -999.0f);
+            bool throttleMoved = firstCommand ||
+                (std::abs(throttle - s_lastInjectedThrottle) > kThrottleDeltaAuthority);
 
-        if (s_throttleBurstFrames > 0) {
-            SafeInjectThrottle(s_activeThrottlePtr, s_throttleBurstValue, true);
-            s_throttleBurstFrames--;
+            if (throttleMoved) {
+                s_throttleBurstFrames = throttleBurstFrameCount;
+                s_throttleBurstValue  = throttle;
+                s_lastInjectedThrottle = throttle;
+            }
+
+            if (s_throttleBurstFrames > 0) {
+                SafeInjectThrottle(s_activeThrottlePtr, s_throttleBurstValue, true);
+                s_throttleBurstFrames--;
+            }
         }
 
         // 6DOF telemetry (merged from both branches)
