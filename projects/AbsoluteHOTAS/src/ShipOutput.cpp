@@ -342,6 +342,15 @@ ShipOutput GetShipButtonOutput(std::string_view actionId) {
     return NoOutput;
 }
 
+ShipOutput ResolveOutputToken(std::string_view token) {
+    const std::string lowered = TrimLower(token);
+    // Raw key/mouse outputs (and "none") carry a ':' or are the literal "none".
+    if (lowered == "none" || lowered.find(':') != std::string::npos)
+        return ParseShipOutput(token, NoOutput);
+    // Otherwise a ship action id — resolved control-map-aware.
+    return GetShipButtonOutput(token);
+}
+
 void LoadShipButtonBindings(CSimpleIniA& ini) {
     struct BindingDef {
         const char* actionId;

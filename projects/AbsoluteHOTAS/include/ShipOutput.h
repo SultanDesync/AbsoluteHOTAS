@@ -47,6 +47,7 @@ inline constexpr ShipOutput SpaceOutput { ShipOutputKind::Keyboard, 0x39, false 
 inline constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
 inline constexpr uint32_t OwnerBoostZone      = 0x00000004u;
 inline constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
+inline constexpr uint32_t OwnerMacroBase      = 0x00002000u;  // + macro index
 
 // ---- Public API ----
 
@@ -83,5 +84,10 @@ int                GetShipButtonCount();
 // driven paths — throttle boost zone, strafe/flight-mode modifier — follow
 // in-game rebinds the same way the button path does. NoOutput if not found.
 ShipOutput GetShipButtonOutput(std::string_view actionId);
+
+// Resolve a macro/binding target token to an output: either a ship action id
+// (e.g. "NextSystem", resolved control-map-aware) or a raw "key:0xNN" / "mouse:N"
+// / "none". NoOutput if it resolves to nothing.
+ShipOutput ResolveOutputToken(std::string_view token);
 
 } // namespace ShipOutputSystem

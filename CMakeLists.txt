@@ -46,6 +46,7 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/WizardCapture.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/WizardConfig.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/ShipOutput.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/MacroEngine.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SignalHunter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/AimController.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/src/SettingBeacon.cpp
@@ -56,6 +57,7 @@ set(absolute_hotas_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/WizardCapture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/WizardConfig.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/ShipOutput.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/MacroEngine.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SignalHunter.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/AimController.h
   ${CMAKE_CURRENT_SOURCE_DIR}/projects/AbsoluteHOTAS/include/SettingBeacon.h

@@ -2,6 +2,7 @@
 #include "ThrottleController.h"
 #include "ThrottleHook.h"
 #include "ShipOutput.h"
+#include "MacroEngine.h"
 #include "SignalHunter.h"
 #include "AimController.h"
 #include "RuntimePaths.h"
@@ -179,6 +180,7 @@ void ThrottleController::LoadConfig() {
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
     ShipOutputSystem::LoadShipButtonBindings(ini);
+    MacroEngine::LoadMacros(ini);  // after ship bindings: action-id targets resolve here
 
     s_config.bSourceObjectAim  = ini.GetBoolValue("Aim", "bSourceObjectAim",  false);
     s_config.fAimSensitivity   = (float)ini.GetDoubleValue("Aim", "fAimSensitivity",   1.0);
@@ -326,6 +328,11 @@ void ThrottleController::ControlLoop() {
         int count = ShipOutputSystem::GetShipButtonCount();
         for (int i = 0; i < count; i++)
             ResolveAndOpen(ShipOutputSystem::GetShipButtonBindings()[i].buttonRef);
+
+        // Macro trigger buttons: resolved here (not in LoadMacros, which runs before
+        // DeviceManager init) so name-based macro buttons get a device index and fire.
+        for (Macro& m : MacroEngine::GetMacrosMutable())
+            ResolveAndOpen(m.button);
     };
 
     ResolveAll(s_config);
@@ -435,6 +442,7 @@ void ThrottleController::ControlLoop() {
             CtrlLog("[Master] DEACTIVATE: releasing all outputs and axis injection.");
             active = false;
             ShipOutputSystem::ReleaseAllShipButtonOutputs();
+            MacroEngine::ReleaseAll();
             SignalHunter::Disarm();
             lastInjectedHardwareValue = -999.0f;
         }
@@ -451,6 +459,7 @@ void ThrottleController::ControlLoop() {
         if (!active) {
             if (wasActive) {
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
+                MacroEngine::ReleaseAll();
                 SignalHunter::Disarm();
                 lastInjectedHardwareValue = -999.0f;
                 wasActive = false;
@@ -476,6 +485,13 @@ void ThrottleController::ControlLoop() {
             ShipOutputSystem::UpdateShipButtonBindings();
         else
             ShipOutputSystem::ReleaseShipButtonBindingOutputs();
+
+        // Macros: live while armed and the overlay is closed; suppressed (held
+        // keys released) while the wizard is open.
+        if (!UIHook::IsUIOpen())
+            MacroEngine::Update();
+        else
+            MacroEngine::ReleaseAll();
 
         // ---- Reverse input ----
         const bool digitalReverseBound = s_config.digitalReverseButton.IsValid()
@@ -695,6 +711,7 @@ void ThrottleController::ControlLoop() {
     }
 
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
+    MacroEngine::ReleaseAll();
     DeviceManager::Shutdown();
 }
 
@@ -721,6 +738,7 @@ void ThrottleController::Start() {
 void ThrottleController::Stop() {
     s_running = false;
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
+    MacroEngine::ReleaseAll();
 }
 
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }
