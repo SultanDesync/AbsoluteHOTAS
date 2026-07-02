@@ -1,10 +1,14 @@
-# AbsoluteHOTAS v3.1.0-beta
+# AbsoluteHOTAS v3.0.2-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Changelog
-### v3.1.0-beta (in development)
-- _In progress on the `3.1-beta` branch._
+### v3.0.2-beta
+- **On-Foot Sprint Fix:** Sprinting no longer cancels after you've flown a ship. This is fixed at the source (the plugin was continuously writing to a shared input lane while on foot), so the ON/OFF toggle is no longer needed as a sprint workaround.
+- **In-Game Rebinds Respected:** Ship action buttons now follow your in-game Starfield keybinds automatically (read from your ControlMap) instead of assuming the vanilla defaults — so if you've rebound ship controls, your HOTAS button outputs match.
+- **Throttle Hands Back to Keyboard When Unbound:** With no throttle axis assigned, the plugin no longer silences the game's throttle channel — keyboard accelerate/decelerate work normally again.
+- **Boost Output Release Fix:** The boost (FireBoosters) output could stay held down when the throttle input changed; it is now released cleanly.
+- **Overlay Conflict Diagnostic:** If another mod's render hook (frame generation, capture, or overlay) prevents the in-game overlay from appearing, the plugin now logs it so a silent no-overlay is self-explaining.
 
 ### v3.0.1-beta
 - **On-Foot Input Control:** Fixed phantom movement/sprint interference after flying. Added a master ON/OFF gate (default ScrollLock) to instantly kill all injected inputs while on foot.
