@@ -124,6 +124,25 @@ void Disarm() {
     ThrottleHook::ClearCandidates();
 }
 
+void SuspendInjection() {
+    // InjectionOnly pilot gate: stop all memory injection but leave SendInput
+    // outputs untouched (unlike Disarm, which also releases ship outputs and
+    // tears down capture). Capture stays live so injection resumes cleanly on
+    // re-pilot.
+    s_lastInjectedThrottle = -999.0f;
+    s_throttleBurstFrames  = 0;
+    s_throttleBurstValue   = 0.0f;
+    s_accumulatorThrottle  = 0.0f;
+    s_accumBurstFrames     = 0;
+    s_lastAccumBurstValue  = -999.0f;
+    s_prevBoostHeld        = false;
+    ThrottleHook::SetReverseOverride(false);
+    ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
+    ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
+    ThrottleHook::SetSilenceEnabled(false);
+    ThrottleHook::SetSilence6CEnabled(false);
+}
+
 void ArmForReacquire(const char* reason) {
     if (reason) SHLog((std::string("Re-arming discovery: ") + reason).c_str());
     s_discoveryArmed        = true;

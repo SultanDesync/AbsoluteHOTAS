@@ -721,17 +721,25 @@ void ThrottleHook::SetReverseOverride(bool enabled) {
         // Only clear the override flag if reverse was actually owning the lane;
         // otherwise SetRotationalOverride already set it this frame and we must
         // not clobber it.
-        if (g_reverseOwnsVertStrafe) {
+        const bool wasReverseActive = g_reverseOwnsVertStrafe != 0;
+        if (wasReverseActive) {
             g_vertStrafeOverrideEnabled = 0;
         }
         g_reverseOwnsVertStrafe = 0;
 
-        // Clear upstream decel intent
-        uintptr_t src = g_capturedSourceR13;
-        if (src) {
-            __try {
-                *(volatile float*)(src + 0x3C) = 0.0f;
-            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        // Clear upstream decel intent ONLY on the reverse-active -> inactive edge.
+        // The neutral-stick throttle branch calls SetReverseOverride(false) every
+        // tick, so writing +0x3C unconditionally zero-stomps this shared source-
+        // object lane at poll rate. On foot (with the captured pointer still live)
+        // that clobbers the game's own use of the lane and cancels sprint. Once
+        // reverse is released, leave the lane to the game.
+        if (wasReverseActive) {
+            uintptr_t src = g_capturedSourceR13;
+            if (src) {
+                __try {
+                    *(volatile float*)(src + 0x3C) = 0.0f;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
         }
     }
 }

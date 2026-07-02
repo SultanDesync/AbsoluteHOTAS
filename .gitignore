@@ -32,3 +32,8 @@ tools/AbsoluteHOTASConfigurator/src-tauri/icons/
 _deps/
 x64/
 releases/
+# xmake generated VS project files (plugin.vsxmake.autoupdate rule)
+vsxmake*/
+.vsxmake/
+# leftover CommonLibSF plugin-template scaffold from the xmake migration
+temp-template/

@@ -32,6 +32,11 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 // Disarm all state (called on pilot-seat exit).
 void Disarm();
 
+// Park the MEMORY injection (silence / overrides / aim / accumulator) WITHOUT
+// releasing SendInput outputs — used by the InjectionOnly pilot gate. Capture
+// stays enabled so injection resumes cleanly when piloting returns.
+void SuspendInjection();
+
 // Re-arm for reacquire (called on activate button or persistent signal loss).
 void ArmForReacquire(const char* reason);
 

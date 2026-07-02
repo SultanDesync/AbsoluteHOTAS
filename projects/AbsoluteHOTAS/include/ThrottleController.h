@@ -12,6 +12,17 @@
 // Runs on a dedicated background thread at ~120Hz.
 class ThrottleController {
 public:
+    // Pilot-state gate mode.
+    //   Off           = legacy behavior (master switch controls everything).
+    //   InjectionOnly = while not piloting, park memory injection; keep SendInput.
+    //   Full          = while not piloting, park everything (injection + SendInput).
+    enum class GateMode { Off, InjectionOnly, Full };
+
+    // Pilot signal source: Manual (toggle key) or Auto (reserved — no working
+    // automatic signal yet; currently falls back to the manual value). See the
+    // dead-ends catalogue in PilotState.cpp.
+    enum class PilotSignal { Manual, Auto };
+
     // Configuration loaded from AbsoluteHOTAS.ini.
     struct Config {
         // [General]
@@ -89,6 +100,12 @@ public:
         bool    bHoldForBoost = true;   // Pause throttle injection while boost is held; cancel on release
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
+
+        // [Gate] pilot-state gate
+        GateMode    pilotGateMode = GateMode::Off;
+        PilotSignal pilotSignal = PilotSignal::Manual;   // Manual (toggle); Auto reserved (no auto signal yet)
+        int         pilotGateManualToggleKey = 0;        // VK to toggle the manual signal (0 = disabled)
+        int         pilotGateDebounceMs = 150;           // Auto-signal debounce window (ms)
 
         // [Aim] - Source-object reticle injection
         bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle

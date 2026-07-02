@@ -251,7 +251,21 @@ static void SendMouseButton(uint16_t mouseButton, bool keyUp) {
     SendInput(1, &input, sizeof(INPUT));
 }
 
-static void EmitShipOutput(const ShipOutput& output, bool keyUp) {
+static std::string DbgOwnerHex(uint32_t id) {
+    char b[16]; sprintf_s(b, "0x%X", id); return b;
+}
+
+static void EmitShipOutput(const ShipOutput& output, bool keyUp, const std::string& reason = {}) {
+    // DEBUG instrumentation: every key/mouse emit — hold AND pulse — funnels through
+    // here, so this is the one chokepoint that catches a spurious Shift (0x2A) up no
+    // matter which path sent it. Tagged with owner/source via `reason`.
+    if (output.kind != ShipOutputKind::None) {
+        char dbg[160];
+        sprintf_s(dbg, "EMIT %s code=0x%02X %s [%s]",
+            output.kind == ShipOutputKind::Keyboard ? "KB" : "MOUSE",
+            static_cast<unsigned>(output.code), keyUp ? "UP" : "DOWN", reason.c_str());
+        ShipLog(dbg);
+    }
     switch (output.kind) {
         case ShipOutputKind::Keyboard: SendKeyboardScanCode(output.code, output.extended, keyUp); break;
         case ShipOutputKind::Mouse:    SendMouseButton(output.code, keyUp);                       break;
@@ -259,10 +273,10 @@ static void EmitShipOutput(const ShipOutput& output, bool keyUp) {
     }
 }
 
-static void PulseOutput(const ShipOutput& output) {
+static void PulseOutput(const ShipOutput& output, const std::string& reason = {}) {
     if (output.kind == ShipOutputKind::None) return;
-    EmitShipOutput(output, false);
-    EmitShipOutput(output, true);
+    EmitShipOutput(output, false, reason);
+    EmitShipOutput(output, true, reason);
 }
 
 // ============================================================================
@@ -280,7 +294,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
     if (held) {
         if (it == s_heldShipOutputs.end()) {
             s_heldShipOutputs.push_back({ output, { ownerId } });
-            EmitShipOutput(output, false);
+            EmitShipOutput(output, false, "SetHeld:firstDown owner=" + DbgOwnerHex(ownerId));
             return;
         }
         if (std::find(it->owners.begin(), it->owners.end(), ownerId) == it->owners.end())
@@ -291,7 +305,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
     if (it == s_heldShipOutputs.end()) return;
     std::erase(it->owners, ownerId);
     if (it->owners.empty()) {
-        EmitShipOutput(it->output, true);
+        EmitShipOutput(it->output, true, "SetHeld:lastRelease owner=" + DbgOwnerHex(ownerId));
         s_heldShipOutputs.erase(it);
     }
 }
@@ -300,7 +314,7 @@ void ReleaseOwnerOutputs(uint32_t ownerId) {
     for (auto it = s_heldShipOutputs.begin(); it != s_heldShipOutputs.end();) {
         std::erase(it->owners, ownerId);
         if (it->owners.empty()) {
-            EmitShipOutput(it->output, true);
+            EmitShipOutput(it->output, true, "ReleaseOwner owner=" + DbgOwnerHex(ownerId));
             it = s_heldShipOutputs.erase(it);
         } else {
             ++it;
@@ -309,7 +323,7 @@ void ReleaseOwnerOutputs(uint32_t ownerId) {
 }
 
 void ReleaseAllShipButtonOutputs() {
-    for (const auto& h : s_heldShipOutputs) EmitShipOutput(h.output, true);
+    for (const auto& h : s_heldShipOutputs) EmitShipOutput(h.output, true, "ReleaseAll");
     s_heldShipOutputs.clear();
     for (auto& b : s_shipButtonBindings) b.previousPressed = false;
 }
@@ -503,7 +517,7 @@ void UpdateShipButtonBindings() {
             if (pressed != binding.previousPressed)
                 SetOutputHeld(binding.output, ownerId, pressed);
         } else if (pressed && !binding.previousPressed) {
-            PulseOutput(binding.output);
+            PulseOutput(binding.output, std::string("Pulse btn=") + binding.actionId);
         }
 
         if (!pressed && binding.previousPressed)

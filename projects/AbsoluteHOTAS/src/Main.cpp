@@ -5,7 +5,7 @@
 #include "UIHook.h"
 #include "BindingWizard.h"
 #include "Plugin.h"
-#include <SFSE/Interfaces.h>
+#include "SFSEInterface.h"
 #include <windows.h>
 #include <format>
 
@@ -79,7 +79,7 @@ static void InstallCrashLogger() {
 }
 
 // SFSE plugin entry point
-SFSEPluginLoad(const SFSE::LoadInterface* /*a_sfse*/)
+SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
 {
     // Read bLogThrottle from INI once and cache the result globally.
     RuntimePaths::EnableFileLogging();

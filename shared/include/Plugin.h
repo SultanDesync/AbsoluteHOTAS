@@ -1,12 +1,11 @@
 #pragma once
 #include <string_view>
-#include <REL/Relocation.h>
+#include "SFSEInterface.h"
 
-// Version components are injected from CMake PROJECT_VERSION (CMakeLists.txt) so
-// the runtime banner, the SFSE plugin version data, and the DLL file-version
-// resource all move together from the single source: project(... VERSION x.y.z).
-// The fallback values apply only to non-CMake tooling (e.g. clangd without the
-// defines) and are intentionally an obviously-wrong 0.0.0.
+// Version components are injected from xmake (add_defines PLUGIN_VERSION_* in
+// xmake.lua, kept in step with set_version) so the runtime banner and the SFSE
+// plugin version data move together. The fallback values apply only to tooling
+// without the defines (e.g. clangd) and are intentionally an obvious 0.0.0.
 #ifndef PLUGIN_VERSION_MAJOR
 #define PLUGIN_VERSION_MAJOR 0
 #endif

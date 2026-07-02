@@ -77,10 +77,9 @@
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
-// RE/Starfield.h excluded — plugin does not use CommonLibSF RE:: types
-#include <SFSE/Impl/PCH.h>
-#include <REL/REL.h>
-#include <SFSE/SFSE.h>
+// Self-contained SFSE plugin ABI — no CommonLibSF dependency (see SFSEInterface.h).
+#include <windows.h>
+#include "SFSEInterface.h"
 
 #include "Plugin.h"
 

@@ -5,6 +5,7 @@
 #include "MacroEngine.h"
 #include "SignalHunter.h"
 #include "AimController.h"
+#include "PilotState.h"
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
 #include "UIHook.h"
@@ -167,6 +168,22 @@ void ThrottleController::LoadConfig() {
     s_config.logThrottle       = ini.GetBoolValue("Injection", "bLogThrottle",     false);
     g_verboseLog               = s_config.logThrottle;
     s_config.bHoldForBoost     = ini.GetBoolValue("Injection", "bHoldForBoost",    true);
+
+    // [Gate] pilot-state gate (framework). Default Off = legacy behavior.
+    {
+        const char* gm = ini.GetValue("Gate", "PilotGateMode", "Off");
+        if (_stricmp(gm, "InjectionOnly") == 0)  s_config.pilotGateMode = ThrottleController::GateMode::InjectionOnly;
+        else if (_stricmp(gm, "Full") == 0)      s_config.pilotGateMode = ThrottleController::GateMode::Full;
+        else                                     s_config.pilotGateMode = ThrottleController::GateMode::Off;
+    }
+    s_config.pilotGateManualToggleKey = (int)ini.GetLongValue("Gate", "iManualToggleKey", 0);
+    s_config.pilotGateDebounceMs      = (int)ini.GetLongValue("Gate", "iDebounceMs", 150);
+    {
+        const char* ps = ini.GetValue("Gate", "PilotSignal", "Manual");
+        s_config.pilotSignal = (_stricmp(ps, "Auto") == 0)
+            ? ThrottleController::PilotSignal::Auto
+            : ThrottleController::PilotSignal::Manual;
+    }
 
     s_config.digitalReverseButton     = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalReverseButton",     ""), -1);
     s_config.digitalRollLeftButton    = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalRollLeftButton",    ""), -1);
@@ -383,6 +400,7 @@ void ThrottleController::ControlLoop() {
     // the activate binding.
     bool active = s_config.alwaysOn;
     bool wasActive = false;
+    bool injectionWasAllowed = true;  // pilot gate (InjectionOnly): tracks memory-injection arm state
     auto lastLoopTime = std::chrono::steady_clock::now();
 
     // Inline axis reading helper — delegates to DeviceManager
@@ -452,17 +470,34 @@ void ThrottleController::ControlLoop() {
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
 
+        // ---- Pilot-state gate ----
+        // Framework: a manual toggle key flips the test piloting signal so the gate
+        // plumbing can be validated before the native signal is wired. PilotState is
+        // the single swap point for that signal.
+        if (s_config.pilotGateManualToggleKey != 0) {
+            bool gateKeyDown = (GetAsyncKeyState(s_config.pilotGateManualToggleKey) & 0x8000) != 0;
+            static bool prevGateKey = false;
+            if (gateKeyDown && !prevGateKey) PilotState::Toggle();
+            prevGateKey = gateKeyDown;
+        }
+        const bool gateOn   = s_config.pilotGateMode != ThrottleController::GateMode::Off;
+        const bool piloting = !gateOn ||
+            PilotState::Update(s_config.pilotSignal == ThrottleController::PilotSignal::Auto, dt, s_config.pilotGateDebounceMs);
+        const bool fullClosed = (s_config.pilotGateMode == ThrottleController::GateMode::Full) && !piloting;
+
         // ---- Master active gate ----
         // While deactivated, suppress ALL SendInput outputs and axis injection.
         // The deactivate edge above already released held keys; this transition
         // guard is a safety net for any other path that clears `active`.
-        if (!active) {
+        // Full gate folds in here: when not piloting, park everything like deactivate.
+        if (!active || fullClosed) {
             if (wasActive) {
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 SignalHunter::Disarm();
                 lastInjectedHardwareValue = -999.0f;
                 wasActive = false;
+                injectionWasAllowed = false;
             }
             std::this_thread::sleep_for(sleepDuration);
             continue;
@@ -527,16 +562,22 @@ void ThrottleController::ControlLoop() {
                 reverseHeld = true;
         }
 
-        // Boost zone: fire boosters when throttle axis is above boostZone+dz
+        // Boost zone: fire boosters when the throttle axis is above boostZone+dz.
+        // Compute inBoostZone unconditionally (false when the feature is off or there
+        // is no throttle source) and ALWAYS drive SetOutputHeld with it, so a gate
+        // flip — e.g. unbinding the throttle — releases the held boost output instead
+        // of orphaning it down. A gated release left Shift stuck (no sprint on foot)
+        // until a manual deactivate.
+        bool inBoostZone = false;
         if (s_config.bBoostZone && s_config.bUnipolarReverse && s_config.unipolarMode
-            && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0
-            && ShipOutputSystem::GetShipButtonCount() > 0) {
+            && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
             long rawThrottle = GetRawAxis(s_config.throttleAxis);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
-            bool inBoostZone = rawThrottle > s_config.boostZoneCenter + s_config.boostZoneDeadzone;
+            inBoostZone = rawThrottle > s_config.boostZoneCenter + s_config.boostZoneDeadzone;
+        }
+        if (ShipOutputSystem::GetShipButtonCount() > 0)
             ShipOutputSystem::SetOutputHeld(
                 ShipOutputSystem::GetShipButtonOutput("FireBoosters"), OwnerBoostZone, inBoostZone);
-        }
 
         // ---- Throttle ----
         float throttle = 0.0f;
@@ -695,16 +736,24 @@ void ThrottleController::ControlLoop() {
                 s_turnAssistRuntimeActive = assistMasterEnabled;
             }
 
-            // ---- SignalHunter ----
-            int candCount = ThrottleHook::GetCandidateCount();
-            SignalHunter::Tick(candCount, throttle, dt, iter);
-            SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim,
-                                 strafeLatActive, strafeVertActive);
-
-            // ---- AimController ----
-            AimController::Update(s_config, yaw, pitch,
-                hasSeparateAimInput, hasSeparateAimAxes,
-                suppressClusterForAim, dt, iter);
+            // ---- SignalHunter / AimController (pilot-gated injection) ----
+            // InjectionOnly: while not piloting, park the memory injection but leave
+            // SendInput bindings live (those are processed above, ungated here).
+            const bool injectionAllowed = (s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting;
+            if (injectionAllowed) {
+                injectionWasAllowed = true;
+                int candCount = ThrottleHook::GetCandidateCount();
+                SignalHunter::Tick(candCount, throttle, dt, iter);
+                SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim,
+                                     strafeLatActive, strafeVertActive);
+                AimController::Update(s_config, yaw, pitch,
+                    hasSeparateAimInput, hasSeparateAimAxes,
+                    suppressClusterForAim, dt, iter);
+            } else if (injectionWasAllowed) {
+                // Transition to parked: stop memory injection, keep SendInput live.
+                SignalHunter::SuspendInjection();
+                injectionWasAllowed = false;
+            }
         }
 
         std::this_thread::sleep_for(sleepDuration);
