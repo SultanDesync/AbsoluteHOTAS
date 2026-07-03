@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "Plugin.h"
 #include "SFSEInterface.h"
 
@@ -19,6 +21,12 @@ SFSE_PLUGIN_VERSION = []() noexcept {
 
     data.UsesSigScanning(true);
     data.UsesAddressLibrary(false);
+    // NOTE: HasNoStructUse(true) is technically a fib — the plugin *does* write raw
+    // game-struct offsets (the flight-control cluster lanes at cluster_base+0x58..0x6C
+    // and the 0x20-byte Bethesda Setting layout). It's tolerable only because the
+    // pinned CompatibleVersions list below is the stricter, operative gate: SFSE will
+    // refuse to load on any runtime whose struct layout we haven't validated. If that
+    // version pin is ever loosened, this flag must be revisited (and probably set false).
     data.HasNoStructUse(true);
     data.IsLayoutDependent(false);
 

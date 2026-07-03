@@ -1,8 +1,14 @@
-// Unit test for ControlMapReader. Built via the CMake/CTest target (MSVC), not
-// a standalone compiler. Enable with -DABSOLUTEHOTAS_BUILD_TESTS=ON:
-//   cmake --preset build-release-user -DABSOLUTEHOTAS_BUILD_TESTS=ON
-//   cmake --build --preset release-user --target control_map_reader_test
-//   ctest --test-dir build/release --output-on-failure
+// Unit test for ControlMapReader. Built via the `control_map_reader_test` xmake
+// target (opt-in; not built by default). From the repo root, in PowerShell:
+//   xmake build control_map_reader_test
+//   xmake run   control_map_reader_test (Resolve-Path tests/fixtures).Path
+//
+// The fixtures directory is passed as argv[1]. Pass it ABSOLUTE: `xmake run`
+// launches the exe from the target's output dir, not the repo root, so a
+// relative "tests/fixtures" would not resolve.
+//
+// The target compiles this file plus src/ControlMapReader.cpp with no PCH, so it
+// stays independent of the plugin target.
 //
 // Fixtures (real captured files, passed as argv[1]):
 //   control_map_default.bin       9-byte vanilla baseline (3 empty sections)

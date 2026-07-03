@@ -17,7 +17,7 @@ Two headline features plus the version roll:
 
 ## Phase 0 — Done
 
-- [x] Bump version to `3.1.0-beta` (CMake `PROJECT_VERSION`, INI banner, README header + changelog stub).
+- [x] Bump version to `3.1.0-beta` (`set_version` + the `PLUGIN_VERSION_*` defines in `xmake.lua`, INI banner, README header + changelog stub).
 - [x] Create `3.1-beta` branch.
 - [x] `ControlMapReader` module scaffolded (parser + token table + `ResolveBinding`), standalone tests passing against real captured fixtures.
 - [x] Format + vanilla-map documentation (`docs/reference/control-map-ship-functions.md`).
@@ -39,11 +39,11 @@ Two headline features plus the version roll:
 ## Phase 3 — ControlMap reader integration
 
 - [ ] Clean-room confirm the in-game **write** shape: from empty baseline, rebind one primary (Boosters→J), flush, decode; add as a third test fixture.
-- [x] Wire `ResolveBinding` into `LoadShipButtonBindings` as the middle precedence layer: vanilla default → control-map-derived → explicit `[ShipButtonOutputs]`. Added `[General] bSyncShipOutputsFromControlMap` (default true), the actionId→(context,action) table, path resolution via `FOLDERID_Documents`, and per-action realignment logging. Builds clean via `release-user`.
+- [x] Wire `ResolveBinding` into `LoadShipButtonBindings` as the middle precedence layer: vanilla default → control-map-derived → explicit `[ShipButtonOutputs]`. Added `[General] bSyncShipOutputsFromControlMap` (default true), the actionId→(context,action) table, path resolution via `FOLDERID_Documents`, and per-action realignment logging. Builds clean via `xmake`.
 - [x] Unpin default `[ShipButtonOutputs]` (commented out) so the control-map layer actually engages — explicit values otherwise win and the feature was inert. Verified the wizard does **not** re-write `[ShipButtonOutputs]` on Save, so the trigger can't re-pin it.
 - [x] Reload trigger decided: **startup + wizard Save** (Save already calls `ReloadConfig` → re-reads the map). No file-watch — bindings are static state; startup is the primary read. Dedicated hotkey is an optional future add.
 - [ ] **In-game verification**: with an INI that has no explicit `sXxxOutput`, rebind a ship primary in Starfield, confirm output follows it + the `[ShipOutput] ControlMap sync:` log lines. (Existing INIs keep explicit outputs — delete the deployed INI to re-seed, or clear the lines.)
-- [ ] Tests for the precedence layering (fold into the pending CTest target).
+- [ ] Tests for the precedence layering (fold into the `control_map_reader_test` xmake target).
 - [ ] Release-notes caveat: existing installs keep their explicit `[ShipButtonOutputs]`; document "clear them to enable auto-follow."
 
 ## Phase 3.5 — Overlay hook compatibility (best-effort, non-blocking)
@@ -51,21 +51,21 @@ Two headline features plus the version roll:
 Adopted stance: match established best practice (Special K / ReShade / RTSS), don't out-engineer it. See `docs/reference/overlay-hook-compatibility.md`. Driven by a reporter's "cursor works, no GUI" log (prior render-chain hook, likely NVIDIA Streamline).
 
 - [ ] Wait on reporter's retest with 3.0.1 + FG/driver-layers off (confirms which layer wins the hook race).
-- [x] **Detect-and-tell**: prior-hook detection added to `UIHook::Install` (`LooksHooked` + warning over all 5 render entry points). Builds clean via `release-user`. _Pending in-game verification._
+- [x] **Detect-and-tell**: prior-hook detection added to `UIHook::Install` (`LooksHooked` + warning over all 5 render entry points). Builds clean via `xmake`. _Pending in-game verification._
 - [ ] **Queue-association capture**: replace the first-seen DIRECT-queue heuristic in `HookedExecuteCommandLists` with "DIRECT queue that fed the most recent Present." Strictly better than first-seen even single-injector; needs in-game verification.
 - [ ] Seed the "Known incompatibilities" list (done in the compat doc) and link it from the README.
 - [ ] Does **not** block Jul 1 — pre-existing environmental incompatibility, not a regression.
 
 ## Phase 4 — Build & verify
 
-- [x] Full plugin build under MSVC `/W4` (vcpkg / CommonLibSF toolchain) — `ControlMapReader.cpp` compiles + links into `AbsoluteHOTAS.dll` clean via the `release-user` preset (only the project-wide benign `D9025 /Ob1→/Ob3` flag warning). _Re-run after Phases 2–3 land more code._
+- [x] Full plugin build under MSVC `/W4` (via `xmake`, no vcpkg / CommonLibSF toolchain) — `ControlMapReader.cpp` compiles + links into `AbsoluteHOTAS.dll` clean (`xmake -y`). _Re-run after Phases 2–3 land more code._
 - [ ] In-game smoke test: macros (chord + turbo) and ControlMap auto-alignment with a real rebind.
 - [ ] Fix fallout.
 
 ## Phase 5 — Release mechanics
 
 - [ ] Replace the README `### v3.1.0-beta (in development)` stub with real changelog bullets (ControlMap auto-align, macros).
-- [ ] Build `package-mo2` target → `releases/AbsoluteHOTAS-v3.1.0-Release.zip`.
+- [ ] Assemble `releases/AbsoluteHOTAS-v3.1.0-Release.zip` (currently done manually — no xmake packaging task exists; the DLL comes from `xmake` and is zipped with the INI/docs by hand).
 - [ ] Tag `v3.1.0-beta`.
 - [ ] Draft release notes.
 - [ ] Publish (Nexus / GitHub release — confirm channel).

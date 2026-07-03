@@ -2,7 +2,7 @@
 
 How AbsoluteHOTAS's in-game ImGui overlay coexists — and sometimes deliberately
 doesn't — with other software that hooks the Direct3D 12 / DXGI render chain.
-This is the adopted design stance for `UIHook` (`shared/src/UIHook.cpp`).
+This is the adopted design stance for `UIHook` (`src/UIHook.cpp`).
 
 ## The problem
 

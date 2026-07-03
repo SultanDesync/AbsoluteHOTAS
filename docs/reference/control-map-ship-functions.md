@@ -3,7 +3,7 @@
 This document records the reverse-engineered format of Starfield's
 `ControlMap_Custom.txt` and the complete vanilla binding map for every spaceship
 function AbsoluteHOTAS emits. It is the source of truth for the lookup tables in
-`ControlMapReader` (`shared/include/ControlMapReader.h`).
+`ControlMapReader` (`include/ControlMapReader.h`).
 
 File location:
 `%USERPROFILE%/Documents/My Games/Starfield/ControlMap_Custom.txt`

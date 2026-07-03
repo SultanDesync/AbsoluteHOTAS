@@ -1,6 +1,6 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "type": "Standalone SFSE Plugin",
   "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling. Features an in-game ImGui binding wizard, per-axis inversion and sensitivity, 22 configurable ship action button bindings, digital axis emulation, and live config reload — no vJoy or Joystick Gremlin required.",
   "technologies": [
@@ -13,21 +13,26 @@
     "x86-64 assembly & trampoline hooks"
   ],
   "directories": {
-    "projects/AbsoluteHOTAS": {
-      "path": "projects/AbsoluteHOTAS",
-      "purpose": "Core plugin code including the main entry point, hooks, controller thread, and default configuration ini.",
-      "subdirectories": {
-        "src": "C++ source files implementing Main, low-level memory hooks, setting beacon, UI binding wizard, and DirectInput controller.",
-        "include": "C++ header files containing class declarations and struct definitions.",
-        "config": "Contains standalone AbsoluteHOTAS.ini configuration file."
-      }
+    "src": {
+      "path": "src",
+      "purpose": "All plugin C++ source files: the main entry point, low-level memory hooks, setting beacon, DirectInput controller thread, ImGui binding wizard, ship output, ControlMap reader, D3D12 UI hook, and runtime paths/logging.",
+      "subdirectories": {}
     },
-    "shared": {
-      "path": "shared",
-      "purpose": "Common headers, global variables, and utilities shared within the project.",
+    "include": {
+      "path": "include",
+      "purpose": "All plugin C++ headers: class declarations and struct definitions, the precompiled header (PCH.h), the vendored SFSE ABI (SFSEInterface.h), DirectInput/KBM utilities, and device manager.",
+      "subdirectories": {}
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Standalone AbsoluteHOTAS.ini configuration file shipped with the plugin.",
+      "subdirectories": {}
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Standalone unit test for ControlMapReader (built via the opt-in control_map_reader_test xmake target) plus captured binary fixtures.",
       "subdirectories": {
-        "src": "Global variable definitions, plugin info details, D3D12 UI hook, and runtime paths/logs configuration.",
-        "include": "Common headers, precompiled header (PCH.h), DirectInput/KBM utilities, device manager, and global synchronization variables."
+        "fixtures": "Real captured ControlMap binary files used by the test (control_map_default.bin, control_map_configurator.bin)."
       }
     },
     "docs": {
@@ -39,59 +44,59 @@
     }
   },
   "files": {
-    "projects/AbsoluteHOTAS/src/Main.cpp": {
+    "src/Main.cpp": {
       "role": "Plugin Loader & Entry Point",
       "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, plants the Setting beacon, installs the low-level hooks, initializes the controller thread, and hooks D3D12 via UIHook."
     },
-    "projects/AbsoluteHOTAS/src/ThrottleHook.cpp": {
+    "src/ThrottleHook.cpp": {
       "role": "Low-level x86 Hook Manager",
       "purpose": "Handles AOB signature scanning inside the game's .text section, allocates 2GB-near memory trampolines, hooks the critical flight writer path, registers manual camera/rotational gates, and provides safe override logic for ship roll, pitch, yaw, and throttle (via per-offset silence gates)."
     },
-    "projects/AbsoluteHOTAS/src/ThrottleController.cpp": {
+    "src/ThrottleController.cpp": {
       "role": "Orchestrator & DirectInput Polling Thread",
       "purpose": "Manages the execution thread of the DirectInput controller, normalizes and deadzones axis inputs, handles ship button bindings, and delegates processing to specific subsystems."
     },
-    "projects/AbsoluteHOTAS/src/SignalHunter.cpp": {
+    "src/SignalHunter.cpp": {
       "role": "Memory Signature & Injection",
       "purpose": "Runs the 'Signal Hunter' algorithm to locate the dynamic control cluster (leveraging the fThrottleAtEngineStart beacon), performs throttle injection, manages reverse thrust/boost zones, and handles turn assist silence gates."
     },
-    "projects/AbsoluteHOTAS/src/ShipOutput.cpp": {
+    "src/ShipOutput.cpp": {
       "role": "Ship Action & Output Management",
       "purpose": "Handles ref-counted holding state for specific ship buttons/actions, resolving overlapping commands and translating them to KBM injects."
     },
-    "projects/AbsoluteHOTAS/src/AimController.cpp": {
+    "src/AimController.cpp": {
       "role": "Aim & Source Object Reticle Injection",
       "purpose": "Drives the source-object reticle/cursor via DirectInput axes or buttons independently from steering, including HOSAM alignment assist logic."
     },
-    "projects/AbsoluteHOTAS/src/SettingBeacon.cpp": {
+    "src/SettingBeacon.cpp": {
       "role": "Bethesda Setting Scanner & Mod Beacon",
       "purpose": "Scans the game module's .data and .rdata memory sections to locate the fThrottleAtEngineStart and fRollDeadzone settings, planting a signpost value (0.0314f) and disabling the native roll deadzone."
     },
-    "projects/AbsoluteHOTAS/src/BindingWizard.cpp": {
+    "src/BindingWizard.cpp": {
       "role": "ImGui Binding Wizard UI",
       "purpose": "Implements the interactive in-game overlay wizard allowing users to dynamically bind controller axes and buttons, calibrate deadzones, and configure sensitivities."
     },
-    "projects/AbsoluteHOTAS/src/WizardCapture.cpp": {
+    "src/WizardCapture.cpp": {
       "role": "Binding Wizard Signal Capture",
       "purpose": "Handles live input capture for physical joystick buttons/axes within the ImGui wizard UI."
     },
-    "projects/AbsoluteHOTAS/src/WizardConfig.cpp": {
+    "src/WizardConfig.cpp": {
       "role": "Binding Wizard Config Serializer",
       "purpose": "Serializes and saves custom controller configurations directly to AbsoluteHOTAS.ini from the ImGui wizard."
     },
-    "projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini": {
+    "config/AbsoluteHOTAS.ini": {
       "role": "User Configuration File",
       "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, and idle deadzones."
     },
-    "shared/src/DeviceManager.cpp": {
+    "src/DeviceManager.cpp": {
       "role": "HID & DirectInput Device Discovery",
       "purpose": "Manages low-level DirectInput 8 device enumeration, initialization, and capability polling for connected HOTAS/HOSAS controllers."
     },
-    "shared/src/UIHook.cpp": {
+    "src/UIHook.cpp": {
       "role": "D3D12 & ImGui Graphics Hook",
       "purpose": "Hooks the game's D3D12 Present and ResizeBuffers calls using MinHook to inject and render the ImGui controller configuration overlay."
     },
-    "shared/src/RuntimePaths.cpp": {
+    "src/RuntimePaths.cpp": {
       "role": "Path Resolver & Logger Utility",
       "purpose": "Resolves documents, SFSE plugins, and logs paths, handling thread-safe append operations to the plugin log file."
     }
@@ -125,18 +130,18 @@
   },
   "task_context_mapping": {
     "how_to_add_new_ship_action": {
-      "ini_config": "Add new i<Action>Button under [ShipButtons] and s<Action>Output under [ShipButtonOutputs] in projects/AbsoluteHOTAS/config/AbsoluteHOTAS.ini.",
-      "controller_declaration": "Update ThrottleController::Config struct in projects/AbsoluteHOTAS/include/ThrottleController.h to include the new bindings.",
-      "config_parsing": "Add standard BindingDef in projects/AbsoluteHOTAS/src/ThrottleController.cpp inside LoadShipButtonBindings to map the actionId, INI key, and output string key.",
-      "default_output": "Register default action scancode in DefaultShipOutputForAction inside projects/AbsoluteHOTAS/src/ThrottleController.cpp.",
+      "ini_config": "Add new i<Action>Button under [ShipButtons] and s<Action>Output under [ShipButtonOutputs] in config/AbsoluteHOTAS.ini.",
+      "controller_declaration": "Update ThrottleController::Config struct in include/ThrottleController.h to include the new bindings.",
+      "config_parsing": "Add standard BindingDef in src/ThrottleController.cpp inside LoadShipButtonBindings to map the actionId, INI key, and output string key.",
+      "default_output": "Register default action scancode in DefaultShipOutputForAction inside src/ThrottleController.cpp.",
       "state_update": "Update state evaluation in UpdateShipButtonBindings to check physical press and trigger SetOutputHeld/PulseOutput."
     },
     "how_to_adjust_axis_normalization_or_reverse": {
-      "formula_logic": "Modify ThrottleController::NormalizeAxis in projects/AbsoluteHOTAS/src/ThrottleController.cpp.",
+      "formula_logic": "Modify ThrottleController::NormalizeAxis in src/ThrottleController.cpp.",
       "variables": "Change configuration mappings in LoadConfig (detents, idle plateaus, reverse threshold) and adjust matching variables in include/ThrottleController.h."
     },
     "how_to_update_writer_block_hooks_for_game_patch": {
-      "signature_update": "Verify assembly signature in InstallRotationalGates and raw Pattern structs in projects/AbsoluteHOTAS/src/ThrottleHook.cpp.",
+      "signature_update": "Verify assembly signature in InstallRotationalGates and raw Pattern structs in src/ThrottleHook.cpp.",
       "call_rva_update": "Adjust version constant bounds and target displacement search bounds (e.g. 0x12B0000 to 0x12C0000 range check in ThrottleHook.cpp line 817)."
     }
   }

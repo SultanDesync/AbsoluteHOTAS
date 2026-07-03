@@ -22,7 +22,7 @@ migrations in the last section.
 | `AbsoluteHOTAS_User.ini` | wizard (bindings, calibration, tuning) | no (created at runtime) | never |
 | `AbsoluteHOTAS_Macros.ini` | wizard Macros tab (`[Macro:*]`) | no (created at runtime) | never |
 
-Paths come from `RuntimePaths` ([RuntimePaths.cpp:31](../../shared/src/RuntimePaths.cpp)).
+Paths come from `RuntimePaths` ([RuntimePaths.cpp:31](../../src/RuntimePaths.cpp)).
 Add `UserIniPath()` and `MacrosIniPath()` alongside `IniPath()`.
 
 Keep it to three files. More than that makes support ("send me your INIs") and the
@@ -52,15 +52,15 @@ lifts out of the old monolith. Everything not listed as user-owned stays mod-own
 **Mod-owned → `AbsoluteHOTAS.ini`** (shipped defaults, overwrite-safe):
 
 - `[General]` — `bEnabled`, `bSyncShipOutputsFromControlMap` (user-overridable via overlay, but default shipped here)
-- `[Injection]` — `iPollRateHz`, `iThrottleBurstMs`, `bRollEnabled`, `bLogThrottle`, `bSignalHunterFallback`
+- `[Injection]` — `iPollRateHz`, `iThrottleBurstMs`, `bRollEnabled`, `bEnableLog`, `bSignalHunterFallback`
 
 `[Macro:*]` → `AbsoluteHOTAS_Macros.ini`. Brand-new in 3.1, so nothing to migrate;
 the file just starts absent/empty. Keeping macros in their own file also avoids the
 "enumerate and delete every `[Macro:*]` section on each wizard save" problem the
 monolith would have.
 
-> Note `EnableFileLogging()` ([RuntimePaths.cpp:48](../../shared/src/RuntimePaths.cpp))
-> reads `bLogThrottle` straight from `IniPath()`. It stays mod-owned in the main
+> Note `InitLogging()` ([RuntimePaths.cpp](../../src/RuntimePaths.cpp))
+> reads `bEnableLog` straight from `IniPath()`. It stays mod-owned in the main
 > file, so that path is unchanged.
 
 ## Load path (layered overlay)
@@ -85,7 +85,7 @@ void ThrottleController::LoadConfig() {
 ```
 
 The rest of `LoadConfig` is untouched — same `ini` object, same `GetValue` calls,
-same defaults. `MacroEngine::LoadMacros(ini)` ([ThrottleController.cpp:183](../../projects/AbsoluteHOTAS/src/ThrottleController.cpp))
+same defaults. `MacroEngine::LoadMacros(ini)` ([ThrottleController.cpp:183](../../src/ThrottleController.cpp))
 keeps working because macros are merged before it runs.
 
 > Verify on implementation: confirm sequential `LoadFile` overwrites single-value
@@ -94,7 +94,7 @@ keeps working because macros are merged before it runs.
 
 ## Save path (wizard)
 
-`SaveBindingsToINI()` ([WizardConfig.cpp:192](../../projects/AbsoluteHOTAS/src/WizardConfig.cpp))
+`SaveBindingsToINI()` ([WizardConfig.cpp:192](../../src/WizardConfig.cpp))
 currently loads/saves `IniPath()`. Change it to operate on `UserIniPath()`:
 
 - Load `UserIniPath()`, `SetValue` the user-owned keys, save `UserIniPath()`.
@@ -161,7 +161,7 @@ config-side). Defend that separately:
 
 ## Implementation touch list
 
-- `shared/src/RuntimePaths.{h,cpp}` — add `UserIniPath()`, `MacrosIniPath()`.
+- `src/RuntimePaths.{h,cpp}` — add `UserIniPath()`, `MacrosIniPath()`.
 - `ThrottleController::LoadConfig` — add `MigrateIfNeeded()` + the two overlay loads.
 - New `MigrateIfNeeded()` (ThrottleController or a small `ConfigMigration` unit) — backup, split, stamp.
 - `WizardConfig::SaveBindingsToINI` — retarget to `UserIniPath()`; never touch main ini; relocate `bHoldForBoost`.
