@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "WizardConfig.h"
 #include "WizardCapture.h"
 #include "ThrottleController.h"
@@ -10,7 +12,7 @@
 #include <cstring>
 
 static void WizLog(const std::string& msg) {
-    RuntimePaths::AppendLog("[BindingWizard]", msg);
+    RuntimePaths::Log("[BindingWizard]", msg);
 }
 
 // --- INI write helpers ---

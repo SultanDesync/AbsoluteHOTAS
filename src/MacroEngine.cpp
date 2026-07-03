@@ -12,7 +12,7 @@
 // ============================================================================
 
 static void MacroLog(const std::string& msg) {
-    RuntimePaths::AppendLogAlways("[Macro]", msg);
+    RuntimePaths::Log("[Macro]", msg);
 }
 
 static std::vector<Macro> s_macros;
@@ -166,15 +166,10 @@ void LoadMacros(CSimpleIniA& ini) {
             continue;
         }
 
-        MacroLog("Loaded macro '" + m.name + "': " + std::to_string(m.steps.size()) +
-                 " step(s), turbo=" + (m.turbo ? "on" : "off") + ".");
         s_macros.push_back(std::move(m));
     }
 
     s_runtime.assign(s_macros.size(), MacroRuntime{});
-
-    if (!s_macros.empty())
-        MacroLog("Total macros loaded: " + std::to_string(s_macros.size()) + ".");
 }
 
 void ReleaseAll() {

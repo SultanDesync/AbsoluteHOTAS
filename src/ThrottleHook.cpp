@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "ThrottleHook.h"
 #include "RuntimePaths.h"
 #include <windows.h>
@@ -54,37 +56,8 @@ struct HookRecord {
 static std::vector<HookRecord> g_hookRegistry;
 
 // ---- Logging helper ----
-static bool IsHookFileLoggingEnabled() {
-    return RuntimePaths::IsFileLoggingEnabled();
-}
-
-static bool IsCriticalHookLog(const std::string& msg) {
-    return msg.find("CRITICAL") != std::string::npos;
-}
-
-static void RotateLogIfNeeded() {
-    static bool checked = false;
-    if (checked) return;
-    checked = true;
-
-    const auto logPath = RuntimePaths::LogPath();
-    const auto oldLogPath = RuntimePaths::PluginDirectory() / L"AbsoluteHOTAS.log.old";
-    WIN32_FILE_ATTRIBUTE_DATA data{};
-    if (GetFileAttributesExW(logPath.c_str(), GetFileExInfoStandard, &data)) {
-        ULARGE_INTEGER size{};
-        size.HighPart = data.nFileSizeHigh;
-        size.LowPart = data.nFileSizeLow;
-        if (size.QuadPart > 1024ull * 1024ull) {
-            DeleteFileW(oldLogPath.c_str());
-            MoveFileExW(logPath.c_str(), oldLogPath.c_str(), MOVEFILE_REPLACE_EXISTING);
-        }
-    }
-}
-
 static void HookLog(const std::string& msg) {
-    if (!IsHookFileLoggingEnabled() && !IsCriticalHookLog(msg)) return;
-    RotateLogIfNeeded();
-    RuntimePaths::AppendLog("[ThrottleHook]", msg);
+    RuntimePaths::Log("[ThrottleHook]", msg);
 }
 
 // ---- Find .text section ----
@@ -571,7 +544,6 @@ void ThrottleHook::ClearCandidates() {
 void ThrottleHook::SetCaptureEnabled(bool enabled) {
     if (g_captureEnabled == enabled) return;
     g_captureEnabled = enabled;
-    HookLog(enabled ? "DISCOVERY MODE ENABLED" : "DISCOVERY MODE DISABLED");
 }
 
 bool ThrottleHook::IsCaptureEnabled() {
@@ -581,7 +553,6 @@ bool ThrottleHook::IsCaptureEnabled() {
 void ThrottleHook::SetSilenceEnabled(bool enabled) {
     if (g_silenceEnabled == enabled) return;
     g_silenceEnabled = enabled;
-    HookLog(enabled ? "ABSOLUTE SILENCE ACTIVE (Game inputs blocked)" : "SILENCE DEACTIVATED");
 }
 
 bool ThrottleHook::IsSilenceEnabled() {

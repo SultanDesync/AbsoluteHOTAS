@@ -223,7 +223,7 @@ Internal engine control. Most users should not modify these.
 |-----|------|---------|-------------|
 | `iPollRateHz` | int | `120` | DirectInput polling frequency in Hz |
 | `iThrottleBurstMs` | int | `250` | Duration of throttle authority burst after movement (ms) |
-| `bLogThrottle` | bool | `false` | Enable verbose diagnostic logging. Logs rotate at 1 MB. |
+| `bEnableLog` | bool | `false` | Write `AbsoluteHOTAS.log` (device enumeration, hook installation with addresses, errors, crashes). When off, nothing is written at all — not even crashes. Logs rotate at 1 MB. |
 | `bHoldForBoost` | bool | `true` | Pause throttle injection while boost is held; cancel on release |
 | `bRollEnabled` | bool | `true` | Enable roll axis injection |
 

@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "SettingBeacon.h"
 #include "RuntimePaths.h"
 #include <windows.h>
@@ -14,7 +16,7 @@
 static bool s_beaconActive = false;
 
 static void BeaconLog(const std::string& msg) {
-    RuntimePaths::AppendLogAlways("[SettingBeacon]", msg);
+    RuntimePaths::Log("[SettingBeacon]", msg);
 }
 
 // SEH-isolated write helper (MSVC C2712 workaround)
@@ -111,10 +113,6 @@ bool SettingBeacon::PlantBeacon() {
         BeaconLog("ERROR: Could not locate .data or .rdata sections.");
         return false;
     }
-
-    BeaconLog(std::format("Module base: 0x{:X}", moduleBase));
-    BeaconLog(std::format(".data: 0x{:X} ({} bytes)", dataStart, dataSize));
-    BeaconLog(std::format(".rdata: 0x{:X} ({} bytes)", rdataStart, rdataSize));
 
     // ---- Plant the beacon: fThrottleAtEngineStart ----
     bool beaconOk = false;

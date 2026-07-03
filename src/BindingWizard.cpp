@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "BindingWizard.h"
 #include "WizardDefs.h"
 #include "WizardCapture.h"
@@ -13,7 +15,7 @@
 #include <algorithm>
 
 static void WizLog(const std::string& msg) {
-    RuntimePaths::AppendLog("[BindingWizard]", msg);
+    RuntimePaths::Log("[BindingWizard]", msg);
 }
 
 // --- Capture commit callback ---

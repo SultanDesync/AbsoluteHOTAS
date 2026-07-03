@@ -1,21 +1,17 @@
+#include "PCH.h"
+
 #include "ThrottleHook.h"
 #include "ThrottleController.h"
 #include "RuntimePaths.h"
 #include "SettingBeacon.h"
 #include "UIHook.h"
 #include "BindingWizard.h"
-#include "Plugin.h"
 #include "SFSEInterface.h"
 #include <windows.h>
 #include <format>
 
-// Logging helper (also used by Prober/Hook modules)
-static void InitializeLog() {
-    RuntimePaths::AppendLog("[AbsoluteHOTAS]", "Started Log Session");
-}
-
 static void MainLog(const std::string& msg) {
-    RuntimePaths::AppendLog("[Main]", msg);
+    RuntimePaths::Log("[Main]", msg);
 }
 
 static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
@@ -42,18 +38,18 @@ static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
         GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), modulePath, static_cast<DWORD>(std::size(modulePath)));
     }
 
-    RuntimePaths::AppendLogAlways("[Crash]",
+    RuntimePaths::Log("[Crash]",
         std::format("Exception code=0x{:08X} address=0x{:016X}",
             static_cast<std::uint32_t>(record->ExceptionCode),
             reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)));
     if (queryOk) {
-        RuntimePaths::AppendLogAlways("[Crash]",
+        RuntimePaths::Log("[Crash]",
             std::format("Module base=0x{:016X} rva=0x{:X} path={}",
                 reinterpret_cast<std::uintptr_t>(mbi.AllocationBase),
                 reinterpret_cast<std::uintptr_t>(record->ExceptionAddress) - reinterpret_cast<std::uintptr_t>(mbi.AllocationBase),
                 modulePath[0] ? modulePath : "<unknown>"));
     }
-    RuntimePaths::AppendLogAlways("[Crash]",
+    RuntimePaths::Log("[Crash]",
         std::format("RIP=0x{:016X} RSP=0x{:016X} RCX=0x{:016X} RDX=0x{:016X} R8=0x{:016X} R9=0x{:016X}",
             static_cast<std::uintptr_t>(context->Rip),
             static_cast<std::uintptr_t>(context->Rsp),
@@ -62,7 +58,7 @@ static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
             static_cast<std::uintptr_t>(context->R8),
             static_cast<std::uintptr_t>(context->R9)));
     if (record->NumberParameters > 1) {
-        RuntimePaths::AppendLogAlways("[Crash]",
+        RuntimePaths::Log("[Crash]",
             std::format("Exception info[0]=0x{:016X} info[1]=0x{:016X}",
                 static_cast<std::uintptr_t>(record->ExceptionInformation[0]),
                 static_cast<std::uintptr_t>(record->ExceptionInformation[1])));
@@ -81,16 +77,12 @@ static void InstallCrashLogger() {
 // SFSE plugin entry point
 SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
 {
-    // Read bLogThrottle from INI once and cache the result globally.
-    RuntimePaths::EnableFileLogging();
-
-    InitializeLog();
-    InstallCrashLogger();
-
-    // Startup banner always writes so the user can confirm the plugin loaded.
-    RuntimePaths::AppendLogAlways("[Main]", "======================================================");
-    RuntimePaths::AppendLogAlways("[Main]", std::format("AbsoluteHOTAS v{} - Direct HID + In-Game UI", Plugin::Version.string()));
-    RuntimePaths::AppendLogAlways("[Main]", "======================================================");
+    // Read bEnableLog from the INI once and cache it. With logging off the plugin
+    // writes nothing, so there is no crash handler to install either.
+    RuntimePaths::InitLogging();
+    if (RuntimePaths::IsLoggingEnabled()) {
+        InstallCrashLogger();
+    }
 
     // Plant the discovery beacon and zero game deadzones unless Signal Hunter fallback is enabled
     bool fallbackMode = GetPrivateProfileIntA(
@@ -98,11 +90,11 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
         RuntimePaths::IniPath().string().c_str()) != 0;
     if (!fallbackMode) {
         if (!SettingBeacon::PlantBeacon()) {
-            RuntimePaths::AppendLogAlways("[Main]",
+            RuntimePaths::Log("[Main]",
                 "Beacon failed. Signal Hunter will rely on StarfieldCustom.ini fallback.");
         }
     } else {
-        RuntimePaths::AppendLogAlways("[Main]",
+        RuntimePaths::Log("[Main]",
             "Signal Hunter fallback enabled. Using StarfieldCustom.ini discovery.");
     }
 
@@ -110,7 +102,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
     bool hookOk = ThrottleHook::Install();
     if (!hookOk) {
         MainLog("WARNING: Hook installation failed. Throttle injection disabled.");
-        MainLog("The game may have updated. Check StarfieldThrottleLog.txt for details.");
+        MainLog("The game may have updated; the .text signature scan found no match.");
     }
 
     if (hookOk) {

@@ -9,7 +9,7 @@ static std::vector<LPDIRECTINPUTDEVICE8> g_openDevices;
 static int g_enumCounter = 0;
 
 static void DevLog(const std::string& msg) {
-    RuntimePaths::AppendLog("[DeviceManager]", msg);
+    RuntimePaths::Log("[DeviceManager]", msg);
 }
 
 

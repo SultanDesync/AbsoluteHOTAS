@@ -16,7 +16,7 @@
 // ============================================================================
 
 static void ShipLog(const char* msg) {
-    RuntimePaths::AppendLogAlways("[ShipOutput]", msg);
+    RuntimePaths::Log("[ShipOutput]", msg);
 }
 
 static bool IsButtonPressedImpl(const BindingRef& ref) {
@@ -195,16 +195,6 @@ static ControlMap::ControlMapFile LoadControlMapOverrides() {
         ShipLog("ControlMap sync: no readable ControlMap_Custom.txt; using vanilla defaults.");
         return file;
     }
-    const std::vector<ControlMap::Record> records = file.DeviceRecords();
-    ShipLog(("ControlMap sync: loaded " + std::to_string(records.size()) +
-             " keyboard/mouse override record(s) across all sections.").c_str());
-    for (const auto& r : records) {
-        char buf[160];
-        std::snprintf(buf, sizeof(buf), "ControlMap record: %s/%s token=0x%04X flag=0x%02X",
-                      r.context.c_str(), r.action.c_str(),
-                      static_cast<unsigned>(r.token), static_cast<unsigned>(r.flag));
-        RuntimePaths::AppendLog("[ShipOutput]", buf);  // per-record dump only when bLogThrottle is on
-    }
     return file;
 }
 
@@ -255,17 +245,7 @@ static std::string DbgOwnerHex(uint32_t id) {
     char b[16]; sprintf_s(b, "0x%X", id); return b;
 }
 
-static void EmitShipOutput(const ShipOutput& output, bool keyUp, const std::string& reason = {}) {
-    // DEBUG instrumentation: every key/mouse emit — hold AND pulse — funnels through
-    // here, so this is the one chokepoint that catches a spurious Shift (0x2A) up no
-    // matter which path sent it. Tagged with owner/source via `reason`.
-    if (output.kind != ShipOutputKind::None) {
-        char dbg[160];
-        sprintf_s(dbg, "EMIT %s code=0x%02X %s [%s]",
-            output.kind == ShipOutputKind::Keyboard ? "KB" : "MOUSE",
-            static_cast<unsigned>(output.code), keyUp ? "UP" : "DOWN", reason.c_str());
-        ShipLog(dbg);
-    }
+static void EmitShipOutput(const ShipOutput& output, bool keyUp, const std::string& /*reason*/ = {}) {
     switch (output.kind) {
         case ShipOutputKind::Keyboard: SendKeyboardScanCode(output.code, output.extended, keyUp); break;
         case ShipOutputKind::Mouse:    SendMouseButton(output.code, keyUp);                       break;
@@ -416,17 +396,6 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
         const char* outputValue = ini.GetValue("ShipButtonOutputs", def.outputIniKey, nullptr);
         const ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
 
-        // Log the actual outcome, not just the control-map layer: only claim a
-        // realign when it survives the explicit-override precedence and takes effect.
-        if (syncFromControlMap && !SameOutput(cmDefault, vanilla)) {
-            if (SameOutput(finalOut, cmDefault))
-                ShipLog((std::string("ControlMap sync: ") + def.actionId +
-                         " realigned to your in-game Starfield binding.").c_str());
-            else
-                ShipLog((std::string("ControlMap sync: ") + def.actionId +
-                         " in-game rebind detected but overridden by an explicit [ShipButtonOutputs] value.").c_str());
-        }
-
         BindingRef bRef = ParseBindingRef(ini.GetValue("ShipButtons", def.sourceIniKey, ""), -1);
 
         ShipButtonBinding binding{
@@ -452,7 +421,6 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
     CSimpleIniA::TNamesDepend keys;
     if (!ini.GetAllKeys("ButtonExpansion", keys)) return;
 
-    int loaded = 0;
     for (const auto& key : keys) {
         if (!key.pItem) continue;
         const char* outputValue = ini.GetValue("ButtonExpansion", key.pItem, nullptr);
@@ -500,11 +468,7 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
             ShipBindingMode::Hold,
             false
         });
-        loaded++;
     }
-
-    if (loaded > 0)
-        ShipLog(("Loaded " + std::to_string(loaded) + " [ButtonExpansion] binding(s).").c_str());
 }
 
 void UpdateShipButtonBindings() {

@@ -12,7 +12,7 @@
 // Logging
 // ============================================================================
 static void SHLog(const char* msg) {
-    RuntimePaths::AppendLogAlways("[SignalHunter]", msg);
+    RuntimePaths::Log("[SignalHunter]", msg);
 }
 
 // ============================================================================
@@ -51,11 +51,6 @@ static float SafeReadThrottle(uintptr_t basePtr) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
 }
 
-static float SafeReadFloat(uintptr_t addr) {
-    __try { return *(volatile float*)(addr); }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return -999.0f; }
-}
-
 // Read ship velocity from flight control cluster (+0x70).
 static float ReadClusterVelocity(uintptr_t clusterBase) {
     if (!clusterBase) return -1.0f;
@@ -78,7 +73,6 @@ static bool      s_discoveryArmed       = false;
 static int       s_activeCandidateIndex = -1;
 static uintptr_t s_activeThrottlePtr   = 0;
 static int       s_plausibilityFailCount = 0;
-static bool      s_lastLogLockedState   = false;
 static bool      s_reacquireWatchdogEnabled = false;
 static float     s_lastInjectedThrottle = -999.0f;
 
@@ -143,8 +137,7 @@ void SuspendInjection() {
     ThrottleHook::SetSilence6CEnabled(false);
 }
 
-void ArmForReacquire(const char* reason) {
-    if (reason) SHLog((std::string("Re-arming discovery: ") + reason).c_str());
+void ArmForReacquire(const char* /*reason*/) {
     s_discoveryArmed        = true;
     s_discoveryLocked       = false;
     s_activeCandidateIndex  = -1;
@@ -161,14 +154,14 @@ void ArmForReacquire(const char* reason) {
 
 
 
-void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
+void Tick(int candCount, float /*throttle*/, float /*dt*/, uint64_t iter) {
     const auto& cfg = ThrottleController::GetConfig();
 
     // SIGNAL HUNTER: Magic Number Pulse detection
     if (s_discoveryArmed && !s_discoveryLocked && candCount > 0) {
+        // Periodic candidate-buffer flush for noise reduction.
         if (iter % (cfg.pollRateHz * 5) == 0) {
             ThrottleHook::ClearCandidates();
-            SHLog("Periodic buffer flush (Noise reduction).");
         }
 
         for (int i = 0; i < candCount && i < kMaxCandidates; i++) {
@@ -186,11 +179,10 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
 
             // Magic-number lock: game signals with 0.0314f
             if (std::abs(memVal - 0.0314f) < 0.0001f) {
-                SHLog("**************************************************");
-                SHLog("MAGIC NUMBER DETECTED! (0.0314f)");
-                char buf[128]; sprintf_s(buf, "Winner: Candidate #%d at 0x%llX", i, (unsigned long long)cand);
+                char buf[128];
+                sprintf_s(buf, "Control cluster located via magic 0.0314 (candidate #%d) at 0x%llX",
+                    i, (unsigned long long)cand);
                 SHLog(buf);
-                SHLog("**************************************************");
                 s_activeCandidateIndex     = i;
                 s_activeThrottlePtr        = cand;
                 s_discoveryLocked          = true;
@@ -204,11 +196,10 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
 
             // Manual correlation fallback: stable signal in plausible float range
             if (s_candidateAges[i] >= 15 && memVal >= -2.1f && memVal <= 2.1f) {
-                SHLog("**************************************************");
-                SHLog("STABLE SIGNAL DETECTED! Locking (Manual Fallback).");
-                char buf[128]; sprintf_s(buf, "Winner: Candidate #%d at 0x%llX", i, (unsigned long long)cand);
+                char buf[128];
+                sprintf_s(buf, "Control cluster located via stable-signal fallback (candidate #%d) at 0x%llX",
+                    i, (unsigned long long)cand);
                 SHLog(buf);
-                SHLog("**************************************************");
                 s_activeCandidateIndex     = i;
                 s_activeThrottlePtr        = cand;
                 s_discoveryLocked          = true;
@@ -230,31 +221,10 @@ void Tick(int candCount, float throttle, float /*dt*/, uint64_t iter) {
         else if (!s_discoveryLocked && !s_discoveryArmed)
             ArmForReacquire("inactive state after prior lock");
     }
-
-    // Dampened state log
-    if (s_discoveryLocked != s_lastLogLockedState) {
-        s_lastLogLockedState = s_discoveryLocked;
-        if (s_discoveryLocked) SHLog("State: PASSIVE (Locked)");
-        else                   SHLog("State: DISCOVERY (Active)");
-    }
-
-    if (cfg.logThrottle && s_discoveryArmed && (iter % cfg.pollRateHz == 0)) {
-        char buf[256];
-        sprintf_s(buf, "[iter=%llu] FINDING SIGNAL: norm=%.3f candidates=%d",
-            iter, throttle, candCount);
-        SHLog(buf);
-    }
-    if (cfg.logThrottle && s_discoveryLocked && s_activeThrottlePtr
-        && (iter % (cfg.pollRateHz * 12)) == 0) {
-        char buf[256];
-        sprintf_s(buf, "[iter=%llu] ACTIVE INJECTION: throttle=%.3f ptr=0x%llX",
-            iter, throttle, (unsigned long long)s_activeThrottlePtr);
-        SHLog(buf);
-    }
 }
 
 void Inject(float throttle, float pitch, float yaw, float roll,
-            float strafeX, float strafeY, float dt, uint64_t iter,
+            float strafeX, float strafeY, float dt, uint64_t /*iter*/,
             bool reverseHeld, bool suppressPitchYaw,
             bool strafeLatActive, bool strafeVertActive)
 {
@@ -344,23 +314,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
                         ThrottleHook::SetReverseOverride(false);
                         SafeInjectThrottle(s_activeThrottlePtr, 0.0f, true);
                     }
-
-                    if (cfg.logThrottle) {
-                        static uint64_t s_revLogIter = 0;
-                        if (iter > s_revLogIter + 15) {
-                            s_revLogIter = iter;
-                            float vel2 = ReadClusterVelocity(s_activeThrottlePtr);
-                            char buf[256];
-                            snprintf(buf, sizeof(buf),
-                                "[Reverse/Accum] vel=%.1f gate=%s src=%s +68=%+.3f +6C=%+.3f +70=%.1f",
-                                vel2, gateOpen ? "OPEN" : "CLOSED",
-                                ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
-                                SafeReadFloat(s_activeThrottlePtr + 0x68),
-                                SafeReadFloat(s_activeThrottlePtr + 0x6C),
-                                SafeReadFloat(s_activeThrottlePtr + 0x70));
-                            RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
-                        }
-                    }
                 }
             } else {
                 // Stick at neutral
@@ -407,31 +360,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             s_accumBurstFrames = 0;
         }
 
-        // Diagnostics
-        if (cfg.logThrottle) {
-            static bool s_velStartupLogged = false;
-            static uint64_t s_velLogIter   = 0;
-            float vel = ReadClusterVelocity(s_activeThrottlePtr);
-            if (!s_velStartupLogged) {
-                s_velStartupLogged = true;
-                char buf[256];
-                snprintf(buf, sizeof(buf),
-                    "[DualStick] Velocity monitor online: cluster+0x70 @ 0x%llX rawVal=%.4f",
-                    (unsigned long long)(s_activeThrottlePtr + 0x70), vel);
-                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
-            }
-            if (iter > s_velLogIter + (uint64_t)(cfg.pollRateHz * 2)) {
-                s_velLogIter = iter;
-                char buf[256];
-                snprintf(buf, sizeof(buf),
-                    "[DualStick] vel=%.2f accum=%+.3f stick=%+.3f gate=%.1f %s",
-                    vel, s_accumulatorThrottle, throttle,
-                    cfg.fReverseGateVelocity,
-                    (vel >= 0.0f && vel <= cfg.fReverseGateVelocity) ? "GATE_OPEN" : "GATE_CLOSED");
-                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
-            }
-        }
-
     } else if (reverseHeld) {
         // Direct-memory reverse — release silence so the game can process reverse
         ThrottleHook::SetSilenceEnabled(false);
@@ -447,29 +375,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             ThrottleHook::SetReverseOverride(false);
             SafeInjectThrottle(s_activeThrottlePtr, 0.0f);
             s_lastInjectedThrottle = 0.0f;
-        }
-
-        if (cfg.logThrottle) {
-            static uint64_t s_revLogIter2 = 0;
-            static bool s_prevGateOpen = false;
-            bool gateTransition = (gateOpen != s_prevGateOpen);
-            s_prevGateOpen = gateOpen;
-            if (gateTransition || iter > s_revLogIter2 + 15) {
-                s_revLogIter2 = iter;
-                uintptr_t src = ThrottleHook::GetSourceBasePtr();
-                char buf[384];
-                snprintf(buf, sizeof(buf),
-                    "[Reverse] %svel=%.1f gate=%s src=%s src3C=%+.3f +5C=%+.3f +68=%+.3f +6C=%+.3f +70=%.1f",
-                    gateTransition ? "TRANSITION " : "",
-                    vel, gateOpen ? "OPEN" : "CLOSED",
-                    ThrottleHook::IsSourcePtrValid() ? "OK" : "STALE",
-                    src ? SafeReadFloat(src + 0x3C) : -999.0f,
-                    SafeReadFloat(s_activeThrottlePtr + 0x5C),
-                    SafeReadFloat(s_activeThrottlePtr + 0x68),
-                    SafeReadFloat(s_activeThrottlePtr + 0x6C),
-                    SafeReadFloat(s_activeThrottlePtr + 0x70));
-                RuntimePaths::AppendLogAlways("[SignalHunter]", buf);
-            }
         }
 
         s_throttleBurstFrames  = 0;
@@ -517,21 +422,6 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             if (s_throttleBurstFrames > 0) {
                 SafeInjectThrottle(s_activeThrottlePtr, s_throttleBurstValue, true);
                 s_throttleBurstFrames--;
-            }
-        }
-
-        // 6DOF telemetry (merged from both branches)
-        if (cfg.logThrottle) {
-            static float lP = 0, lY = 0, lR = 0;
-            static uint64_t lastLogIter = 0;
-            if (iter > lastLogIter + 30) {
-                if (std::abs(pitch - lP) > 0.05f || std::abs(yaw - lY) > 0.05f || std::abs(roll - lR) > 0.05f) {
-                    char tel[256];
-                    sprintf_s(tel, "[Telemetry] P%+.3f Y%+.3f R%+.3f | T%+.3f",
-                        pitch, yaw, roll, throttle);
-                    RuntimePaths::AppendLogAlways("[SignalHunter]", tel);
-                    lP = pitch; lY = yaw; lR = roll; lastLogIter = iter;
-                }
             }
         }
     }

@@ -40,11 +40,7 @@ bool IsPiloting() {
 }
 
 void SetPiloting(bool piloting) {
-    const bool prev = s_piloting.exchange(piloting, std::memory_order_relaxed);
-    if (prev != piloting) {
-        RuntimePaths::AppendLogAlways("[PilotState]",
-            piloting ? "piloting = TRUE" : "piloting = FALSE");
-    }
+    s_piloting.store(piloting, std::memory_order_relaxed);
 }
 
 void Toggle() {
@@ -59,7 +55,7 @@ bool Update(bool autoSource, float /*dt*/, int /*debounceMs*/) {
         static bool s_warned = false;
         if (!s_warned) {
             s_warned = true;
-            RuntimePaths::AppendLogAlways("[PilotState]",
+            RuntimePaths::Log("[PilotState]",
                 "PilotSignal=Auto, but no automatic pilot signal is available "
                 "(all candidates invalidated) — using the manual value.");
         }

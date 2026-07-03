@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "RuntimePaths.h"
 
 #include <windows.h>
@@ -38,17 +40,22 @@ namespace RuntimePaths {
         return PluginDirectory() / L"AbsoluteHOTAS.log";
     }
 
-    static bool g_fileLoggingEnabled = false;
+    static bool g_loggingEnabled = false;
 
-    bool IsFileLoggingEnabled()
+    bool IsLoggingEnabled()
     {
-        return g_fileLoggingEnabled;
+        return g_loggingEnabled;
     }
 
-    void EnableFileLogging()
+    void InitLogging()
     {
+        // Deliberately uses the Win32 GetPrivateProfile* API rather than SimpleIni:
+        // this runs at plugin-load bootstrap, before the controller/config subsystem
+        // (which owns the CSimpleIniA instance) exists. Reading one bool here with the
+        // OS INI reader keeps logging available from the very first line of startup.
+        // Do not "unify" this onto SimpleIni — there is no config object yet.
         wchar_t value[32]{};
-        GetPrivateProfileStringW(L"Injection", L"bLogThrottle", L"0", value, static_cast<DWORD>(std::size(value)), IniPath().c_str());
+        GetPrivateProfileStringW(L"Injection", L"bEnableLog", L"0", value, static_cast<DWORD>(std::size(value)), IniPath().c_str());
 
         std::wstring_view text{ value };
         while (!text.empty() && std::iswspace(text.front())) {
@@ -64,21 +71,41 @@ namespace RuntimePaths {
             normalized.push_back(static_cast<wchar_t>(std::towlower(ch)));
         }
 
-        g_fileLoggingEnabled = (normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on");
+        g_loggingEnabled = (normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on");
     }
 
-    void AppendLogAlways(const char* a_prefix, const std::string& a_message)
+    // Rotate a stale log once per session, before the first line is appended, so a
+    // long-lived install does not grow the file without bound.
+    static void RotateIfLarge()
     {
-        std::ofstream log(LogPath(), std::ios::app);
-        if (log.is_open()) {
-            log << a_prefix << ' ' << a_message << '\n';
-            log.flush();
+        static bool checked = false;
+        if (checked) return;
+        checked = true;
+
+        const auto logPath    = LogPath();
+        const auto oldLogPath = PluginDirectory() / L"AbsoluteHOTAS.log.old";
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (GetFileAttributesExW(logPath.c_str(), GetFileExInfoStandard, &data)) {
+            ULARGE_INTEGER size{};
+            size.HighPart = data.nFileSizeHigh;
+            size.LowPart  = data.nFileSizeLow;
+            if (size.QuadPart > 1024ull * 1024ull) {
+                DeleteFileW(oldLogPath.c_str());
+                MoveFileExW(logPath.c_str(), oldLogPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+            }
         }
     }
 
-    void AppendLog(const char* a_prefix, const std::string& a_message)
+    void Log(const char* a_tag, const std::string& a_message)
     {
-        if (!g_fileLoggingEnabled) return;
-        AppendLogAlways(a_prefix, a_message);
+        if (!g_loggingEnabled) return;
+
+        RotateIfLarge();
+
+        std::ofstream log(LogPath(), std::ios::app);
+        if (log.is_open()) {
+            log << a_tag << ' ' << a_message << '\n';
+            log.flush();
+        }
     }
 }

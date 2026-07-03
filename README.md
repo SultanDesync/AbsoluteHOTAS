@@ -66,7 +66,7 @@ fThrottleAtEngineStart = 0.0314
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
 * **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
 * **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
-* **Silent logging** — Diagnostic logging is disabled by default to minimize performance impact, and can be toggled on via `bLogThrottle = true` in the INI.
+* **Silent by default** — No log file is written at all unless you opt in with `bEnableLog = true` in the INI. When enabled it logs device enumeration, hook installation, and errors/crashes — no runtime spam.
 
 ## Requirements
 
@@ -323,15 +323,15 @@ fAlignmentDecayRate = 8.0      ; Decay speed (higher = faster centering)
 [Injection]
 iPollRateHz = 120             ; DirectInput polling rate
 iThrottleBurstMs = 250        ; Throttle authority burst duration
-bLogThrottle = false          ; Enable verbose logging
+bEnableLog = false            ; Write a diagnostic log (off by default)
 ```
 
 
 ## Logging
 
-Logging is **off by default**. Only the startup banner (4 lines) is written to confirm the plugin loaded.
+Logging is **off by default** and is fully opt-in: with `bEnableLog = false` the plugin writes **nothing at all** — no file is ever created, not even on a crash.
 
-Set `bLogThrottle = true` to enable full diagnostic logging. Logs rotate at 1 MB.
+Set `bEnableLog = true` to write `AbsoluteHOTAS.log`. It captures the things worth seeing: device enumeration, trampoline/control-cluster hook installation (with resolved addresses), and any errors or crashes. There is no per-frame or heartbeat spam. Logs rotate at 1 MB.
 
 ## Mod Manager Compatibility
 
@@ -350,10 +350,10 @@ If the overlay crashes or refuses to open on `Ctrl+Alt+B`, this is most likely c
 
 ### Logging & Diagnostic Data
 If you encounter hardware axis mapping or detection issues:
-1. Set `bLogThrottle = true` in `AbsoluteHOTAS.ini` under `[Injection]`.
+1. Set `bEnableLog = true` in `AbsoluteHOTAS.ini` under `[Injection]`.
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
 ## Notes
 
-Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bLogThrottle = true`).
+Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bEnableLog = true`).

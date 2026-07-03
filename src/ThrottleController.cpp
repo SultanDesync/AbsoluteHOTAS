@@ -24,13 +24,12 @@ std::atomic<bool>  ThrottleController::s_configReloadRequested{ false };
 std::atomic<float> ThrottleController::s_currentThrottle{ 0.0f };
 std::thread        ThrottleController::s_thread;
 
-static bool g_verboseLog = false;
 static bool s_turnAssistRuntimeActive = false;
 
 // ---- Logging ----
+// All controller lines are gated by bEnableLog inside RuntimePaths::Log.
 static void CtrlLog(const char* msg) {
-    if (!g_verboseLog) return;
-    RuntimePaths::AppendLogAlways("[Controller]", msg);
+    RuntimePaths::Log("[Controller]", msg);
 }
 static void CtrlLog(const std::string& msg) { CtrlLog(msg.c_str()); }
 
@@ -165,8 +164,6 @@ void ThrottleController::LoadConfig() {
     s_config.pollRateHz        = (int)ini.GetLongValue("Injection", "iPollRateHz",     120);
     s_config.throttleBurstMs   = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled       = ini.GetBoolValue("Injection", "bRollEnabled",     true);
-    s_config.logThrottle       = ini.GetBoolValue("Injection", "bLogThrottle",     false);
-    g_verboseLog               = s_config.logThrottle;
     s_config.bHoldForBoost     = ini.GetBoolValue("Injection", "bHoldForBoost",    true);
 
     // [Gate] pilot-state gate (framework). Default Off = legacy behavior.
@@ -222,20 +219,6 @@ void ThrottleController::LoadConfig() {
     s_config.iAlignmentIdleMs  = std::clamp((int)ini.GetLongValue("Aim", "iAlignmentIdleMs",      50),  0, 2000);
     s_config.fAlignmentDecayRate = std::clamp((float)ini.GetDoubleValue("Aim", "fAlignmentDecayRate", 8.0), 0.1f, 50.0f);
 
-    {
-        char msg[512];
-        snprintf(msg, sizeof(msg),
-            "[Aim] bSourceObjectAim=%s fAimSensitivity=%.2f aimYaw=%d aimPitch=%d mirror=%s HOSAM=%s align=%s",
-            s_config.bSourceObjectAim ? "true" : "false",
-            s_config.fAimSensitivity,
-            s_config.aimYawAxis.value,
-            s_config.aimPitchAxis.value,
-            s_config.bMirrorFlightToAim ? "true" : "false",
-            s_config.bHOSAMMode ? "true" : "false",
-            s_config.bAlignmentAssist ? "true" : "false");
-        RuntimePaths::AppendLogAlways("[Controller]", msg);
-    }
-
     // Per-axis calibration overrides from [Calibration]
     s_config.axisCalibration.clear();
     CSimpleIniA::TNamesDepend calibKeys;
@@ -250,9 +233,6 @@ void ThrottleController::LoadConfig() {
             if (sscanf_s(val, "%ld,%ld", &cmin, &cmax) == 2 && cmin < cmax) {
                 int calibKey = (devIdx << 8) | usage;
                 s_config.axisCalibration[calibKey] = { cmin, cmax };
-                char logBuf[128];
-                sprintf_s(logBuf, "Calibration: dev=%d axis=0x%02X range=[%ld, %ld]", devIdx, usage, cmin, cmax);
-                CtrlLog(logBuf);
             }
         }
     }
@@ -264,15 +244,6 @@ void ThrottleController::LoadConfig() {
     s_config.bAccumulatorTurnAssist = ini.GetBoolValue("DualStick", "bAccumulatorTurnAssist", false);
     s_config.iTurnAssistMode      = std::clamp((int)ini.GetLongValue("DualStick", "iTurnAssistMode", 0), 0, 2);
     s_config.turnAssistButton     = ParseBindingRef(ini.GetValue("DualStick", "iTurnAssistButton", ""), -1);
-    if (s_config.bAccumulatorThrottle) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "[DualStick] Accumulator ON: rate=%.2f decay=%.2f reverseGate=%.1f m/s turnAssist=%s mode=%d",
-            s_config.fAccumulatorRate, s_config.fAccumulatorDecay, s_config.fReverseGateVelocity,
-            s_config.bAccumulatorTurnAssist ? "true" : "false", s_config.iTurnAssistMode);
-        RuntimePaths::AppendLogAlways("[Controller]", buf);
-    }
-
-    CtrlLog("Config Loaded - AbsoluteHOTAS 6DOF Dashboard Initialized.");
 }
 
 // ---- Control Loop ----
@@ -297,7 +268,7 @@ void ThrottleController::ControlLoop() {
                     char buf[256];
                     sprintf_s(buf, "Warning: Device index #%d out of range (%d devices)",
                         ref.deviceIndex, DeviceManager::GetDeviceCount());
-                    RuntimePaths::AppendLogAlways("[Controller]", buf);
+                    RuntimePaths::Log("[Controller]", buf);
                 }
             } else if (ref.HasDevice()) {
                 resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
@@ -311,7 +282,7 @@ void ThrottleController::ControlLoop() {
                 char buf[256];
                 sprintf_s(buf, "Warning: Could not resolve device: %s",
                     ref.HasDevice() ? ref.deviceName.c_str() : "default fallback");
-                RuntimePaths::AppendLogAlways("[Controller]", buf);
+                RuntimePaths::Log("[Controller]", buf);
             }
         };
 
@@ -694,7 +665,7 @@ void ThrottleController::ControlLoop() {
             bool curToggleAimMode = IsButtonPressed(s_config.toggleAimModeButton);
             if (curToggleAimMode && !s_toggleAimModePrev) {
                 s_aimModeOverride = !s_aimModeOverride;
-                RuntimePaths::AppendLogAlways("[Controller]",
+                RuntimePaths::Log("[Controller]",
                     s_aimModeOverride ? "[Aim] Toggled to: Aim-Driven Steering"
                                       : "[Aim] Toggled to: Independent Aim & Steer");
             }

@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "WizardCapture.h"
 #include "WizardDefs.h"
 #include "DeviceManager.h"
@@ -9,7 +11,7 @@
 #include <cstdio>
 
 static void WizLog(const std::string& msg) {
-    RuntimePaths::AppendLog("[BindingWizard]", msg);
+    RuntimePaths::Log("[BindingWizard]", msg);
 }
 
 namespace WizardCapture {

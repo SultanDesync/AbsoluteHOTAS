@@ -1,3 +1,5 @@
+#include "PCH.h"
+
 #include "UIHook.h"
 #include "RuntimePaths.h"
 
@@ -23,8 +25,8 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static void UILog(const std::string& msg) {
-    // Always log UIHook messages — these are diagnostics, not per-frame spam
-    RuntimePaths::AppendLogAlways("[UIHook]", msg);
+    // D3D12 hook/overlay setup and errors — gated by bEnableLog.
+    RuntimePaths::Log("[UIHook]", msg);
 }
 
 // ============================================================================
@@ -315,7 +317,7 @@ static bool TryImGuiBackendShutdown() {
 static void SafeShutdownStaleImGui() {
     if (ImGui::GetCurrentContext()) {
         if (!TryImGuiBackendShutdown()) {
-            RuntimePaths::AppendLogAlways("[UIHook]", "Exception in ImGui_ImplDX12_Shutdown. Forcing context destruction.");
+            RuntimePaths::Log("[UIHook]", "Exception in ImGui_ImplDX12_Shutdown. Forcing context destruction.");
         }
         ImGui::DestroyContext();
     }
@@ -498,8 +500,7 @@ static void HandleRenderException() {
     // We accept a minor GPU resource leak. InitImGui will recreate everything
     // from scratch on the next Ctrl+Alt+B press.
 
-    // Use AppendLogAlways so this is visible even with logging disabled
-    RuntimePaths::AppendLogAlways("[UIHook]",
+    RuntimePaths::Log("[UIHook]",
         "D3D12 render exception caught — overlay disabled. Press Ctrl+Alt+B to reinit.");
 
     // Restore Win32 cursor state if the overlay was open when the exception fired.
@@ -521,7 +522,7 @@ static void HandleRenderException() {
     // Attempt safe COM release in a separate block. Releasing references
     // is valid even if device is lost, but proxy objects might crash.
     if (!TryReleaseResources()) {
-        RuntimePaths::AppendLogAlways("[UIHook]", "Exception during resource release, proxy object is dead. Leaking remaining resources.");
+        RuntimePaths::Log("[UIHook]", "Exception during resource release, proxy object is dead. Leaking remaining resources.");
     }
 
     g_backBuffers = nullptr;
@@ -557,10 +558,9 @@ static bool RebindRenderTargetsIfNeeded(IDXGISwapChain* pSwapChain) {
     WaitForGpu();
     CleanupRenderTargets();
     if (!CreateRenderTargets(pSwapChain)) {
-        UILog("Failed to rebind render targets to presented swapchain.");
+        UILog("ERROR: Failed to rebind render targets to presented swapchain.");
         return false;
     }
-    UILog("Rebound overlay render targets to the presented swapchain.");
     return true;
 }
 
@@ -639,17 +639,11 @@ static void HandlePresent(IDXGISwapChain* pSwapChain) {
                 curDesc.BufferDesc.Format != g_backBufferFormat ||
                 curDesc.BufferDesc.Width != g_lastSwapWidth ||
                 curDesc.BufferDesc.Height != g_lastSwapHeight) {
-                UILog("Swap chain state changed (" +
-                    std::to_string(g_lastSwapWidth) + "x" + std::to_string(g_lastSwapHeight) +
-                    " -> " + std::to_string(curDesc.BufferDesc.Width) + "x" +
-                    std::to_string(curDesc.BufferDesc.Height) +
-                    ") — forcing overlay reinit.");
                 HandleRenderException();
             }
 
             // Detect HWND change → re-hook WndProc
             if (curDesc.OutputWindow && curDesc.OutputWindow != g_hWnd) {
-                UILog("HWND changed in Present — re-hooking WndProc.");
                 if (g_origWndProc && g_hWnd) {
                     SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
                 }
@@ -696,7 +690,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* pSwapChain, UIN
 // C++ objects with destructors in scope. Logging is delegated to the exception
 // handler to keep InvokeOrigResizeBuffers free of std::string temporaries.
 static void HandleResizeBuffersException() {
-    RuntimePaths::AppendLogAlways("[UIHook]",
+    RuntimePaths::Log("[UIHook]",
         "WARNING: ResizeBuffers threw — overlay disabled, game may continue.");
 }
 
@@ -716,9 +710,6 @@ static HRESULT InvokeOrigResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCo
 // ResizeBuffers Hook
 // ============================================================================
 static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
-    RuntimePaths::AppendLogAlways("[UIHook]",
-        "ResizeBuffers called: " + std::to_string(Width) + "x" + std::to_string(Height));
-
     // Force-close the overlay and clear the captured queue unconditionally.
     // Frame Generation reconfigures the presentation pipeline on enable/disable,
     // invalidating both our D3D12 resources and the command queue pointer.
@@ -750,9 +741,6 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
         if (g_fenceEvent) { CloseHandle(g_fenceEvent); g_fenceEvent = nullptr; }
         g_d3dDevice     = nullptr;
         g_numBackBuffers = 0;
-
-        RuntimePaths::AppendLogAlways("[UIHook]",
-            "Overlay state abandoned for resize — back buffers released, queue cleared.");
     }
 
     // Forward to the real ResizeBuffers. Back buffer refs are fully released so
@@ -766,7 +754,6 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
         DXGI_SWAP_CHAIN_DESC scDesc{};
         pSwapChain->GetDesc(&scDesc);
         if (scDesc.OutputWindow && scDesc.OutputWindow != g_hWnd) {
-            RuntimePaths::AppendLogAlways("[UIHook]", "HWND changed after ResizeBuffers — re-hooking WndProc.");
             if (g_origWndProc && g_hWnd) {
                 SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
             }
@@ -1049,8 +1036,6 @@ void UIHook::ToggleUI() {
             io.MouseDrawCursor = true;
             io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         }
-
-        UILog("UI overlay OPENED — cursor unclipped, input captured.");
     } else {
         // --- Closing the overlay ---
         // Hide the software cursor
@@ -1066,8 +1051,6 @@ void UIHook::ToggleUI() {
         if (g_hadClipRect) {
             ClipCursor(&g_savedClipRect);
         }
-
-        UILog("UI overlay CLOSED — cursor restored, input released.");
     }
 }
 

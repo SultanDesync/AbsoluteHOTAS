@@ -37,7 +37,7 @@ not source.
 
 ## Runtime Check
 
-With `bLogThrottle=true`, `Data\SFSE\Plugins\AbsoluteHOTAS.log` should
+With `bEnableLog=true`, `Data\SFSE\Plugins\AbsoluteHOTAS.log` should
 show:
 
 - `[Main] Plugin load complete.`

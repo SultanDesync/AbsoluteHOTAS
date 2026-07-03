@@ -115,18 +115,6 @@ void Update(const ThrottleController::Config& cfg,
         return;
     }
 
-    static bool s_aimDiagLogged = false;
-    if (!s_aimDiagLogged) {
-        s_aimDiagLogged = true;
-        char diagMsg[256];
-        snprintf(diagMsg, sizeof(diagMsg),
-            "First fire: srcPtrValid=%s srcPtr=0x%llX separateAxes=%s",
-            ThrottleHook::IsSourcePtrValid() ? "YES" : "NO",
-            (unsigned long long)ThrottleHook::GetSourceBasePtr(),
-            hasSeparateAimAxes ? "YES" : "NO");
-        RuntimePaths::AppendLogAlways("[AimController]", diagMsg);
-    }
-
     if (!ThrottleHook::IsSourcePtrValid()) {
         ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, true);
         return;
@@ -208,22 +196,6 @@ void Update(const ThrottleController::Config& cfg,
     aimPitch *= 200.0f;
 
     ThrottleHook::SetSourceObjectAim(aimYaw, aimPitch, true);
-
-    // Periodic diagnostics
-    if (cfg.logThrottle) {
-        static uint64_t s_aimLogCounter = 0;
-        if (++s_aimLogCounter % (cfg.pollRateHz * 2) == 1) {
-            uintptr_t src = ThrottleHook::GetSourceBasePtr();
-            char diagBuf[256];
-            snprintf(diagBuf, sizeof(diagBuf),
-                "mode=%s wrote Y=%.3f P=%.3f | readback +4C=%.3f +50=%.3f +54=%.3f +58=%.3f",
-                hasSeparateAimAxes ? "separate" : (cfg.bMirrorFlightToAim ? "mirror" : "center"),
-                aimYaw, aimPitch,
-                SafeReadFloat(src + 0x4C), SafeReadFloat(src + 0x50),
-                SafeReadFloat(src + 0x54), SafeReadFloat(src + 0x58));
-            RuntimePaths::AppendLogAlways("[AimController]", diagBuf);
-        }
-    }
 }
 
 } // namespace AimController
