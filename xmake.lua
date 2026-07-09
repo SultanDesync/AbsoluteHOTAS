@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("3.0.2")
+set_version("3.1.0")
 set_languages("c++23")
 set_warnings("all")
 
@@ -40,7 +40,7 @@ target("AbsoluteHOTAS")
 
     set_pcxxheader("include/PCH.h")
 
-    add_defines("PLUGIN_VERSION_MAJOR=3", "PLUGIN_VERSION_MINOR=0", "PLUGIN_VERSION_PATCH=2")
+    add_defines("PLUGIN_VERSION_MAJOR=3", "PLUGIN_VERSION_MINOR=1", "PLUGIN_VERSION_PATCH=0")
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).
     -- These were previously pulled in transitively by CommonLibSF.

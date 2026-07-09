@@ -1,6 +1,6 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "type": "Standalone SFSE Plugin",
   "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling. Features an in-game ImGui binding wizard, per-axis inversion and sensitivity, 22 configurable ship action button bindings, digital axis emulation, and live config reload — no vJoy or Joystick Gremlin required.",
   "technologies": [
@@ -30,7 +30,7 @@
     },
     "tests": {
       "path": "tests",
-      "purpose": "Standalone unit test for ControlMapReader (built via the opt-in control_map_reader_test xmake target) plus captured binary fixtures.",
+      "purpose": "Standalone unit tests, each built via an opt-in xmake target: control_map_reader_test (ControlMapReader, against captured binary fixtures) and config_migration_test (the pure monolith-to-split config transform).",
       "subdirectories": {
         "fixtures": "Real captured ControlMap binary files used by the test (control_map_default.bin, control_map_configurator.bin)."
       }
@@ -82,7 +82,11 @@
     },
     "src/WizardConfig.cpp": {
       "role": "Binding Wizard Config Serializer",
-      "purpose": "Serializes and saves custom controller configurations directly to AbsoluteHOTAS.ini from the ImGui wizard."
+      "purpose": "Serializes wizard state to the user-owned AbsoluteHOTAS_User.ini (never the mod-owned AbsoluteHOTAS.ini), and implements profile export/import to and from the Profiles/ directory."
+    },
+    "src/ConfigMigration.cpp": {
+      "role": "Config Split Migration",
+      "purpose": "One-time migration of the pre-3.1 monolithic AbsoluteHOTAS.ini into the split layout: backs up the old file, lifts user-owned sections into AbsoluteHOTAS_User.ini, relocates bHoldForBoost to [DualStick], and stamps iConfigVersion."
     },
     "config/AbsoluteHOTAS.ini": {
       "role": "User Configuration File",
@@ -98,7 +102,7 @@
     },
     "src/RuntimePaths.cpp": {
       "role": "Path Resolver & Logger Utility",
-      "purpose": "Resolves documents, SFSE plugins, and logs paths, handling thread-safe append operations to the plugin log file."
+      "purpose": "Resolves the plugin directory and every config path (mod-owned INI, user INI, macros INI, Profiles/ directory, log), and handles opt-in append operations to the plugin log file."
     }
   },
   "technical_details": {
