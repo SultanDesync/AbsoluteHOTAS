@@ -80,6 +80,9 @@ struct WizardState {
     // Custom button expansion bindings
     std::vector<CustomBindingRow> customBindings;
 
+    // Macro editor rows, read from / written to AbsoluteHOTAS_Macros.ini
+    std::vector<MacroRow> macros;
+
     bool loaded = false;
 };
 
@@ -90,8 +93,19 @@ WizardState& GetState();
 // Load bindings from ThrottleController::GetConfig() into WizardState.
 void LoadCurrentBindings();
 
-// Save all wizard state back to AbsoluteHOTAS_User.ini and request a config reload.
+// Save all wizard state back to AbsoluteHOTAS_User.ini (+ macros to
+// AbsoluteHOTAS_Macros.ini) and request a config reload.
 void SaveBindingsToINI();
+
+// Rewrite AbsoluteHOTAS_Macros.ini from WizardState::macros. The file holds only
+// [Macro:*] sections, so this is a full rewrite — which is exactly why macros were
+// given their own file (no enumerate-and-delete against the user's other keys).
+//
+// Half-built macros (no trigger button, no steps) ARE written: MacroEngine ignores
+// them at load, and dropping them would delete work-in-progress out from under the
+// editor, which reloads from this file after each Save. Only unnamed macros and
+// duplicate names are skipped, since neither can be an INI section.
+void SaveMacrosToINI();
 
 // Format a binding string for display, annotating POV virtual buttons.
 std::string FormatBindingDisplay(const std::string& binding);

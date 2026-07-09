@@ -41,6 +41,110 @@ static WizardState s_state;
 
 WizardState& GetState() { return s_state; }
 
+// --- Macro row parsing (mirrors MacroEngine's grammar, at the token level) ---
+namespace {
+    std::vector<std::string> SplitOn(std::string_view text, char delim) {
+        std::vector<std::string> out;
+        size_t start = 0;
+        while (start <= text.size()) {
+            const size_t end = text.find(delim, start);
+            std::string_view piece = text.substr(start, (end == std::string_view::npos ? text.size() : end) - start);
+            while (!piece.empty() && std::isspace((unsigned char)piece.front())) piece.remove_prefix(1);
+            while (!piece.empty() && std::isspace((unsigned char)piece.back()))  piece.remove_suffix(1);
+            if (!piece.empty()) out.emplace_back(piece);
+            if (end == std::string_view::npos) break;
+            start = end + 1;
+        }
+        return out;
+    }
+
+    std::vector<std::string> SplitWhitespace(std::string_view text) {
+        std::vector<std::string> out;
+        size_t i = 0;
+        while (i < text.size()) {
+            while (i < text.size() && std::isspace((unsigned char)text[i])) ++i;
+            const size_t start = i;
+            while (i < text.size() && !std::isspace((unsigned char)text[i])) ++i;
+            if (i > start) out.emplace_back(text.substr(start, i - start));
+        }
+        return out;
+    }
+
+    // "<targets> <tap|hold> <amount> [gapMs]" -> row. False if unrepresentable.
+    bool ParseStepRow(std::string_view line, MacroStepRow& out) {
+        if (const size_t c = line.find(';'); c != std::string_view::npos)
+            line = line.substr(0, c);
+
+        const auto tok = SplitWhitespace(line);
+        if (tok.size() < 3) return false;
+
+        out.targets = SplitOn(tok[0], '+');
+        if (out.targets.empty()) return false;
+
+        std::string action = tok[1];
+        std::transform(action.begin(), action.end(), action.begin(),
+                       [](unsigned char ch) { return (char)std::tolower(ch); });
+        out.hold   = (action == "hold");
+        out.amount = std::atoi(tok[2].c_str());
+        out.gapMs  = (tok.size() >= 4) ? std::atoi(tok[3].c_str()) : 50;
+
+        if (out.amount < 0) out.amount = 0;
+        if (out.gapMs  < 0) out.gapMs  = 0;
+        return true;
+    }
+
+    // Macro names become INI section names, so anything that would break the
+    // section header (or the ';' comment scanner) is stripped.
+    std::string SanitizeMacroName(const std::string& in) {
+        std::string out;
+        for (char c : in) {
+            if (c == '[' || c == ']' || c == '=' || c == ';' || c == '\r' || c == '\n') continue;
+            out.push_back(c);
+        }
+        const size_t a = out.find_first_not_of(' ');
+        const size_t b = out.find_last_not_of(' ');
+        if (a == std::string::npos) return "";
+        return out.substr(a, b - a + 1);
+    }
+
+    void LoadMacroRows(WizardState& s) {
+        s.macros.clear();
+
+        CSimpleIniA ini;
+        ini.SetUnicode(false);
+        if (ini.LoadFile(RuntimePaths::MacrosIniPath().string().c_str()) != SI_OK)
+            return;  // no macros file yet — that's the normal fresh-install case
+
+        CSimpleIniA::TNamesDepend sections;
+        ini.GetAllSections(sections);
+
+        for (const auto& sec : sections) {
+            if (!sec.pItem) continue;
+            std::string_view name(sec.pItem);
+            if (name.rfind("Macro:", 0) != 0) continue;
+
+            MacroRow row;
+            row.name = std::string(name.substr(6));
+
+            const char* btn = ini.GetValue(sec.pItem, "iButton", "");
+            row.buttonBinding = (btn && *btn && std::strcmp(btn, "-1") != 0) ? btn : "(unbound)";
+            row.turbo = ini.GetBoolValue(sec.pItem, "bTurbo", false);
+
+            for (int i = 0;; ++i) {
+                const std::string key = "Step" + std::to_string(i);
+                const char* line = ini.GetValue(sec.pItem, key.c_str(), nullptr);
+                if (!line) break;  // steps are contiguous Step0..StepN
+                MacroStepRow step;
+                if (ParseStepRow(line, step)) row.steps.push_back(std::move(step));
+            }
+            s.macros.push_back(std::move(row));
+        }
+
+        std::sort(s.macros.begin(), s.macros.end(),
+                  [](const MacroRow& a, const MacroRow& b) { return a.name < b.name; });
+    }
+}
+
 void LoadCurrentBindings() {
     if (s_state.loaded) return;
 
@@ -189,6 +293,9 @@ void LoadCurrentBindings() {
         }
     }
 
+    // Macros come straight from their INI, not from MacroEngine — see WizardDefs.h.
+    LoadMacroRows(s);
+
     s.loaded = true;
 }
 
@@ -324,10 +431,73 @@ void SaveBindingsToINI() {
     ini.SetLongValue("Meta", "iConfigVersion", ConfigMigration::kConfigVersion);
 
     ini.SaveFile(iniPath.string().c_str());
+
+    SaveMacrosToINI();  // separate file, same Save action
+
     WizLog("INI saved. Reloading config...");
 
     ThrottleController::ReloadConfig();
     WizLog("Config reload requested.");
+}
+
+void SaveMacrosToINI() {
+    const auto path = RuntimePaths::MacrosIniPath();
+
+    // Full rewrite from the editor rows. The file holds nothing but [Macro:*], so
+    // there is no foreign state to preserve — deliberately do NOT LoadFile first,
+    // or deleted macros would linger.
+    CSimpleIniA ini;
+    ini.SetUnicode(false);
+
+    // A half-built macro (no trigger button yet, no steps yet) is still the user's
+    // work, and MacroEngine already ignores such macros at load with a warning. So
+    // persist them rather than dropping them — otherwise the wizard, which reloads
+    // from this file after every Save, would make them vanish as the user typed.
+    int saved = 0;
+    std::vector<std::string> used;
+    for (const auto& m : s_state.macros) {
+        const std::string name = SanitizeMacroName(m.name);
+        if (name.empty()) continue;  // no name = no INI section; wizard flags it
+
+        // Two macros with one name would share an INI section and silently merge
+        // their steps. Skip the later one; the wizard flags it in red.
+        if (std::find(used.begin(), used.end(), name) != used.end()) {
+            WizLog("Skipped duplicate macro name: " + name);
+            continue;
+        }
+        used.push_back(name);
+
+        const std::string section = "Macro:" + name;
+        const bool bound = (m.buttonBinding != "(unbound)");
+        ini.SetValue(section.c_str(), "iButton", bound ? m.buttonBinding.c_str() : "-1");
+        ini.SetBoolValue(section.c_str(), "bTurbo", m.turbo);
+
+        // Step keys must be contiguous Step0..StepN — the engine stops at the first
+        // gap — so index by what we actually write, not by the row's position.
+        int written = 0;
+        for (const auto& step : m.steps) {
+            if (step.targets.empty()) continue;
+
+            std::string value;
+            for (size_t t = 0; t < step.targets.size(); ++t) {
+                if (t) value += '+';
+                value += step.targets[t];
+            }
+            value += step.hold ? " hold " : " tap ";
+            value += std::to_string(std::max(0, step.amount));
+            value += ' ';
+            value += std::to_string(std::max(0, step.gapMs));
+
+            ini.SetValue(section.c_str(), ("Step" + std::to_string(written)).c_str(), value.c_str());
+            ++written;
+        }
+        if (bound && written > 0) ++saved;  // count only the ones that will actually run
+    }
+
+    if (ini.SaveFile(path.string().c_str()) != SI_OK)
+        WizLog("Could not write macros file: " + path.string());
+    else
+        WizLog("Saved macros (" + std::to_string(saved) + " runnable) -> " + path.string());
 }
 
 // --- Profiles ---

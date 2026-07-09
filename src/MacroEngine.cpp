@@ -198,8 +198,15 @@ void Update() {
 
         if (rt.stepIdx < 0) continue;  // inactive
 
-        // Released mid-sequence → abort and release whatever it was holding.
-        if (!down) {
+        // Turbo means "repeat while held", so releasing stops it at once.
+        //
+        // A plain sequence is fire-and-forget: one press plays it to the end even if
+        // the button comes up first. Aborting on release would make a multi-second
+        // macro demand a multi-second hold, and — worse — an early release would
+        // leave the sequence half-applied (Grav -> Shields would drain the grav
+        // drive and never fill the shields). The master toggle, the stop binding,
+        // and opening the wizard all still cancel via ReleaseAll().
+        if (!down && m.turbo) {
             ShipOutputSystem::ReleaseOwnerOutputs(owner);
             rt.stepIdx = -1;
             continue;
@@ -235,11 +242,11 @@ void Update() {
                         rt.phaseStartMs = now;
                         break;
                     }
-                    // Advance to the next step, finish, or loop (turbo).
+                    // Advance to the next step, finish, or loop (turbo, still held).
                     ++rt.stepIdx;
                     if (rt.stepIdx >= static_cast<int>(m.steps.size())) {
-                        if (m.turbo) { rt.stepIdx = 0; BeginStep(rt, m, now); }
-                        else         { rt.stepIdx = -1; }
+                        if (m.turbo && down) { rt.stepIdx = 0; BeginStep(rt, m, now); }
+                        else                 { rt.stepIdx = -1; }
                     } else {
                         BeginStep(rt, m, now);
                     }

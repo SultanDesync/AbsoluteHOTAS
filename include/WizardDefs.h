@@ -19,6 +19,7 @@ namespace CaptureSlot {
     constexpr int kDigitalAimBase  = 700;   // 700..704
     constexpr int kToggleAimMode   = 705;
     constexpr int kTurnAssistBtn   = 706;
+    constexpr int kMacroBase       = 800;   // 800..899, one per macro trigger button
 
     inline bool IsAxis(int slot) {
         return (slot >= kAxisBase && slot < kButtonBase)
@@ -120,6 +121,66 @@ struct CustomBindingRow {
     std::string output;         // "key:0x11" or "mouse:1" or "none"
 };
 
+// --- Macro editor rows (wizard-owned mirror of the [Macro:*] sections) ---
+//
+// The wizard reads and writes AbsoluteHOTAS_Macros.ini directly rather than going
+// through MacroEngine. Two reasons, both about not losing the user's work:
+//   1. MacroStep stores *resolved* ShipOutputs, so "NextSystem" would round-trip
+//      out as "key:0x4D" — silently breaking the control-map-follows-your-rebinds
+//      property that makes action targets worth having.
+//   2. MacroEngine drops macros it can't run (unbound button, no valid steps). A
+//      save built from its view would delete a half-configured macro from the file.
+// Editing the file's own tokens keeps the round-trip lossless.
+
+struct MacroStepRow {
+    std::vector<std::string> targets;  // tokens: "NextSystem", "key:0x1E"; >1 = chord
+    bool hold   = false;               // false = tap, true = hold
+    int  amount = 1;                   // tap: repeat count; hold: duration in ms
+    int  gapMs  = 50;                  // wait before the next step
+};
+
+struct MacroRow {
+    std::string name;
+    std::string buttonBinding = "(unbound)";
+    bool        turbo = false;
+    std::vector<MacroStepRow> steps;
+};
+
+// Ship-action targets for the macro step picker. Values are the actionIds that
+// ShipOutputSystem::ResolveOutputToken understands; labels mirror the wizard's
+// ship action rows. Order matches the binding table in ShipOutput.cpp.
+struct MacroTargetOption {
+    const char* label;
+    const char* value;
+};
+
+inline const MacroTargetOption kShipActionTargets[] = {
+    {"Fire Boosters",          "FireBoosters"},
+    {"Switch Flight Modes",    "SwitchFlightModes"},
+    {"Toggle POV",             "TogglePov"},
+    {"Fire Weapon 0",          "FireWeapon0"},
+    {"Fire Weapon 1",          "FireWeapon1"},
+    {"Fire Weapon 2",          "FireWeapon2"},
+    {"Ship Action 1",          "ShipAction1"},
+    {"Select Target",          "SelectTarget"},
+    {"Increase System Power",  "IncreaseSystemPower"},
+    {"Decrease System Power",  "DecreaseSystemPower"},
+    {"Previous System",        "PreviousSystem"},
+    {"Next System",            "NextSystem"},
+    {"Open Scanner",           "OpenScanner"},
+    {"Repair",                 "Repair"},
+    {"Ship Alternate Control", "ShipAlternateControlHold"},
+    {"Cruise",                 "Cruise"},
+    {"Cancel",                 "Cancel"},
+    {"Undock / Take-Off",      "UndockTakeOff"},
+    {"Get Up",                 "GetUp"},
+    {"Exit Ship",              "ExitShipFromCockpit"},
+    {"Zoom Camera In",         "ZoomCameraIn"},
+    {"Zoom Camera Out",        "ZoomCameraOut"},
+    {"Autopilot On/Off",       "AutopilotOnOff"},
+};
+inline constexpr int kNumShipActionTargets = sizeof(kShipActionTargets) / sizeof(kShipActionTargets[0]);
+
 // --- Output catalog for custom bindings ---
 struct OutputOption {
     const char* label;
@@ -182,4 +243,15 @@ inline int FindOutputIndex(const std::string& val) {
         if (val == kOutputCatalog[i].value) return i;
     }
     return -1;
+}
+
+// Friendly label for a macro target token, or nullptr if it's neither a known ship
+// action nor a catalog key — callers then show the raw token, so a hand-written
+// "key:0xFF" stays visible and editable instead of rendering as blank.
+inline const char* FindMacroTargetLabel(const std::string& token) {
+    for (int i = 0; i < kNumShipActionTargets; i++) {
+        if (token == kShipActionTargets[i].value) return kShipActionTargets[i].label;
+    }
+    const int k = FindOutputIndex(token);
+    return (k >= 0) ? kOutputCatalog[k].label : nullptr;
 }

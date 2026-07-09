@@ -1,8 +1,10 @@
 # Macro Builder (design)
 
-Status: design / in development for 3.1. A macro lets one physical button play an
-ordered sequence of key actions — chords (multi-key), holds, taps, and turbo
-(repeat-while-held) — so fiddly multi-press routines become one press.
+Status: **implemented** (3.1-beta) — engine, `[Macro:*]` parsing, and the wizard
+Macros tab. Deferred: the per-macro Test button (see the tab section). A macro lets
+one physical button play an ordered sequence of key actions — chords (multi-key),
+holds, taps, and turbo (repeat-while-held) — so fiddly multi-press routines become
+one press.
 
 ## Model
 
@@ -37,9 +39,25 @@ running at the poll rate):
 - Each tick: advance by **wall-clock** elapsed time (poll-rate-independent);
   press/hold/release targets via `SetOutputHeld` under a per-macro owner ID, so it
   composes with the existing reference-counted held-key system.
-- On release: stop, release all held keys. If `turbo` and still held: loop.
+- On completion: stop. If `turbo` and still held: loop from step 0.
 
 Durations and gaps are real time, not tick counts.
+
+### Release semantics — fire-and-forget, not hold-to-run
+
+A plain sequence **runs to completion on the press edge**; releasing the trigger
+does not abort it. `turbo` is the only mode that tracks the button: it repeats
+while held and stops the instant it comes up.
+
+This is deliberate, and was originally the other way round. Aborting on release
+made a macro's run length equal to how long the user held the button, which quietly
+broke the whole premise ("one press"): Grav → Shields takes ~2.7 s, so a normal
+~150 ms thumb press produced exactly **two taps** and stopped. Worse, the abort is
+silent and leaks no stuck key — the sequence just ends half-applied, draining the
+grav drive without ever filling the shields.
+
+An in-flight sequence is still cancellable: the master toggle, the stop binding,
+the pilot gate, and opening the wizard all route through `MacroEngine::ReleaseAll()`.
 
 ## Robustness — open-loop reality
 
@@ -52,6 +70,15 @@ Macros are blind key sequences; they can't read game state. Reliability comes fr
 - **Stable anchors** — ENG/SHD/GRV are always the rightmost three, so anchoring
   *right* avoids the variable weapon pools entirely.
 
+**Gap is the key-*up* window.** A tap is `kTapHoldMs` (40 ms) down, then `gap` ms
+up. The gap is what lets the game observe a distinct release before the next press.
+5 ms is snappy and holds up because the engine consumes discrete input events rather
+than sampling key state per frame. It is, however, the first knob to suspect if
+presses are ever dropped: a dropped `NextSystem` breaks the right-edge anchor, and
+the macro then drains whatever pool it happens to be sitting on instead of GRV —
+turning a harmless overshoot into a wrong-pool drain. Raise the gap before anything
+else.
+
 ## INI form
 
 One section per macro, indexed steps (maps 1:1 to the wizard tab):
@@ -61,19 +88,64 @@ One section per macro, indexed steps (maps 1:1 to the wizard tab):
 iButton = VKBSim Gunfighter@7
 bTurbo  = false
 ; Step<N> = <targets> <tap|hold> <amount> [gapMs]
-Step0 = NextSystem tap 6 50
+Step0 = NextSystem tap 6 5
 Step1 = DecreaseSystemPower hold 1200
-Step2 = PreviousSystem tap 1 60
+Step2 = PreviousSystem tap 1 5
 Step3 = IncreaseSystemPower hold 1200
 ```
 
 Targets: a ship action id, a `key:0xNN` / `mouse:N`, or several joined with `+`
 for a chord (`key:0x2A+key:0x11` = L Shift + W).
 
-## Wizard "Macros" tab
+## Wizard "Macros" tab — dedicated tab
 
-List macros; per macro: assign button, turbo toggle, ordered step rows (target
-picker + tap/hold + amount + gap), Test button. Writes the `[Macro:*]` sections.
+Macros get their **own tab**, not a section on the Buttons tab. A macro editor is a
+list-of-lists (per macro: button, turbo flag, N step rows) — a full-height editor,
+and the Buttons tab already carries four collapsing headers. It also gives a clean
+1:1 support story: *Macros tab ↔ `AbsoluteHOTAS_Macros.ini`* (see
+[config-layout.md](config-layout.md)), separate save path from `_User.ini`.
+
+Renames that landed with it (the old name promised what it did not deliver):
+
+- Tab "Buttons & Macros" → **"Buttons"**.
+- Its "Custom Keyboard Macros" header → **"Custom Key Bindings"** (those are simple
+  one-button→one-output bindings, not macros).
+
+Tab contents: list macros; per macro: name, trigger button, turbo toggle, and
+ordered step rows (target picker + tap/hold + amount + gap + reorder/delete). An
+"Add Grav → Shields Preset" button seeds the worked example below.
+
+**Step row shape — flat list, targets inline.** One row per step. A step's targets
+render as inline combos joined by `+`, with a `+` button to add one. So the common
+case (one target) is a single combo, and a chord grows horizontally without a nested
+editor. Chord-ness is a property of the row, not a different kind of row.
+
+**The tab edits the INI, not the engine's model.** `MacroStep` holds *resolved*
+`ShipOutput`s — the token `NextSystem` is gone by the time the engine has it. If the
+wizard round-tripped through `MacroEngine`, saving would rewrite every action target
+as a raw `key:0xNN` and silently destroy the control-map-follows-your-rebinds
+property. So the wizard parses and writes `AbsoluteHOTAS_Macros.ini` itself, at the
+token level. Two parsers, one grammar; they must stay in step.
+
+**Half-built macros persist.** A macro with no trigger button or no steps is still
+written (as `iButton = -1` / no `Step` keys). The engine already ignores such macros
+at load, and the wizard reloads from this file after every Save — so dropping them
+would make a macro vanish while the user was still building it. Only unnamed and
+duplicate-named macros are skipped, since neither can be an INI section; the tab
+flags both in red.
+
+**Save is a full rewrite** of the macros file. That is the whole reason macros got
+their own file: no enumerate-and-delete of `[Macro:*]` sections against the user's
+other keys.
+
+**Deferred: the Test button.** Firing a macro from the wizard would emit keys into
+the game behind the open overlay (macros are suppressed while it's up), which is
+both awkward to reason about and easy to mistake for a stuck key. Bind, Save, and
+try it in flight instead.
+
+Layers: the macro trigger is an ordinary button reference, so it accepts the
+`:L<n>` layer qualifier ([input-layers.md](input-layers.md)); the tab shows the same
+layer-selector pills as the Buttons tab. Steps are layer-blind.
 
 ## Worked example — "Grav → Shields"
 
@@ -85,9 +157,9 @@ GRV/SHD pools — robust regardless of weapon loadout.
 [Macro:GravToShields]
 iButton = <your button>
 bTurbo  = false
-Step0 = NextSystem tap 6 50            ; anchor to right edge = GRV (selector clamps)
+Step0 = NextSystem tap 6 5             ; anchor to right edge = GRV (selector clamps)
 Step1 = DecreaseSystemPower hold 1200  ; drain grav drive -> shared surplus
-Step2 = PreviousSystem tap 1 60        ; GRV -> SHD (always adjacent)
+Step2 = PreviousSystem tap 1 5         ; GRV -> SHD (always adjacent)
 Step3 = IncreaseSystemPower hold 1200  ; pour the surplus into shields
 ```
 

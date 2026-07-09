@@ -27,7 +27,10 @@ struct MacroStep {
 struct Macro {
     std::string            name;
     BindingRef             button;                // physical trigger
-    bool                   turbo = false;         // repeat whole sequence while held
+    // Turbo repeats the whole sequence while the button is held, and stops on
+    // release. Without it a macro is fire-and-forget: one press plays the sequence
+    // to completion, so a 3-second routine does not demand a 3-second hold.
+    bool                   turbo = false;
     std::vector<MacroStep> steps;
 };
 

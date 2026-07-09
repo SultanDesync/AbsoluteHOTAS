@@ -200,7 +200,7 @@ config-side). Defend that separately:
 - [x] `ThrottleController::LoadConfig` — `MigrateIfNeeded()` + the three-file overlay load; `bHoldForBoost` alias read (`[DualStick]` then `[Injection]`).
 - [x] New `ConfigMigration` unit (`{include,src}/ConfigMigration.{h,cpp}`) — backup, split, stamp; pure `SplitUserConfig` seam unit-tested.
 - [x] `WizardConfig::SaveBindingsToINI` — retargeted to `UserIniPath()`; writes no mod-owned key; relocates `bHoldForBoost` to `[DualStick]`; stamps `iConfigVersion`.
-- [ ] Macros save/load — `MacrosIniPath()` (lands with the macro builder work; load already overlays the file).
+- [x] Macros save/load — `MacrosIniPath()`; load overlays the file, `WizardConfig::SaveMacrosToINI` full-rewrites it from the Macros tab.
 - [x] Profiles — `RuntimePaths::ProfilesDir()`, `WizardConfig::{ListProfiles,ExportProfile,ImportProfile}`, wizard footer Export/Import row, and `ConfigGeneration()`-driven UI refresh.
 - [ ] `AbsoluteHOTAS.ini` shipped file — strip user-owned sections down to documented defaults only.
 - [ ] Packaging — 3.1 archive must not overwrite an existing main ini (FOMOD skip-if-present or `.default` + DLL generate).

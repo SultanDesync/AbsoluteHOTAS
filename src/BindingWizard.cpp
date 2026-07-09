@@ -42,6 +42,9 @@ static void OnCaptureCommit(int slot, const char* binding) {
         s.toggleAimModeBinding = binding;
     } else if (slot == CaptureSlot::kTurnAssistBtn) {
         s.turnAssistBinding = binding;
+    } else if (slot >= CaptureSlot::kMacroBase && slot < CaptureSlot::kMacroBase + 100) {
+        int idx = slot - CaptureSlot::kMacroBase;
+        if (idx < (int)s.macros.size()) s.macros[idx].buttonBinding = binding;
     }
 }
 
@@ -793,7 +796,7 @@ static void DrawAdvancedModesTab(WizardState& s) {
 }
 
 static void DrawButtonsTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons & Macros (Macros not yet supported)");
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons");
     ImGui::TextWrapped("Configure button bindings for vanilla ship actions and plugin controls.");
     ImGui::Separator();
     ImGui::Spacing();
@@ -819,9 +822,9 @@ static void DrawButtonsTab(WizardState& s) {
 
     ImGui::Spacing();
 
-    if (ImGui::CollapsingHeader("Custom Keyboard Macros", ImGuiTreeNodeFlags_None)) {
+    if (ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("Bind controller buttons to emit custom keyboard/mouse outputs. Use Starfield's vanilla binding menu to assign matching secondary bindings.");
+        ImGui::TextWrapped("Bind controller buttons to emit a single custom keyboard/mouse output. Use Starfield's vanilla binding menu to assign matching secondary bindings. For multi-key sequences or chords, use the Macros tab.");
         ImGui::Spacing();
 
         if (ImGui::Button("Add Binding")) s.customBindings.push_back({"(unbound)", "none"});
@@ -909,6 +912,227 @@ static void DrawButtonsTab(WizardState& s) {
         }
         ImGui::Unindent(12);
     }
+}
+
+// --- Tab: Macros ---
+
+// Target picker: ship actions first (they follow the user's in-game rebinds), raw
+// keys/mouse second. An unrecognized token (hand-edited INI) previews as itself
+// rather than vanishing.
+static void DrawTargetCombo(std::string& token) {
+    const char* label   = FindMacroTargetLabel(token);
+    const char* preview = label ? label : token.c_str();
+
+    ImGui::PushItemWidth(170);
+    if (ImGui::BeginCombo("##target", preview)) {
+        ImGui::SeparatorText("Ship Actions (follow in-game binds)");
+        for (int i = 0; i < kNumShipActionTargets; i++) {
+            const bool sel = (token == kShipActionTargets[i].value);
+            ImGui::PushID(i);
+            if (ImGui::Selectable(kShipActionTargets[i].label, sel)) token = kShipActionTargets[i].value;
+            if (sel) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+        }
+        ImGui::SeparatorText("Keys & Mouse");
+        for (int i = 0; i < kOutputCatalogSize; i++) {
+            const bool sel = (token == kOutputCatalog[i].value);
+            ImGui::PushID(1000 + i);
+            if (ImGui::Selectable(kOutputCatalog[i].label, sel)) token = kOutputCatalog[i].value;
+            if (sel) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopItemWidth();
+}
+
+static std::string UniqueMacroName(const WizardState& s) {
+    for (int n = 1;; ++n) {
+        std::string candidate = "Macro" + std::to_string(n);
+        bool taken = false;
+        for (const auto& m : s.macros) {
+            if (m.name == candidate) { taken = true; break; }
+        }
+        if (!taken) return candidate;
+    }
+}
+
+static void DrawMacroSteps(MacroRow& m) {
+    int removeStep = -1, moveUp = -1, moveDown = -1;
+
+    for (int si = 0; si < (int)m.steps.size(); si++) {
+        auto& st = m.steps[si];
+        ImGui::PushID(si);
+
+        ImGui::Text("%2d", si);
+        ImGui::SameLine();
+
+        // Targets. More than one = a chord: pressed together in the same step.
+        int removeTarget = -1;
+        for (int ti = 0; ti < (int)st.targets.size(); ti++) {
+            if (ti) { ImGui::SameLine(0, 4); ImGui::Text("+"); ImGui::SameLine(0, 4); }
+            ImGui::PushID(ti);
+            DrawTargetCombo(st.targets[ti]);
+            if (st.targets.size() > 1) {
+                ImGui::SameLine(0, 2);
+                if (ImGui::SmallButton("x")) removeTarget = ti;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this target from the chord");
+            }
+            ImGui::PopID();
+        }
+        if (removeTarget >= 0) st.targets.erase(st.targets.begin() + removeTarget);
+
+        ImGui::SameLine(0, 4);
+        if (ImGui::SmallButton("+")) st.targets.push_back("key:0x1E");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add a target to press together with this one (chord)");
+
+        // Tap vs hold, and the amount that means different things for each.
+        ImGui::SameLine();
+        int actionIdx = st.hold ? 1 : 0;
+        const char* kActions[] = { "Tap", "Hold" };
+        ImGui::PushItemWidth(70);
+        if (ImGui::Combo("##action", &actionIdx, kActions, 2)) st.hold = (actionIdx == 1);
+        ImGui::PopItemWidth();
+
+        ImGui::SameLine();
+        ImGui::TextDisabled(st.hold ? "for" : "x");
+        ImGui::SameLine();
+        ImGui::PushItemWidth(64);
+        ImGui::InputInt("##amount", &st.amount, 0);
+        ImGui::PopItemWidth();
+        if (st.amount < 0) st.amount = 0;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(st.hold ? "How long to hold, in milliseconds" : "How many times to press");
+
+        ImGui::SameLine();
+        ImGui::TextDisabled(st.hold ? "ms, gap" : "times, gap");
+        ImGui::SameLine();
+        ImGui::PushItemWidth(64);
+        ImGui::InputInt("##gap", &st.gapMs, 0);
+        ImGui::PopItemWidth();
+        if (st.gapMs < 0) st.gapMs = 0;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Milliseconds to wait before the next step");
+        ImGui::SameLine();
+        ImGui::TextDisabled("ms");
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton("^")) moveUp = si;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("v")) moveDown = si;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Del")) removeStep = si;
+
+        ImGui::PopID();
+    }
+
+    if (moveUp > 0)                                     std::swap(m.steps[moveUp], m.steps[moveUp - 1]);
+    if (moveDown >= 0 && moveDown + 1 < (int)m.steps.size()) std::swap(m.steps[moveDown], m.steps[moveDown + 1]);
+    if (removeStep >= 0)                                m.steps.erase(m.steps.begin() + removeStep);
+}
+
+static void DrawMacrosTab(WizardState& s) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Macros");
+    ImGui::TextWrapped(
+        "A macro plays an ordered sequence of key actions from one button press. Steps can target "
+        "ship actions (which follow your in-game Starfield keybinds automatically) or raw keys. "
+        "Press '+' on a step to add targets pressed together as a chord.");
+    ImGui::TextWrapped(
+        "One press runs the whole sequence to the end - you do not need to hold the button. "
+        "Turbo instead repeats the sequence for as long as the button IS held.");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (ImGui::Button("Add Macro")) {
+        MacroRow m;
+        m.name = UniqueMacroName(s);
+        m.steps.push_back({ {"NextSystem"}, false, 1, 50 });
+        s.macros.push_back(std::move(m));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Add \"Grav -> Shields\" Preset")) {
+        MacroRow m;
+        m.name = "GravToShields";
+        m.steps.push_back({ {"NextSystem"},          false, 6,    5 });  // right edge = GRV (clamps)
+        m.steps.push_back({ {"DecreaseSystemPower"}, true,  1200, 0 });  // drain grav -> surplus
+        m.steps.push_back({ {"PreviousSystem"},      false, 1,    5 });  // GRV -> SHD (adjacent)
+        m.steps.push_back({ {"IncreaseSystemPower"}, true,  1200, 0 });  // pour surplus into shields
+        s.macros.push_back(std::move(m));
+        WizLog("Added Grav -> Shields preset macro.");
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Dumps grav-drive power into shields in one press.\n"
+                          "Anchors to the right edge of the power bar, so it works\n"
+                          "regardless of your weapon loadout. Bind a button and Save.");
+
+    ImGui::Spacing();
+
+    if (s.macros.empty()) {
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                           "No macros. Click 'Add Macro', or try the Grav -> Shields preset.");
+        return;
+    }
+
+    int removeMacro = -1;
+    for (int mi = 0; mi < (int)s.macros.size(); mi++) {
+        auto& m = s.macros[mi];
+        ImGui::PushID(6000 + mi);
+
+        // Duplicate names collide into one INI section, so the save skips the later
+        // one. Say so here rather than letting a macro silently not persist.
+        bool duplicate = false;
+        for (int j = 0; j < mi; j++) {
+            if (s.macros[j].name == m.name) { duplicate = true; break; }
+        }
+
+        char header[160];
+        std::snprintf(header, sizeof(header), "%s%s###macro%d",
+                      m.name.empty() ? "(unnamed)" : m.name.c_str(),
+                      m.buttonBinding == "(unbound)" ? "  [no button]" : "", mi);
+
+        if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Indent(12);
+
+            char nameBuf[64];
+            std::snprintf(nameBuf, sizeof(nameBuf), "%s", m.name.c_str());
+            ImGui::PushItemWidth(200);
+            if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf))) m.name = nameBuf;
+            ImGui::PopItemWidth();
+            if (m.name.empty()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "name required - will not save");
+            } else if (duplicate) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "duplicate name - will not save");
+            }
+
+            if (mi < 100) {
+                DrawBindingRow("Trigger Button", m.buttonBinding, CaptureSlot::kMacroBase + mi, false);
+            }
+
+            ImGui::Checkbox("Turbo (repeat while held)", &m.turbo);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Off: one press plays the sequence once, to the end.\n"
+                                  "On:  the sequence repeats while the button is held,\n"
+                                  "     and stops as soon as you release it.");
+            ImGui::SameLine(500);
+            if (ImGui::SmallButton("Delete Macro")) removeMacro = mi;
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Steps");
+            DrawMacroSteps(m);
+
+            if (ImGui::Button("Add Step")) m.steps.push_back({ {"NextSystem"}, false, 1, 50 });
+            if (m.steps.empty())
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Add a step - this macro will not run yet.");
+            else if (m.buttonBinding == "(unbound)")
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Bind a trigger button - this macro will not run yet.");
+
+            ImGui::Unindent(12);
+            ImGui::Spacing();
+        }
+        ImGui::PopID();
+    }
+    if (removeMacro >= 0) s.macros.erase(s.macros.begin() + removeMacro);
 }
 
 // --- Profiles footer row (Export / Import) ---
@@ -1018,8 +1242,13 @@ void BindingWizard::Draw() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Buttons & Macros")) {
+        if (ImGui::BeginTabItem("Buttons")) {
             DrawButtonsTab(s);
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Macros")) {
+            DrawMacrosTab(s);
             ImGui::EndTabItem();
         }
 
