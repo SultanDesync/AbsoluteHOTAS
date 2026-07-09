@@ -5,7 +5,24 @@
 
 namespace RuntimePaths {
     std::filesystem::path PluginDirectory();
+
+    // Mod-owned defaults + tunables. Shipped in the archive and (from 3.2 on)
+    // overwritten freely on update, because no user data lives here. InitLogging()
+    // and mod-owned sections ([General], [Injection], [Gate]) read from this file.
     std::filesystem::path IniPath();
+
+    // User-owned bindings, calibration, tuning, and shift layers. Written by the
+    // wizard, never shipped, never overwritten on update. Overlays IniPath() at load.
+    std::filesystem::path UserIniPath();
+
+    // User-owned [Macro:*] sections. Written by the wizard Macros tab; own file so a
+    // wizard save never has to enumerate-and-delete macro sections from the monolith.
+    std::filesystem::path MacrosIniPath();
+
+    // Directory for user-initiated profile snapshots (Export/Import). Created on first
+    // export; may not exist yet.
+    std::filesystem::path ProfilesDir();
+
     std::filesystem::path LogPath();
 
     // Whether bEnableLog was set in the INI. Diagnostics are fully opt-in: when this

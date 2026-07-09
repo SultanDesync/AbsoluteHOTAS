@@ -3,6 +3,7 @@
 #include "ThrottleHook.h"
 #include "ShipOutput.h"
 #include "MacroEngine.h"
+#include "ConfigMigration.h"
 #include "SignalHunter.h"
 #include "AimController.h"
 #include "PilotState.h"
@@ -21,6 +22,7 @@
 ThrottleController::Config    ThrottleController::s_config;
 std::atomic<bool>  ThrottleController::s_running{ false };
 std::atomic<bool>  ThrottleController::s_configReloadRequested{ false };
+std::atomic<uint32_t> ThrottleController::s_configGeneration{ 0 };
 std::atomic<float> ThrottleController::s_currentThrottle{ 0.0f };
 std::thread        ThrottleController::s_thread;
 
@@ -92,13 +94,28 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
 
 // ---- INI Config Loading ----
 void ThrottleController::LoadConfig() {
+    // One-time monolith -> split migration, before any load reads a value.
+    ConfigMigration::MigrateIfNeeded();
+
+    // Layered overlay: mod defaults, then user overrides win, then macros merge in.
+    // Sequential LoadFile into one object overwrites single-value keys (multikey is
+    // off), so the user file supersedes the shipped defaults per-key, and [Macro:*]
+    // lands in the same object for MacroEngine::LoadMacros below.
     CSimpleIniA ini;
     ini.SetUnicode();
-    const auto path = RuntimePaths::IniPath().string();
-    if (ini.LoadFile(path.c_str()) == SI_OK)
-        CtrlLog("Loaded config from: " + path);
+    const auto path      = RuntimePaths::IniPath().string();
+    const auto userPath  = RuntimePaths::UserIniPath().string();
+    const auto macroPath = RuntimePaths::MacrosIniPath().string();
+
+    const bool haveMain = ini.LoadFile(path.c_str()) == SI_OK;
+    const bool haveUser = ini.LoadFile(userPath.c_str()) == SI_OK;
+    ini.LoadFile(macroPath.c_str());  // absent until the Macros tab writes it
+
+    if (haveMain || haveUser)
+        CtrlLog("Loaded config (main: " + std::string(haveMain ? "yes" : "no") +
+                ", user: " + (haveUser ? "yes" : "no") + ").");
     else
-        CtrlLog("No AbsoluteHOTAS.ini found, using defaults.");
+        CtrlLog("No config files found, using defaults.");
 
     s_config.enabled = ini.GetBoolValue("General", "bEnabled", true);
 
@@ -164,7 +181,10 @@ void ThrottleController::LoadConfig() {
     s_config.pollRateHz        = (int)ini.GetLongValue("Injection", "iPollRateHz",     120);
     s_config.throttleBurstMs   = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled       = ini.GetBoolValue("Injection", "bRollEnabled",     true);
-    s_config.bHoldForBoost     = ini.GetBoolValue("Injection", "bHoldForBoost",    true);
+    // bHoldForBoost relocated [Injection] -> [DualStick] in 3.1. Read the new home,
+    // falling back to the old location as a migration alias for un-migrated files.
+    s_config.bHoldForBoost     = ini.GetBoolValue("DualStick", "bHoldForBoost",
+                                     ini.GetBoolValue("Injection", "bHoldForBoost", true));
 
     // [Gate] pilot-state gate (framework). Default Off = legacy behavior.
     {
@@ -397,6 +417,10 @@ void ThrottleController::ControlLoop() {
             LoadConfig();
             ResolveAll(s_config);
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
+            // Publish AFTER the new config is fully applied so a wizard reading a
+            // bumped generation is guaranteed to see the reloaded values, not a
+            // half-applied state.
+            s_configGeneration.fetch_add(1, std::memory_order_release);
             CtrlLog("=== HOT-RELOAD COMPLETE ===");
         }
 
@@ -744,6 +768,10 @@ bool ThrottleController::Initialize() {
 void ThrottleController::ReloadConfig() {
     s_configReloadRequested.store(true, std::memory_order_release);
     CtrlLog("Config reload requested (will apply on next loop iteration).");
+}
+
+uint32_t ThrottleController::ConfigGeneration() {
+    return s_configGeneration.load(std::memory_order_acquire);
 }
 
 void ThrottleController::Start() {

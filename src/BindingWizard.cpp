@@ -4,6 +4,7 @@
 #include "WizardDefs.h"
 #include "WizardCapture.h"
 #include "WizardConfig.h"
+#include "ThrottleController.h"
 #include "UIHook.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
@@ -910,12 +911,81 @@ static void DrawButtonsTab(WizardState& s) {
     }
 }
 
+// --- Profiles footer row (Export / Import) ---
+static void DrawProfilesRow() {
+    static char profileName[64] = "";
+    static int  selectedProfile = 0;
+    static std::string profileStatus;
+
+    ImGui::Spacing();
+
+    // Export: name field + button.
+    ImGui::PushItemWidth(160);
+    ImGui::InputTextWithHint("##profilename", "profile name", profileName, sizeof(profileName));
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    if (ImGui::Button("Export")) {
+        std::string err;
+        if (WizardConfig::ExportProfile(profileName, err))
+            profileStatus = std::string("Exported '") + profileName + "'.";
+        else
+            profileStatus = "Export failed: " + err;
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    // Import: profile dropdown + button. The list is the user's own exports;
+    // auto-backups are hidden but remain on disk under Profiles/ as a safety net.
+    auto profiles = WizardConfig::ListProfiles();
+    if (selectedProfile >= (int)profiles.size()) selectedProfile = 0;
+    const char* preview = profiles.empty() ? "(no profiles)" : profiles[selectedProfile].c_str();
+    ImGui::PushItemWidth(160);
+    if (ImGui::BeginCombo("##profilelist", preview)) {
+        for (int i = 0; i < (int)profiles.size(); i++) {
+            bool sel = (i == selectedProfile);
+            if (ImGui::Selectable(profiles[i].c_str(), sel)) selectedProfile = i;
+            if (sel) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(profiles.empty());
+    if (ImGui::Button("Import")) {
+        std::string err;
+        if (WizardConfig::ImportProfile(profiles[selectedProfile], err))
+            profileStatus = std::string("Imported '") + profiles[selectedProfile] +
+                            "'. Previous setup auto-backed up.";
+        else
+            profileStatus = "Import failed: " + err;
+    }
+    ImGui::EndDisabled();
+
+    if (!profileStatus.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.9f, 1.0f), "%s", profileStatus.c_str());
+    }
+}
+
 // --- Main Draw ---
 void BindingWizard::Draw() {
     static bool s_allDevicesOpened = false;
     if (!s_allDevicesOpened) {
         DeviceManager::OpenAllDevices();
         s_allDevicesOpened = true;
+    }
+
+    // A live config reload (from a Save or a profile Import) bumps the generation
+    // counter once it has been fully applied. Reset the cached wizard state so
+    // LoadCurrentBindings repopulates it from the new config — race-free, because a
+    // changed generation guarantees GetConfig() already reflects the reload.
+    static uint32_t s_lastConfigGen = ThrottleController::ConfigGeneration();
+    const uint32_t configGen = ThrottleController::ConfigGeneration();
+    if (configGen != s_lastConfigGen) {
+        s_lastConfigGen = configGen;
+        WizardConfig::GetState() = WizardState{};
     }
 
     WizardConfig::LoadCurrentBindings();
@@ -975,7 +1045,9 @@ void BindingWizard::Draw() {
     ImGui::PopStyleColor(3);
 
     ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Writes to AbsoluteHOTAS.ini and reloads live.");
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Writes to AbsoluteHOTAS_User.ini and reloads live.");
+
+    DrawProfilesRow();
 
     ImGui::End();
 }

@@ -90,10 +90,27 @@ WizardState& GetState();
 // Load bindings from ThrottleController::GetConfig() into WizardState.
 void LoadCurrentBindings();
 
-// Save all wizard state back to AbsoluteHOTAS.ini and request config reload.
+// Save all wizard state back to AbsoluteHOTAS_User.ini and request a config reload.
 void SaveBindingsToINI();
 
 // Format a binding string for display, annotating POV virtual buttons.
 std::string FormatBindingDisplay(const std::string& binding);
+
+// --- Profiles (Export/Import) ---
+// A profile is one INI = the user file + macros file merged (disjoint by
+// ownership) plus a [Profile] header. See docs/reference/config-layout.md.
+
+// Names of exportable profiles in ProfilesDir() (stems, no extension). Hides the
+// underscore-prefixed auto-backups so the import list stays the user's own saves.
+std::vector<std::string> ListProfiles();
+
+// Merge the current user + macros files into ProfilesDir()/<name>.ini. Returns
+// false with a reason in `err` (empty name, nothing saved yet, write failure).
+bool ExportProfile(const std::string& name, std::string& err);
+
+// Replace the current user + macros files with the named profile, after
+// auto-backing up the current pair. Triggers a live reload. Returns false with a
+// reason in `err`.
+bool ImportProfile(const std::string& name, std::string& err);
 
 } // namespace WizardConfig

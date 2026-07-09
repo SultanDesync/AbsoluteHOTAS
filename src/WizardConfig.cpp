@@ -5,6 +5,7 @@
 #include "ThrottleController.h"
 #include "ShipOutput.h"
 #include "RuntimePaths.h"
+#include "ConfigMigration.h"
 
 #include <SimpleIni.h>
 #include <cstdio>
@@ -192,7 +193,10 @@ void LoadCurrentBindings() {
 }
 
 void SaveBindingsToINI() {
-    auto iniPath = RuntimePaths::IniPath();
+    // Write ONLY the user file. The main ini is mod-owned and overwrite-safe; a
+    // single user key written there reintroduces the update-clobber bug the split
+    // exists to prevent. See docs/reference/config-layout.md.
+    auto iniPath = RuntimePaths::UserIniPath();
     WizLog("Saving bindings to: " + iniPath.string());
 
     CSimpleIniA ini;
@@ -280,7 +284,8 @@ void SaveBindingsToINI() {
         const char* val = (s.turnAssistBinding != "(unbound)") ? s.turnAssistBinding.c_str() : "-1";
         ini.SetValue("DualStick", "iTurnAssistButton", val);
     }
-    ini.SetBoolValue("Injection", "bHoldForBoost", s.holdForBoost);
+    // Relocated from [Injection] in 3.1 (see LoadConfig alias read).
+    ini.SetBoolValue("DualStick", "bHoldForBoost", s.holdForBoost);
 
     // HOSAM
     ini.SetBoolValue("Aim", "bHOSAMMode", s.hosamMode);
@@ -314,11 +319,162 @@ void SaveBindingsToINI() {
         ini.SetValue("ButtonExpansion", iniKey.c_str(), row.output.c_str());
     }
 
+    // Stamp the schema version so a fresh-install user file (which never went through
+    // MigrateIfNeeded) still carries one for future semantic migrations.
+    ini.SetLongValue("Meta", "iConfigVersion", ConfigMigration::kConfigVersion);
+
     ini.SaveFile(iniPath.string().c_str());
     WizLog("INI saved. Reloading config...");
 
     ThrottleController::ReloadConfig();
-    WizLog("Config reload requested. UI retains current values.");
+    WizLog("Config reload requested.");
+}
+
+// --- Profiles ---
+
+namespace {
+    // Strip anything that isn't safe in a filename; collapse to a trimmed token.
+    // Keeps letters, digits, space, dash, underscore, dot — enough for readable
+    // names, nothing that can escape ProfilesDir().
+    std::string SanitizeProfileName(const std::string& in) {
+        std::string out;
+        for (char c : in) {
+            if (std::isalnum((unsigned char)c) || c == ' ' || c == '-' || c == '_' || c == '.')
+                out.push_back(c);
+        }
+        size_t a = out.find_first_not_of(' ');
+        size_t b = out.find_last_not_of(' ');
+        if (a == std::string::npos) return "";
+        return out.substr(a, b - a + 1);
+    }
+
+    // Timestamp. compact=true -> "20260709_143005" (filenames); false -> readable.
+    std::string TimeStamp(bool compact) {
+        std::time_t t = std::time(nullptr);
+        std::tm tm{};
+        localtime_s(&tm, &t);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), compact ? "%Y%m%d_%H%M%S" : "%Y-%m-%d %H:%M:%S", &tm);
+        return buf;
+    }
+
+    std::string ModVersionString() {
+        return std::to_string(PLUGIN_VERSION_MAJOR) + "." +
+               std::to_string(PLUGIN_VERSION_MINOR) + "." +
+               std::to_string(PLUGIN_VERSION_PATCH);
+    }
+}
+
+std::vector<std::string> ListProfiles() {
+    std::vector<std::string> out;
+    std::error_code ec;
+    const auto dir = RuntimePaths::ProfilesDir();
+    if (!std::filesystem::exists(dir, ec)) return out;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        const auto& p = entry.path();
+        if (p.extension() != ".ini") continue;
+        std::string stem = p.stem().string();
+        if (stem.empty() || stem[0] == '_') continue;  // hide _autobackup_*
+        out.push_back(stem);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+bool ExportProfile(const std::string& name, std::string& err) {
+    const std::string clean = SanitizeProfileName(name);
+    if (clean.empty()) { err = "Enter a profile name."; return false; }
+
+    std::error_code ec;
+    std::filesystem::create_directories(RuntimePaths::ProfilesDir(), ec);
+
+    const auto userPath  = RuntimePaths::UserIniPath();
+    const auto macroPath = RuntimePaths::MacrosIniPath();
+    if (!std::filesystem::exists(userPath, ec) && !std::filesystem::exists(macroPath, ec)) {
+        err = "Nothing to export yet — Save & Apply your bindings first.";
+        return false;
+    }
+
+    // User + macros are disjoint by ownership, so merging is a plain two-file load.
+    CSimpleIniA prof;
+    prof.SetUnicode(false);
+    prof.LoadFile(userPath.string().c_str());
+    prof.LoadFile(macroPath.string().c_str());
+
+    const long ver = prof.GetLongValue("Meta", "iConfigVersion", ConfigMigration::kConfigVersion);
+    prof.SetValue("Profile", "sName", clean.c_str());
+    prof.SetValue("Profile", "sModVersion", ModVersionString().c_str());
+    prof.SetLongValue("Profile", "iConfigVersion", ver);
+    prof.SetValue("Profile", "sExported", TimeStamp(false).c_str());
+
+    const auto out = RuntimePaths::ProfilesDir() / (clean + ".ini");
+    if (prof.SaveFile(out.string().c_str()) != SI_OK) {
+        err = "Could not write profile file.";
+        return false;
+    }
+    WizLog("Exported profile -> " + out.string());
+    return true;
+}
+
+bool ImportProfile(const std::string& name, std::string& err) {
+    const auto path = RuntimePaths::ProfilesDir() / (SanitizeProfileName(name) + ".ini");
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) { err = "Profile not found."; return false; }
+
+    // Auto-backup the current pair before overwriting it — importing is a full swap,
+    // so the working setup must be recoverable.
+    {
+        CSimpleIniA cur;
+        cur.SetUnicode(false);
+        cur.LoadFile(RuntimePaths::UserIniPath().string().c_str());
+        cur.LoadFile(RuntimePaths::MacrosIniPath().string().c_str());
+        cur.SetValue("Profile", "sName", "autobackup");
+        cur.SetValue("Profile", "sExported", TimeStamp(false).c_str());
+        std::filesystem::create_directories(RuntimePaths::ProfilesDir(), ec);
+        const auto bak = RuntimePaths::ProfilesDir() / ("_autobackup_" + TimeStamp(true) + ".ini");
+        cur.SaveFile(bak.string().c_str());
+        WizLog("Auto-backed up current config -> " + bak.string());
+    }
+
+    CSimpleIniA prof;
+    prof.SetUnicode(false);
+    if (prof.LoadFile(path.string().c_str()) != SI_OK) { err = "Could not read profile file."; return false; }
+
+    const long ver = prof.GetLongValue("Profile", "iConfigVersion", ConfigMigration::kConfigVersion);
+
+    // Split back by section ownership: [Macro:*] -> macros file, [Profile] dropped
+    // (metadata), everything else -> user file.
+    CSimpleIniA user, macros;
+    user.SetUnicode(false);
+    macros.SetUnicode(false);
+
+    CSimpleIniA::TNamesDepend sections;
+    prof.GetAllSections(sections);
+    for (const auto& sec : sections) {
+        const char* secName = sec.pItem;
+        if (_stricmp(secName, "Profile") == 0) continue;
+        CSimpleIniA& dst = (_strnicmp(secName, "Macro:", 6) == 0) ? macros : user;
+        CSimpleIniA::TNamesDepend keys;
+        prof.GetAllKeys(secName, keys);
+        for (const auto& k : keys) {
+            const char* v = prof.GetValue(secName, k.pItem, nullptr);
+            if (v) dst.SetValue(secName, k.pItem, v);
+        }
+    }
+    user.SetLongValue("Meta", "iConfigVersion", ver);
+
+    // Full replace so no stale key or macro survives the swap. SaveFile overwrites
+    // both files; an empty macros object clears a previously-populated macro file.
+    if (user.SaveFile(RuntimePaths::UserIniPath().string().c_str()) != SI_OK) {
+        err = "Could not write user config.";
+        return false;
+    }
+    macros.SaveFile(RuntimePaths::MacrosIniPath().string().c_str());
+
+    ThrottleController::ReloadConfig();  // wizard state refreshes via ConfigGeneration
+    WizLog("Imported profile: " + path.string());
+    return true;
 }
 
 std::string FormatBindingDisplay(const std::string& binding) {

@@ -177,6 +177,12 @@ public:
     // Thread-safe — can be called from any thread (e.g., ImGui render thread).
     static void ReloadConfig();
 
+    // Monotonic counter bumped once each time a reload has been fully applied to
+    // s_config. The wizard watches it to refresh its UI state after an import
+    // without racing the async reload: a changed value guarantees GetConfig() and
+    // GetCalibrationData() already reflect the new files. Thread-safe.
+    static uint32_t ConfigGeneration();
+
     // Returns the last normalized throttle value (-1.0 to 1.0)
     static float GetCurrentThrottle();
 
@@ -199,6 +205,7 @@ private:
     static Config s_config;
     static std::atomic<bool> s_running;
     static std::atomic<bool> s_configReloadRequested;
+    static std::atomic<uint32_t> s_configGeneration;
     static std::atomic<float> s_currentThrottle;
     static std::thread s_thread;
 

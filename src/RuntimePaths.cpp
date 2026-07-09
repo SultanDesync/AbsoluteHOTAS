@@ -35,6 +35,21 @@ namespace RuntimePaths {
         return PluginDirectory() / L"AbsoluteHOTAS.ini";
     }
 
+    std::filesystem::path UserIniPath()
+    {
+        return PluginDirectory() / L"AbsoluteHOTAS_User.ini";
+    }
+
+    std::filesystem::path MacrosIniPath()
+    {
+        return PluginDirectory() / L"AbsoluteHOTAS_Macros.ini";
+    }
+
+    std::filesystem::path ProfilesDir()
+    {
+        return PluginDirectory() / L"Profiles";
+    }
+
     std::filesystem::path LogPath()
     {
         return PluginDirectory() / L"AbsoluteHOTAS.log";

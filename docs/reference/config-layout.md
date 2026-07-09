@@ -1,6 +1,9 @@
 # Config Split & Migration (design)
 
-Status: design / planned for 3.1.
+Status: **implemented** (3.1-beta) — path helpers, layered load, migration,
+wizard-save retarget, and profile Export/Import are done; the split transform is
+unit-tested ([config_migration_test](../../tests/config_migration_test.cpp)).
+Remaining: shipped-ini strip + packaging skip-if-present.
 
 ## Goal
 
@@ -47,6 +50,7 @@ lifts out of the old monolith. Everything not listed as user-owned stays mod-own
 - `[Aim]` — entire section (bindings + tuning + HOSAM/alignment)
 - `[DualStick]` — entire section
 - `[Calibration]` — entire section (auto-generated per-device ranges)
+- `[Layers]` — entire section (shift-layer definitions, see [input-layers.md](input-layers.md)); layer-qualified binding keys (`:L<n>` suffix) live wherever their unqualified siblings do, i.e. in the user file
 - `bHoldForBoost` — **currently mis-homed in `[Injection]`.** Relocate to `[DualStick]` (or `[Normalization]`) and read the old `[Injection]` location as a migration alias.
 
 **Mod-owned → `AbsoluteHOTAS.ini`** (shipped defaults, overwrite-safe):
@@ -145,6 +149,37 @@ onward** the main ini can be overwritten freely, because no user data lives ther
 - **Read-only / locked file:** if the user file can't be written, log and run from
   in-memory defaults+monolith for the session rather than crashing.
 
+## Profiles (user-initiated backup / share)
+
+The split protects against *update* clobber. Profiles cover the other two things
+flight-sim users expect (TARGET `.fcf`, Joystick Gremlin profiles): deliberate
+snapshots ("before I retune everything") and sharing setups on Nexus.
+
+- **Wizard footer: "Export Profile…" / "Import Profile…".**
+- **Location:** `Profiles/` next to the INIs (add `RuntimePaths::ProfilesDir()`).
+- **Format: one INI file** = the sections of `AbsoluteHOTAS_User.ini` +
+  `AbsoluteHOTAS_Macros.ini` merged (they're disjoint by the ownership table),
+  plus a `[Profile]` header: `sName`, `sModVersion`, `iConfigVersion`, timestamp.
+  Plain `.ini` keeps it notepad-editable and forum-postable.
+- **Export:** merge both user files into `Profiles/<name>.ini`.
+- **Import:** back up the current pair to `Profiles/_autobackup_<timestamp>.ini`
+  first, then split the profile by section ownership (`[Macro:*]` →
+  `_Macros.ini`, `[Profile]` dropped, everything else → `_User.ini`), then reload.
+  Import is a **full replace** (both files overwritten) so no stale key or macro
+  survives the swap. Version migrations are a no-op today (one schema version);
+  the profile's `iConfigVersion` is carried into the user file for the future.
+- **Wizard state refresh:** import reloads asynchronously on the control thread,
+  which bumps `ThrottleController::ConfigGeneration()` once applied. The wizard
+  watches that counter and rebuilds its UI state when it changes — so the imported
+  values appear without racing the reload. (Save rides the same path.)
+- **Cross-hardware note:** bindings carry device names; importing a profile from
+  different hardware leaves non-matching bindings unresolved/unbound, same as
+  unplugging the device. That's the honest behavior — don't guess-remap.
+
+Profiles are strictly a copy/split of the two user files — no new schema, so
+this lands after the split with no interaction with migration beyond reusing the
+`iConfigVersion` machinery.
+
 ## Config versioning (semantic changes)
 
 File-splitting protects bindings from being *overwritten*. It does nothing when a
@@ -161,13 +196,14 @@ config-side). Defend that separately:
 
 ## Implementation touch list
 
-- `src/RuntimePaths.{h,cpp}` — add `UserIniPath()`, `MacrosIniPath()`.
-- `ThrottleController::LoadConfig` — add `MigrateIfNeeded()` + the two overlay loads.
-- New `MigrateIfNeeded()` (ThrottleController or a small `ConfigMigration` unit) — backup, split, stamp.
-- `WizardConfig::SaveBindingsToINI` — retarget to `UserIniPath()`; never touch main ini; relocate `bHoldForBoost`.
-- Macros save/load — `MacrosIniPath()` (lands with the macro builder work).
-- `AbsoluteHOTAS.ini` shipped file — strip user-owned sections down to documented defaults only.
-- Packaging — 3.1 archive must not overwrite an existing main ini (FOMOD skip-if-present or `.default` + DLL generate).
+- [x] `src/RuntimePaths.{h,cpp}` — added `UserIniPath()`, `MacrosIniPath()`, `ProfilesDir()`.
+- [x] `ThrottleController::LoadConfig` — `MigrateIfNeeded()` + the three-file overlay load; `bHoldForBoost` alias read (`[DualStick]` then `[Injection]`).
+- [x] New `ConfigMigration` unit (`{include,src}/ConfigMigration.{h,cpp}`) — backup, split, stamp; pure `SplitUserConfig` seam unit-tested.
+- [x] `WizardConfig::SaveBindingsToINI` — retargeted to `UserIniPath()`; writes no mod-owned key; relocates `bHoldForBoost` to `[DualStick]`; stamps `iConfigVersion`.
+- [ ] Macros save/load — `MacrosIniPath()` (lands with the macro builder work; load already overlays the file).
+- [x] Profiles — `RuntimePaths::ProfilesDir()`, `WizardConfig::{ListProfiles,ExportProfile,ImportProfile}`, wizard footer Export/Import row, and `ConfigGeneration()`-driven UI refresh.
+- [ ] `AbsoluteHOTAS.ini` shipped file — strip user-owned sections down to documented defaults only.
+- [ ] Packaging — 3.1 archive must not overwrite an existing main ini (FOMOD skip-if-present or `.default` + DLL generate).
 
 ## Test checklist
 

@@ -98,3 +98,20 @@ target("control_map_reader_test")
 
     -- MapVirtualKeyW (VK -> scancode) in TokenToOutput.
     add_syslinks("user32")
+
+-- Standalone unit test for ConfigMigration::SplitUserConfig (the pure monolith->
+-- split transform). Not built by default; opt in with:
+--   xmake build config_migration_test
+--   xmake run   config_migration_test
+-- Compiles ConfigMigration.cpp + RuntimePaths.cpp (its only link dependency) with
+-- no PCH, so it stays independent of the plugin target.
+target("config_migration_test")
+    set_kind("binary")
+    set_default(false)
+
+    add_packages("simpleini")
+    add_includedirs("include")
+
+    add_files("tests/config_migration_test.cpp")
+    add_files("src/ConfigMigration.cpp")
+    add_files("src/RuntimePaths.cpp")
