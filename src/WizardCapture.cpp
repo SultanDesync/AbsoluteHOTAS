@@ -9,6 +9,16 @@
 #include <cmath>
 #include <climits>
 #include <cstdio>
+#include <chrono>
+
+static constexpr int kBounceFrames = 2;             // a raw edge must persist this long
+static constexpr unsigned long long kMaxCaptureMs = 8000;  // give up if nothing settles
+
+static unsigned long long NowMs() {
+    using namespace std::chrono;
+    return (unsigned long long)duration_cast<milliseconds>(
+        steady_clock::now().time_since_epoch()).count();
+}
 
 static void WizLog(const std::string& msg) {
     RuntimePaths::Log("[BindingWizard]", msg);
@@ -62,12 +72,35 @@ const char* PovDirectionName(int direction) {
 // --- Internal helpers ---
 
 static void ResetDebounce() {
-    s_pendingBind.debounceDeviceIndex = -1;
-    s_pendingBind.debounceButtonIndex = -1;
-    s_pendingBind.debounceButtonFrames = 0;
-    s_pendingBind.debounceAxisDeviceIndex = -1;
-    s_pendingBind.debounceAxisIndex = -1;
-    s_pendingBind.debounceAxisFrames = 0;
+    auto& pb = s_pendingBind;
+    pb.debounceAxisDeviceIndex = -1;
+    pb.debounceAxisIndex = -1;
+    pb.debounceAxisFrames = 0;
+    pb.targetDeviceIndex = -1;
+    pb.targetValue = -1;
+    pb.lastConfirmMs = 0;
+    pb.candDeviceIndex = -1;
+    pb.candValue = -1;
+    pb.candFrames = 0;
+}
+
+// Refresh prevFrame (button/POV state) for next-frame edge detection.
+static void UpdatePrevFrame() {
+    for (auto& snap : s_pendingBind.prevFrame) {
+        const auto* st = DeviceManager::GetCachedState(snap.deviceIndex);
+        if (!st) continue;
+        memcpy(snap.buttons, st->rgbButtons, 128);
+        memcpy(snap.povs, st->rgdwPOV, sizeof(snap.povs));
+    }
+}
+
+// Is a captured value (1..128 physical, 129..144 POV) currently held on its device?
+static bool IsValueHeld(int deviceIndex, int value) {
+    const auto* st = DeviceManager::GetCachedState(deviceIndex);
+    if (!st) return false;
+    if (value >= 1 && value <= 128) return (st->rgbButtons[value - 1] & 0x80) != 0;
+    const int p = (value - 129) / 4, dir = (value - 129) % 4;
+    return IsPovDirectionActive(st->rgdwPOV[p], dir);
 }
 
 static void TakeSnapshots() {
@@ -121,12 +154,15 @@ void StartAxisCapture(int slotIndex, const char* label) {
     WizLog("Axis capture started for: " + std::string(label));
 }
 
-void StartButtonCapture(int slotIndex, int categoryOffset, const char* label) {
+void StartButtonCapture(int slotIndex, int categoryOffset, const char* label, int settleWindowMs) {
     s_pendingBind.active = true;
     s_pendingBind.targetLabel = label;
     s_pendingBind.targetConfigSlot = categoryOffset + slotIndex;
     ResetDebounce();
     TakeSnapshots();
+    s_pendingBind.prevFrame = s_pendingBind.snapshots;  // frame-0 reference for edge detect
+    s_pendingBind.settleWindowMs = settleWindowMs > 0 ? settleWindowMs : kButtonCaptureMs;
+    s_pendingBind.captureStartMs = NowMs();
     WizLog("Button capture started for: " + std::string(label));
 }
 
@@ -135,7 +171,6 @@ bool UpdateCapture(BindingCommitFn commitFn) {
 
     int slot = s_pendingBind.targetConfigSlot;
 
-    constexpr int kButtonDebounceFrames = 8;
     constexpr int kAxisDebounceFrames = 5;
 
     if (CaptureSlot::IsAxis(slot)) {
@@ -174,77 +209,75 @@ bool UpdateCapture(BindingCommitFn commitFn) {
             }
         }
     } else {
-        // Button capture (all categories)
-        for (auto& snap : s_pendingBind.snapshots) {
-            if (snap.deviceIndex >= DeviceManager::GetDeviceCount()) continue;
-            const auto* st = DeviceManager::GetCachedState(snap.deviceIndex);
+        // Button / POV capture — settle-to-quiescence. Each confirmed NEW press becomes
+        // the target and resets a settle timer; when input goes quiet for settleWindowMs,
+        // the LAST press wins. This binds the deep stage of a 2-stage trigger (the pull
+        // ends on the last edge) and the final detent of a rotary you turn to, with one
+        // rule. A short bounce guard stops a contact bounce from posing as a later press.
+        // Already-held buttons produce no down-edge, so they are ignored until re-pressed
+        // — for a selector already at the target, turn the switch to it. See the capture
+        // design in docs/reference/profile-switching.md.
+        auto& pb = s_pendingBind;
+        const unsigned long long now = NowMs();
+
+        // Find at most one NEW press edge this frame (down now, up last frame).
+        int edgeDev = -1, edgeVal = -1;
+        for (const auto& prev : pb.prevFrame) {
+            if (edgeVal >= 0) break;
+            if (prev.deviceIndex >= DeviceManager::GetDeviceCount()) continue;
+            const auto* st = DeviceManager::GetCachedState(prev.deviceIndex);
             if (!st) continue;
 
-            auto CommitAndReturn = [&](const char* buf) -> bool {
-                commitFn(slot, buf);
-                WizLog("Button captured: " + std::string(buf) + " for " + s_pendingBind.targetLabel);
-                s_pendingBind.active = false;
-                return true;
-            };
-
-            // Physical buttons (1-128)
-            for (int b = 0; b < 128; b++) {
-                bool nowPressed = (st->rgbButtons[b] & 0x80) != 0;
-                bool wasPressed = (snap.buttons[b] & 0x80) != 0;
-
-                if (!nowPressed || wasPressed) {
-                    if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
-                        s_pendingBind.debounceButtonIndex == b && !nowPressed) {
-                        s_pendingBind.debounceButtonFrames = 0;
-                    }
-                    continue;
-                }
-
-                if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
-                    s_pendingBind.debounceButtonIndex == b) {
-                    s_pendingBind.debounceButtonFrames++;
-                } else {
-                    s_pendingBind.debounceDeviceIndex = snap.deviceIndex;
-                    s_pendingBind.debounceButtonIndex = b;
-                    s_pendingBind.debounceButtonFrames = 1;
-                }
-
-                if (s_pendingBind.debounceButtonFrames >= kButtonDebounceFrames) {
-                    std::string binding = FormatCapturedBinding(snap.deviceIndex, b + 1, false);
-                    return CommitAndReturn(binding.c_str());
+            for (int b = 0; b < 128 && edgeVal < 0; b++) {
+                if ((st->rgbButtons[b] & 0x80) && !(prev.buttons[b] & 0x80)) {
+                    edgeDev = prev.deviceIndex; edgeVal = b + 1;
                 }
             }
-
-            // POV / HAT switches (virtual buttons 129-144)
-            for (int p = 0; p < 4; p++) {
-                for (int dir = 0; dir < 4; dir++) {
-                    int virtualBtn = 129 + p * 4 + dir;
-                    bool nowActive = IsPovDirectionActive(st->rgdwPOV[p], dir);
-                    bool wasActive = IsPovDirectionActive(snap.povs[p], dir);
-
-                    if (!nowActive || wasActive) {
-                        if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
-                            s_pendingBind.debounceButtonIndex == virtualBtn && !nowActive) {
-                            s_pendingBind.debounceButtonFrames = 0;
-                        }
-                        continue;
-                    }
-
-                    if (s_pendingBind.debounceDeviceIndex == snap.deviceIndex &&
-                        s_pendingBind.debounceButtonIndex == virtualBtn) {
-                        s_pendingBind.debounceButtonFrames++;
-                    } else {
-                        s_pendingBind.debounceDeviceIndex = snap.deviceIndex;
-                        s_pendingBind.debounceButtonIndex = virtualBtn;
-                        s_pendingBind.debounceButtonFrames = 1;
-                    }
-
-                    if (s_pendingBind.debounceButtonFrames >= kButtonDebounceFrames) {
-                        std::string binding = FormatCapturedBinding(snap.deviceIndex, virtualBtn, false);
-                        return CommitAndReturn(binding.c_str());
+            for (int p = 0; p < 4 && edgeVal < 0; p++) {
+                for (int dir = 0; dir < 4 && edgeVal < 0; dir++) {
+                    if (IsPovDirectionActive(st->rgdwPOV[p], dir) &&
+                        !IsPovDirectionActive(prev.povs[p], dir)) {
+                        edgeDev = prev.deviceIndex; edgeVal = 129 + p * 4 + dir;
                     }
                 }
             }
+        }
+
+        // Bounce guard: hold a raw edge as a candidate until it persists kBounceFrames,
+        // then confirm it as the (new) target and reset the settle timer.
+        if (edgeVal >= 0) {
+            pb.candDeviceIndex = edgeDev; pb.candValue = edgeVal; pb.candFrames = 1;
+        } else if (pb.candValue >= 0) {
+            if (IsValueHeld(pb.candDeviceIndex, pb.candValue)) {
+                if (++pb.candFrames >= kBounceFrames) {
+                    pb.targetDeviceIndex = pb.candDeviceIndex;
+                    pb.targetValue       = pb.candValue;
+                    pb.lastConfirmMs     = now;
+                    pb.candDeviceIndex = -1; pb.candValue = -1; pb.candFrames = 0;
+                }
+            } else {
+                pb.candDeviceIndex = -1; pb.candValue = -1; pb.candFrames = 0;  // bounce
+            }
+        }
+
+        UpdatePrevFrame();
+
+        const bool haveTarget = pb.targetValue >= 0;
+        const bool settled = haveTarget && pb.candValue < 0 &&
+                             (now - pb.lastConfirmMs) >= (unsigned long long)pb.settleWindowMs;
+        const bool timedOut = (now - pb.captureStartMs) >= kMaxCaptureMs;
+
+        if (settled || (timedOut && haveTarget)) {
+            std::string binding = FormatCapturedBinding(pb.targetDeviceIndex, pb.targetValue, false);
+            commitFn(slot, binding.c_str());
+            WizLog("Button captured: " + binding + " for " + pb.targetLabel);
+            pb.active = false;
+            return true;
+        }
+        if (timedOut) {  // nothing pressed the whole time — give up silently
+            WizLog("Button capture timed out for " + pb.targetLabel);
+            pb.active = false;
+            return false;
         }
     }
 
