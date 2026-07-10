@@ -122,3 +122,18 @@ target("config_migration_test")
     add_files("tests/config_migration_test.cpp")
     add_files("src/ConfigMigration.cpp")
     add_files("src/RuntimePaths.cpp")
+
+-- Standalone unit test for ProfileOverlay::ComputeDiff (the sparse profile-overlay
+-- diff). Not built by default; opt in with:
+--   xmake build config_overlay_test
+--   xmake run   config_overlay_test
+-- Compiles ProfileOverlay.cpp (SimpleIni-only) with no PCH.
+target("config_overlay_test")
+    set_kind("binary")
+    set_default(false)
+
+    add_packages("simpleini")
+    add_includedirs("include")
+
+    add_files("tests/config_overlay_test.cpp")
+    add_files("src/ProfileOverlay.cpp")

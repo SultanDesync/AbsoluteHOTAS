@@ -6,6 +6,7 @@
 #include "ShipOutput.h"
 #include "RuntimePaths.h"
 #include "ConfigMigration.h"
+#include "ProfileOverlay.h"
 
 #include <SimpleIni.h>
 #include <cstdio>
@@ -39,7 +40,18 @@ namespace WizardConfig {
 
 static WizardState s_state;
 
+// Pristine base config, captured whenever s_state is (re)loaded. Valid because the
+// wizard being open forces the engine to base (slot 0), so GetConfig() == base while
+// we edit. Sparse profile saves diff s_state against this.
+static WizardState s_baseState;
+
+// Save target: empty = base (_User.ini, full); otherwise a Profiles/<name> overlay.
+static std::string s_editProfile;
+
 WizardState& GetState() { return s_state; }
+
+const std::string& GetEditProfile() { return s_editProfile; }
+void SetEditProfile(const std::string& name) { s_editProfile = name; }
 
 // --- Macro row parsing (mirrors MacroEngine's grammar, at the token level) ---
 namespace {
@@ -296,22 +308,17 @@ void LoadCurrentBindings() {
     // Macros come straight from their INI, not from MacroEngine — see WizardDefs.h.
     LoadMacroRows(s);
 
+    // Snapshot base for sparse-overlay diffs (see s_baseState). The wizard forces the
+    // engine to base while open, so what we just loaded IS base.
+    s_baseState = s;
+
     s.loaded = true;
 }
 
-void SaveBindingsToINI() {
-    // Write ONLY the user file. The main ini is mod-owned and overwrite-safe; a
-    // single user key written there reintroduces the update-clobber bug the split
-    // exists to prevent. See docs/reference/config-layout.md.
-    auto iniPath = RuntimePaths::UserIniPath();
-    WizLog("Saving bindings to: " + iniPath.string());
-
-    CSimpleIniA ini;
-    ini.SetUnicode(false);
-    ini.LoadFile(iniPath.string().c_str());
-
-    auto& s = s_state;
-
+// Serialize every user-owned key from a WizardState into an ini object. Shared by
+// the full user-file save and the sparse profile-overlay diff, so both write the
+// exact same key set for the same state — which is what makes the diff clean.
+static void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
     // Axes
     for (int i = 0; i < kNumAxisSlots; i++) {
         const char* val = (s.axisBindings[i] != "(unbound)") ? s.axisBindings[i].c_str() : "";
@@ -425,6 +432,20 @@ void SaveBindingsToINI() {
         }
         ini.SetValue("ButtonExpansion", iniKey.c_str(), row.output.c_str());
     }
+}
+
+void SaveBindingsToINI() {
+    // Write ONLY the user file. The main ini is mod-owned and overwrite-safe; a
+    // single user key written there reintroduces the update-clobber bug the split
+    // exists to prevent. See docs/reference/config-layout.md.
+    const auto iniPath = RuntimePaths::UserIniPath();
+    WizLog("Saving bindings to: " + iniPath.string());
+
+    CSimpleIniA ini;
+    ini.SetUnicode(false);
+    ini.LoadFile(iniPath.string().c_str());  // preserve keys we don't manage
+
+    SerializeUserOwnedState(s_state, ini);
 
     // Stamp the schema version so a fresh-install user file (which never went through
     // MigrateIfNeeded) still carries one for future semantic migrations.
@@ -438,6 +459,54 @@ void SaveBindingsToINI() {
 
     ThrottleController::ReloadConfig();
     WizLog("Config reload requested.");
+}
+
+// Write a switch profile as a SPARSE overlay: only the keys whose effective value
+// differs from base. This is the hard requirement the whole profile UX rests on — a
+// full dump would freeze the profile into a copy that stops tracking base. See
+// docs/reference/profile-switching.md.
+//
+// PRECONDITION: s_state must hold the profile's EFFECTIVE config (base + this
+// profile's overrides). ComputeDiff visits every managed key, so if s_state were
+// merely base (overrides not loaded), a managed key the user did not touch would
+// read as "reverted" and its override would be deleted. Editing an existing profile
+// therefore requires loading its overrides into s_state first (effective-load, lands
+// with override rendering). Creating a fresh empty overlay is safe today: s_state is
+// base + this session's edits, and the file starts empty.
+void SaveProfileOverlay(const std::string& name) {
+    CSimpleIniA effIni, baseIni;
+    effIni.SetUnicode(false);
+    baseIni.SetUnicode(false);
+    SerializeUserOwnedState(s_state,     effIni);   // base + this session's edits
+    SerializeUserOwnedState(s_baseState, baseIni);  // pristine base
+
+    // Merge onto any existing overlay so overrides from earlier sessions that the user
+    // did not touch this time survive; we only add/update/remove what changed.
+    std::error_code ec;
+    std::filesystem::create_directories(RuntimePaths::ProfilesDir(), ec);
+    const auto path = RuntimePaths::ProfilesDir() / (name + ".ini");
+    CSimpleIniA prof;
+    prof.SetUnicode(false);
+    prof.LoadFile(path.string().c_str());
+
+    const int overrides = ProfileOverlay::ComputeDiff(effIni, baseIni, prof);
+
+    prof.SetValue("Profile", "sName", name.c_str());
+    prof.SetValue("Profile", "sKind", "overlay");
+    prof.SetLongValue("Profile", "iConfigVersion", ConfigMigration::kConfigVersion);
+
+    if (prof.SaveFile(path.string().c_str()) != SI_OK) {
+        WizLog("Could not write profile overlay: " + path.string());
+        return;
+    }
+    WizLog("Saved overlay '" + name + "' (" + std::to_string(overrides) + " override(s)) -> " + path.string());
+    ThrottleController::ReloadConfig();
+}
+
+// Route Save to whichever profile is the current edit target.
+void SaveActiveProfile() {
+    if (s_editProfile.empty()) SaveBindingsToINI();     // base -> _User.ini, full
+    else                       SaveProfileOverlay(s_editProfile);
 }
 
 void SaveMacrosToINI() {

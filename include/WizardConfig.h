@@ -97,6 +97,18 @@ void LoadCurrentBindings();
 // AbsoluteHOTAS_Macros.ini) and request a config reload.
 void SaveBindingsToINI();
 
+// --- Profile edit target ---
+// Which config the wizard's Save writes to: "" = base (_User.ini, full save);
+// otherwise a Profiles/<name> sparse overlay. The dropdown in the profiles header
+// sets this; the Save button routes through SaveActiveProfile.
+const std::string& GetEditProfile();
+void SetEditProfile(const std::string& name);
+
+// Save to the current edit target: base -> full _User.ini; a profile -> a sparse
+// overlay of only the keys that differ from base. See docs/reference/profile-switching.md.
+void SaveActiveProfile();
+void SaveProfileOverlay(const std::string& name);
+
 // Rewrite AbsoluteHOTAS_Macros.ini from WizardState::macros. The file holds only
 // [Macro:*] sections, so this is a full rewrite — which is exactly why macros were
 // given their own file (no enumerate-and-delete against the user's other keys).
