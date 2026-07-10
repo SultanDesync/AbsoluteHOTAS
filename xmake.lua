@@ -66,19 +66,26 @@ target("AbsoluteHOTAS")
 
         -- 2) Optional live deploy (see the `deploydir` option above). Guarded so a
         --    fresh clone / CI without a deploydir still builds cleanly.
+        --
+        --    Both the DLL and the INI are overwritten every build. The INI used to be
+        --    seeded only-if-absent to keep tuned bindings from being clobbered, but
+        --    since the config split it is mod-owned and holds no user data: bindings,
+        --    calibration, and macros live in AbsoluteHOTAS_User.ini and
+        --    AbsoluteHOTAS_Macros.ini, which nothing here writes. Overwriting the main
+        --    INI is therefore what a real 3.2+ update does, and testing that path on
+        --    every build is the point.
+        --
+        --    Under MO2 the user/macros/profile files are written to `overwrite/`, not
+        --    to the mod folder this deploys into, so a rebuild cannot reach them.
         local dst = config.get("deploydir")
         if not dst or dst == "" then dst = os.getenv("ABSOLUTEHOTAS_DEPLOY_DIR") end
         if dst and dst ~= "" then
             os.mkdir(dst)
+            -- The DLL is locked while the game is running; fail loudly rather than
+            -- leaving a stale DLL behind a "build ok" that invites testing it.
             os.cp(dllsrc, path.join(dst, "AbsoluteHOTAS.dll"))
-            -- Seed the INI only if absent so tuned bindings survive rebuilds; delete
-            -- the deployed INI to re-seed the default on the next build.
-            local inidst = path.join(dst, "AbsoluteHOTAS.ini")
-            if not os.isfile(inidst) then
-                os.cp(inisrc, inidst)
-                print("Seeded AbsoluteHOTAS.ini -> " .. inidst)
-            end
-            print("Deployed AbsoluteHOTAS.dll -> " .. dst)
+            os.cp(inisrc, path.join(dst, "AbsoluteHOTAS.ini"))
+            print("Deployed AbsoluteHOTAS.dll + .ini -> " .. dst)
         end
     end)
 
