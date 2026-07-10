@@ -50,7 +50,7 @@ lifts out of the old monolith. Everything not listed as user-owned stays mod-own
 - `[Aim]` — entire section (bindings + tuning + HOSAM/alignment)
 - `[DualStick]` — entire section
 - `[Calibration]` — entire section (auto-generated per-device ranges)
-- `[Layers]` — entire section (shift-layer definitions, see [input-layers.md](input-layers.md)); layer-qualified binding keys (`:L<n>` suffix) live wherever their unqualified siblings do, i.e. in the user file
+- `[Profiles]` — entire section (switch-slot definitions, see [profile-switching.md](profile-switching.md))
 - `bHoldForBoost` — **currently mis-homed in `[Injection]`.** Relocate to `[DualStick]` (or `[Normalization]`) and read the old `[Injection]` location as a migration alias.
 
 **Mod-owned → `AbsoluteHOTAS.ini`** (shipped defaults, overwrite-safe):
@@ -179,6 +179,15 @@ snapshots ("before I retune everything") and sharing setups on Nexus.
 Profiles are strictly a copy/split of the two user files — no new schema, so
 this lands after the split with no interaction with migration beyond reusing the
 `iConfigVersion` machinery.
+
+> **Import is not Swap.** The same `Profiles/*.ini` file serves two opposite verbs.
+> **Import** (above) is destructive and persistent: it rewrites `_User.ini` and
+> `_Macros.ini`, auto-backs up first, and is driven from the wizard. **Swap**
+> ([profile-switching.md](profile-switching.md)) is transient and in-memory: it
+> overlays the base config, writes nothing, and is driven by a physical button
+> mid-flight. A swap must never be implemented by calling `ImportProfile` — that
+> would overwrite the user's base config on every shift press, spam auto-backups,
+> and re-read `ControlMap_Custom.txt` from Documents each time.
 
 ## Config versioning (semantic changes)
 

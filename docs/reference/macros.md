@@ -143,9 +143,10 @@ the game behind the open overlay (macros are suppressed while it's up), which is
 both awkward to reason about and easy to mistake for a stuck key. Bind, Save, and
 try it in flight instead.
 
-Layers: the macro trigger is an ordinary button reference, so it accepts the
-`:L<n>` layer qualifier ([input-layers.md](input-layers.md)); the tab shows the same
-layer-selector pills as the Buttons tab. Steps are layer-blind.
+Profiles: a macro belongs to whichever profile defines it, so a
+[profile swap](profile-switching.md) changes the whole macro set. No per-macro
+qualifier is needed — the tab shows the same slot pills as the Buttons tab, and
+editing under a slot writes that slot's profile. A swap releases any in-flight macro.
 
 ## Worked example — "Grav → Shields"
 
