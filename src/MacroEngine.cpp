@@ -179,6 +179,18 @@ void ReleaseAll() {
     }
 }
 
+std::vector<Macro> SnapshotMacros() {
+    return s_macros;
+}
+
+void RestoreMacros(const std::vector<Macro>& macros) {
+    // Caller has already released held macro keys (ReleaseAll). Swap in the new set
+    // and reset runtime to all-inactive, sized to match — no stale phase or step
+    // index may survive into a different macro list.
+    s_macros = macros;
+    s_runtime.assign(s_macros.size(), MacroRuntime{});
+}
+
 void Update() {
     const uint64_t now = NowMs();
 

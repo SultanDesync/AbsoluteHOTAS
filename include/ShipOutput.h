@@ -73,6 +73,16 @@ void ReleaseShipButtonBindingOutputs();
 void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held);
 void ReleaseOwnerOutputs(uint32_t ownerId);
 
+// ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
+// A profile swap preloads the ControlMap-resolved ship-button table per slot and
+// restores one into place on swap. RestoreBindings does NOT touch held outputs —
+// the caller releases those first — and SeedDownButtonsConsumed then marks any
+// physically-held button as already-seen so it will not re-fire under its new
+// meaning until genuinely re-pressed.
+std::vector<ShipButtonBinding> SnapshotBindings();
+void RestoreBindings(const std::vector<ShipButtonBinding>& bindings);
+void SeedDownButtonsConsumed();
+
 // Returns true if the FireBoosters (index 0) output is currently held.
 bool IsBoostOutputHeld();
 

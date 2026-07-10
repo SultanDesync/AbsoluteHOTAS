@@ -56,7 +56,7 @@ lifts out of the old monolith. Everything not listed as user-owned stays mod-own
 **Mod-owned → `AbsoluteHOTAS.ini`** (shipped defaults, overwrite-safe):
 
 - `[General]` — `bEnabled`, `bSyncShipOutputsFromControlMap` (user-overridable via overlay, but default shipped here)
-- `[Injection]` — `iPollRateHz`, `iThrottleBurstMs`, `bRollEnabled`, `bEnableLog`, `bSignalHunterFallback`
+- `[Injection]` — `iPollRateHz`, `iThrottleBurstMs`, `bRollEnabled`, `bEnableLog`, `bSignalHunterFallback`, `bEnableInjection` (base default true; a `Profiles/` overlay flips it false to park)
 
 `[Macro:*]` → `AbsoluteHOTAS_Macros.ini`. Brand-new in 3.1, so nothing to migrate;
 the file just starts absent/empty. Keeping macros in their own file also avoids the

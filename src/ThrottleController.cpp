@@ -28,6 +28,34 @@ std::thread        ThrottleController::s_thread;
 
 static bool s_turnAssistRuntimeActive = false;
 
+// ---- Profile switching (see docs/reference/profile-switching.md) ----
+// Each slot holds a fully-resolved snapshot of the three things a swap replaces:
+// the Config, the ControlMap-resolved ship-button table, and the macro set. Slot 0
+// is the base profile; slots 1+ are switch profiles with a trigger button. All of
+// this is control-thread-only state — no locking.
+// How a slot's trigger button selects it.
+//   Momentary — active while held (spring-return shift button); returns on release.
+//   Toggle    — press flips in/out of the profile.
+//   Selector  — active while held, evaluated by LEVEL not edge: for a rotary/detent
+//               switch where each position keeps its button held. Self-syncs to the
+//               physical position at startup and after the overlay closes.
+enum class SwapMode { Momentary, Toggle, Selector };
+
+struct ProfileSlot {
+    ThrottleController::Config      config;
+    std::vector<ShipButtonBinding>  shipBindings;
+    std::vector<Macro>              macros;
+
+    // Activation (unused for slot 0).
+    BindingRef  trigger;
+    SwapMode    mode       = SwapMode::Momentary;
+    bool        prevDown   = false;  // momentary/toggle edge-detect state
+    int         restoreSlot = 0;     // momentary: slot that was active when this was pressed
+};
+static std::vector<ProfileSlot> s_profiles;   // [0] = base
+static int s_activeSlot = 0;
+static int s_lastSelectorPos = -2;            // last selector position acted on (-2 = re-eval)
+
 // ---- Logging ----
 // All controller lines are gated by bEnableLog inside RuntimePaths::Log.
 static void CtrlLog(const char* msg) {
@@ -93,14 +121,15 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
 }
 
 // ---- INI Config Loading ----
-void ThrottleController::LoadConfig() {
+void ThrottleController::LoadConfig(const std::string* slotFile) {
     // One-time monolith -> split migration, before any load reads a value.
     ConfigMigration::MigrateIfNeeded();
 
-    // Layered overlay: mod defaults, then user overrides win, then macros merge in.
-    // Sequential LoadFile into one object overwrites single-value keys (multikey is
-    // off), so the user file supersedes the shipped defaults per-key, and [Macro:*]
-    // lands in the same object for MacroEngine::LoadMacros below.
+    // Layered overlay: mod defaults, then user overrides win, then macros merge in,
+    // then (for a switch profile) the slot file wins over all of them. Sequential
+    // LoadFile into one object overwrites single-value keys (multikey is off), so a
+    // sparse slot inherits every key it does not mention, and [Macro:*] lands in the
+    // same object for MacroEngine::LoadMacros below.
     CSimpleIniA ini;
     ini.SetUnicode();
     const auto path      = RuntimePaths::IniPath().string();
@@ -110,10 +139,13 @@ void ThrottleController::LoadConfig() {
     const bool haveMain = ini.LoadFile(path.c_str()) == SI_OK;
     const bool haveUser = ini.LoadFile(userPath.c_str()) == SI_OK;
     ini.LoadFile(macroPath.c_str());  // absent until the Macros tab writes it
+    if (slotFile)
+        ini.LoadFile(slotFile->c_str());  // switch-profile overlay, wins per-key
 
     if (haveMain || haveUser)
         CtrlLog("Loaded config (main: " + std::string(haveMain ? "yes" : "no") +
-                ", user: " + (haveUser ? "yes" : "no") + ").");
+                ", user: " + (haveUser ? "yes" : "no") +
+                (slotFile ? ", slot: " + *slotFile : "") + ").");
     else
         CtrlLog("No config files found, using defaults.");
 
@@ -181,6 +213,7 @@ void ThrottleController::LoadConfig() {
     s_config.pollRateHz        = (int)ini.GetLongValue("Injection", "iPollRateHz",     120);
     s_config.throttleBurstMs   = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled       = ini.GetBoolValue("Injection", "bRollEnabled",     true);
+    s_config.bEnableInjection  = ini.GetBoolValue("Injection", "bEnableInjection", true);
     // bHoldForBoost relocated [Injection] -> [DualStick] in 3.1. Read the new home,
     // falling back to the old location as a migration alias for un-migrated files.
     s_config.bHoldForBoost     = ini.GetBoolValue("DualStick", "bHoldForBoost",
@@ -266,6 +299,171 @@ void ThrottleController::LoadConfig() {
     s_config.turnAssistButton     = ParseBindingRef(ini.GetValue("DualStick", "iTurnAssistButton", ""), -1);
 }
 
+// ---- Profile switching ----
+
+// Resolve every BindingRef in the active config, ship-button table, and macro set
+// to a device index and open that device. Formerly the ResolveAll lambda inside
+// ControlLoop; hoisted so PreloadProfiles can resolve each slot.
+void ThrottleController::ResolveActiveDevices() {
+    auto ResolveAndOpen = [](BindingRef& ref) {
+        if (!ref.IsValid()) return;
+        int resolvedIndex = -1;
+        if (ref.HasIndex()) {
+            if (ref.deviceIndex < DeviceManager::GetDeviceCount())
+                resolvedIndex = ref.deviceIndex;
+            else {
+                char buf[256];
+                sprintf_s(buf, "Warning: Device index #%d out of range (%d devices)",
+                    ref.deviceIndex, DeviceManager::GetDeviceCount());
+                RuntimePaths::Log("[Controller]", buf);
+            }
+        } else if (ref.HasDevice()) {
+            resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
+        } else {
+            resolvedIndex = DeviceManager::GetDeviceCount() > 0 ? 0 : -1;
+        }
+        if (resolvedIndex >= 0) {
+            ref.deviceIndex = resolvedIndex;
+            DeviceManager::OpenDevice(resolvedIndex);
+        } else {
+            char buf[256];
+            sprintf_s(buf, "Warning: Could not resolve device: %s",
+                ref.HasDevice() ? ref.deviceName.c_str() : "default fallback");
+            RuntimePaths::Log("[Controller]", buf);
+        }
+    };
+
+    Config& cfg = s_config;
+    ResolveAndOpen(cfg.throttleAxis);
+    ResolveAndOpen(cfg.pitchAxis);
+    ResolveAndOpen(cfg.yawAxis);
+    ResolveAndOpen(cfg.rollAxis);
+    ResolveAndOpen(cfg.strafeLatAxis);
+    ResolveAndOpen(cfg.strafeVertAxis);
+    ResolveAndOpen(cfg.reverseAxis);
+    ResolveAndOpen(cfg.aimYawAxis);
+    ResolveAndOpen(cfg.aimPitchAxis);
+    ResolveAndOpen(cfg.activateButton);
+    ResolveAndOpen(cfg.stopButton);
+    ResolveAndOpen(cfg.toggleWizardButton);
+    ResolveAndOpen(cfg.digitalReverseButton);
+    ResolveAndOpen(cfg.digitalRollLeftButton);
+    ResolveAndOpen(cfg.digitalRollRightButton);
+    ResolveAndOpen(cfg.digitalStrafeLeftButton);
+    ResolveAndOpen(cfg.digitalStrafeRightButton);
+    ResolveAndOpen(cfg.digitalStrafeUpButton);
+    ResolveAndOpen(cfg.digitalStrafeDownButton);
+    ResolveAndOpen(cfg.digitalAimLeftButton);
+    ResolveAndOpen(cfg.digitalAimRightButton);
+    ResolveAndOpen(cfg.digitalAimUpButton);
+    ResolveAndOpen(cfg.digitalAimDownButton);
+    ResolveAndOpen(cfg.digitalAimCenterButton);
+    ResolveAndOpen(cfg.toggleAimModeButton);
+    ResolveAndOpen(cfg.turnAssistButton);
+
+    int count = ShipOutputSystem::GetShipButtonCount();
+    for (int i = 0; i < count; i++)
+        ResolveAndOpen(ShipOutputSystem::GetShipButtonBindings()[i].buttonRef);
+
+    // Macro trigger buttons: resolved here (not in LoadMacros, which runs before
+    // DeviceManager init) so name-based macro buttons get a device index and fire.
+    for (Macro& m : MacroEngine::GetMacrosMutable())
+        ResolveAndOpen(m.button);
+}
+
+// One [Profiles] slot definition. Discrete keys per slot (Slot<N>File /
+// Slot<N>Button / Slot<N>Mode) rather than one packed value, because a device-name
+// button ref contains spaces and could not be split from the value cleanly.
+struct ProfileSlotDef {
+    std::string file;     // resolved absolute path under Profiles/
+    BindingRef  trigger;
+    SwapMode    mode = SwapMode::Momentary;
+};
+
+static std::vector<ProfileSlotDef> ParseProfileSlots() {
+    std::vector<ProfileSlotDef> out;
+    CSimpleIniA ini;
+    ini.SetUnicode();
+    ini.LoadFile(RuntimePaths::IniPath().string().c_str());
+    ini.LoadFile(RuntimePaths::UserIniPath().string().c_str());
+
+    for (int n = 1; n <= 16; ++n) {  // sparse slot numbering tolerated
+        const std::string base = "Slot" + std::to_string(n);
+        const char* file = ini.GetValue("Profiles", (base + "File").c_str(), nullptr);
+        if (!file || !*file) continue;
+
+        ProfileSlotDef def;
+        def.file    = (RuntimePaths::ProfilesDir() / file).string();
+        def.trigger = ParseBindingRef(ini.GetValue("Profiles", (base + "Button").c_str(), ""), -1);
+        const char* mode = ini.GetValue("Profiles", (base + "Mode").c_str(), "momentary");
+        if (_stricmp(mode, "toggle") == 0)        def.mode = SwapMode::Toggle;
+        else if (_stricmp(mode, "selector") == 0) def.mode = SwapMode::Selector;
+        else                                      def.mode = SwapMode::Momentary;
+        out.push_back(std::move(def));
+    }
+    return out;
+}
+
+// Build, resolve, and snapshot every slot; leave the base profile active.
+void ThrottleController::PreloadProfiles() {
+    const std::vector<ProfileSlotDef> defs = ParseProfileSlots();
+
+    s_profiles.clear();
+
+    // Slot 0 = base: no slot file.
+    {
+        LoadConfig(nullptr);
+        ResolveActiveDevices();
+        ProfileSlot base;
+        base.config       = s_config;
+        base.shipBindings = ShipOutputSystem::SnapshotBindings();
+        base.macros       = MacroEngine::SnapshotMacros();
+        s_profiles.push_back(std::move(base));
+    }
+
+    // Slots 1..N = switch profiles, each a fourth overlay on the base stack.
+    for (const ProfileSlotDef& def : defs) {
+        LoadConfig(&def.file);
+        ResolveActiveDevices();
+        ProfileSlot slot;
+        slot.config       = s_config;
+        slot.shipBindings = ShipOutputSystem::SnapshotBindings();
+        slot.macros       = MacroEngine::SnapshotMacros();
+        slot.trigger      = def.trigger;
+        slot.mode         = def.mode;
+        s_profiles.push_back(std::move(slot));
+    }
+
+    CtrlLog("Preloaded " + std::to_string(s_profiles.size()) + " profile(s) (incl. base).");
+
+    // Make base active without a release storm (nothing is held yet at preload).
+    s_activeSlot = 0;
+    s_config       = s_profiles[0].config;
+    ShipOutputSystem::RestoreBindings(s_profiles[0].shipBindings);
+    MacroEngine::RestoreMacros(s_profiles[0].macros);
+}
+
+// Swap the live configuration to a preloaded slot.
+void ThrottleController::ActivateProfile(int slot) {
+    if (slot < 0 || slot >= (int)s_profiles.size() || slot == s_activeSlot) return;
+
+    // Release everything the outgoing profile was holding so no key sticks across
+    // the swap, then copy the target snapshot into the live globals.
+    ShipOutputSystem::ReleaseAllShipButtonOutputs();
+    MacroEngine::ReleaseAll();
+
+    s_config = s_profiles[slot].config;
+    ShipOutputSystem::RestoreBindings(s_profiles[slot].shipBindings);
+    MacroEngine::RestoreMacros(s_profiles[slot].macros);
+
+    // A button still physically down must not re-fire as its new-profile meaning.
+    ShipOutputSystem::SeedDownButtonsConsumed();
+
+    s_activeSlot = slot;
+    s_configGeneration.fetch_add(1, std::memory_order_release);  // wizard UI refresh
+    CtrlLog("Profile swap -> slot " + std::to_string(slot));
+}
+
 // ---- Control Loop ----
 void ThrottleController::ControlLoop() {
     CtrlLog("=== DirectInput Polling Loop Starting ===");
@@ -276,74 +474,8 @@ void ThrottleController::ControlLoop() {
     }
     DeviceManager::LogDeviceManifest();
 
-    // Resolve a BindingRef to a device index and open that device.
-    auto ResolveAll = [](Config& cfg) {
-        auto ResolveAndOpen = [](BindingRef& ref) {
-            if (!ref.IsValid()) return;
-            int resolvedIndex = -1;
-            if (ref.HasIndex()) {
-                if (ref.deviceIndex < DeviceManager::GetDeviceCount())
-                    resolvedIndex = ref.deviceIndex;
-                else {
-                    char buf[256];
-                    sprintf_s(buf, "Warning: Device index #%d out of range (%d devices)",
-                        ref.deviceIndex, DeviceManager::GetDeviceCount());
-                    RuntimePaths::Log("[Controller]", buf);
-                }
-            } else if (ref.HasDevice()) {
-                resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
-            } else {
-                resolvedIndex = DeviceManager::GetDeviceCount() > 0 ? 0 : -1;
-            }
-            if (resolvedIndex >= 0) {
-                ref.deviceIndex = resolvedIndex;
-                DeviceManager::OpenDevice(resolvedIndex);
-            } else {
-                char buf[256];
-                sprintf_s(buf, "Warning: Could not resolve device: %s",
-                    ref.HasDevice() ? ref.deviceName.c_str() : "default fallback");
-                RuntimePaths::Log("[Controller]", buf);
-            }
-        };
-
-        ResolveAndOpen(cfg.throttleAxis);
-        ResolveAndOpen(cfg.pitchAxis);
-        ResolveAndOpen(cfg.yawAxis);
-        ResolveAndOpen(cfg.rollAxis);
-        ResolveAndOpen(cfg.strafeLatAxis);
-        ResolveAndOpen(cfg.strafeVertAxis);
-        ResolveAndOpen(cfg.reverseAxis);
-        ResolveAndOpen(cfg.aimYawAxis);
-        ResolveAndOpen(cfg.aimPitchAxis);
-        ResolveAndOpen(cfg.activateButton);
-        ResolveAndOpen(cfg.stopButton);
-        ResolveAndOpen(cfg.toggleWizardButton);
-        ResolveAndOpen(cfg.digitalReverseButton);
-        ResolveAndOpen(cfg.digitalRollLeftButton);
-        ResolveAndOpen(cfg.digitalRollRightButton);
-        ResolveAndOpen(cfg.digitalStrafeLeftButton);
-        ResolveAndOpen(cfg.digitalStrafeRightButton);
-        ResolveAndOpen(cfg.digitalStrafeUpButton);
-        ResolveAndOpen(cfg.digitalStrafeDownButton);
-        ResolveAndOpen(cfg.digitalAimLeftButton);
-        ResolveAndOpen(cfg.digitalAimRightButton);
-        ResolveAndOpen(cfg.digitalAimUpButton);
-        ResolveAndOpen(cfg.digitalAimDownButton);
-        ResolveAndOpen(cfg.digitalAimCenterButton);
-        ResolveAndOpen(cfg.toggleAimModeButton);
-        ResolveAndOpen(cfg.turnAssistButton);
-
-        int count = ShipOutputSystem::GetShipButtonCount();
-        for (int i = 0; i < count; i++)
-            ResolveAndOpen(ShipOutputSystem::GetShipButtonBindings()[i].buttonRef);
-
-        // Macro trigger buttons: resolved here (not in LoadMacros, which runs before
-        // DeviceManager init) so name-based macro buttons get a device index and fire.
-        for (Macro& m : MacroEngine::GetMacrosMutable())
-            ResolveAndOpen(m.button);
-    };
-
-    ResolveAll(s_config);
+    // Base + every switch profile: build, resolve, snapshot; base becomes active.
+    PreloadProfiles();
 
     // Detect hardware range for the primary throttle axis
     long axisMin = 0, axisMax = 65535;
@@ -414,8 +546,10 @@ void ThrottleController::ControlLoop() {
         // Hot-reload
         if (s_configReloadRequested.exchange(false)) {
             CtrlLog("=== CONFIG HOT-RELOAD ===");
-            LoadConfig();
-            ResolveAll(s_config);
+            // Release anything the outgoing config was holding, then rebuild every
+            // slot and return to base. (PreloadProfiles releases macro keys itself.)
+            ShipOutputSystem::ReleaseAllShipButtonOutputs();
+            PreloadProfiles();
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
             // Publish AFTER the new config is fully applied so a wizard reading a
             // bumped generation is guaranteed to see the reloaded values, not a
@@ -458,12 +592,84 @@ void ThrottleController::ControlLoop() {
             MacroEngine::ReleaseAll();
             SignalHunter::Disarm();
             lastInjectedHardwareValue = -999.0f;
+            ActivateProfile(0);  // always return home; no-op if already on base
         }
         if (curToggleWizard && !prevToggleWizard) UIHook::ToggleUI();
 
         prevActivate     = curActivate;
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
+
+        // ---- Profile switch triggers ----
+        // Three activation modes coexist (a rig may use any mix): momentary and
+        // toggle are edge-driven; selector is level-driven for rotary/detent switches.
+        // Invariant: a switch profile is only active while armed and the overlay is
+        // closed. While suppressed we snap to base and keep trigger state current
+        // without acting, so a release under suppression can't strand the user and
+        // resuming can't fire a spurious swap; the selector re-syncs on resume.
+        {
+            const bool swapEnabled = active && !UIHook::IsUIOpen();
+            if (!swapEnabled) {
+                if (s_activeSlot != 0) ActivateProfile(0);
+                for (size_t i = 1; i < s_profiles.size(); ++i)
+                    s_profiles[i].prevDown = s_profiles[i].trigger.IsValid()
+                                          && IsButtonPressed(s_profiles[i].trigger);
+                s_lastSelectorPos = -2;  // force selector re-sync to the physical position on resume
+            } else {
+                // The live "base selection": the selector's current position, else
+                // slot 0. Momentary/toggle overrides return here, so a shift layered
+                // over a rotary returns to the dial's position rather than slot 0.
+                auto CurrentBaseSelection = [&]() -> int {
+                    int b = 0;
+                    for (size_t i = 1; i < s_profiles.size(); ++i)
+                        if (s_profiles[i].mode == SwapMode::Selector && s_profiles[i].trigger.IsValid()
+                            && IsButtonPressed(s_profiles[i].trigger))
+                            b = (int)i;
+                    return b;
+                };
+
+                // Selector: read by level, but act only when the physical position
+                // CHANGES, so an override on top is not stomped each tick. A gap with
+                // no position held (break-before-make rotary) holds the last position.
+                {
+                    int pos = -1;
+                    bool haveSelector = false;
+                    for (size_t i = 1; i < s_profiles.size(); ++i) {
+                        if (s_profiles[i].mode != SwapMode::Selector) continue;
+                        haveSelector = true;
+                        if (s_profiles[i].trigger.IsValid() && IsButtonPressed(s_profiles[i].trigger))
+                            pos = (int)i;
+                    }
+                    if (haveSelector && pos != s_lastSelectorPos) {
+                        s_lastSelectorPos = pos;
+                        if (pos >= 0) ActivateProfile(pos);  // pos == -1: hold last, no swap
+                    }
+                }
+
+                // Momentary / toggle: edge-driven.
+                for (size_t i = 1; i < s_profiles.size(); ++i) {
+                    ProfileSlot& sl = s_profiles[i];
+                    if (sl.mode == SwapMode::Selector || !sl.trigger.IsValid()) continue;
+
+                    const bool down        = IsButtonPressed(sl.trigger);
+                    const bool pressEdge   = down && !sl.prevDown;
+                    const bool releaseEdge = !down && sl.prevDown;
+                    sl.prevDown = down;
+
+                    if (sl.mode == SwapMode::Toggle) {
+                        if (pressEdge)
+                            ActivateProfile(s_activeSlot == (int)i ? CurrentBaseSelection() : (int)i);
+                    } else {  // Momentary
+                        if (pressEdge) {
+                            sl.restoreSlot = s_activeSlot;  // per-slot so nesting unwinds correctly
+                            ActivateProfile((int)i);
+                        } else if (releaseEdge && s_activeSlot == (int)i) {
+                            ActivateProfile(sl.restoreSlot);
+                        }
+                    }
+                }
+            }
+        }
 
         // ---- Pilot-state gate ----
         // Framework: a manual toggle key flips the test piloting signal so the gate
@@ -734,7 +940,14 @@ void ThrottleController::ControlLoop() {
             // ---- SignalHunter / AimController (pilot-gated injection) ----
             // InjectionOnly: while not piloting, park the memory injection but leave
             // SendInput bindings live (those are processed above, ungated here).
-            const bool injectionAllowed = (s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting;
+            //
+            // bEnableInjection is the per-profile switch for the same thing: a "parked"
+            // profile sets it false to disable ALL memory injection (flight cluster +
+            // aim) while its buttons/macros keep working. It rides the config swap, so
+            // landing on such a profile parks injection via the same transition path as
+            // the pilot gate — no separate release logic. See profile-switching.md.
+            const bool injectionAllowed = s_config.bEnableInjection
+                && ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
             if (injectionAllowed) {
                 injectionWasAllowed = true;
                 int candCount = ThrottleHook::GetCandidateCount();

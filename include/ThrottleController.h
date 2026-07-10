@@ -95,6 +95,11 @@ public:
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
         bool    rollEnabled = true;       // Roll shares the +0x58 writer with lateral strafe.
         bool    reverseAxisEnabled = true;
+        // Master switch for ALL memory injection (flight cluster + source-object aim).
+        // SendInput outputs, custom bindings, and macros are unaffected. Default true;
+        // a "parked" profile sets it false to disable flight injection on foot while
+        // keeping its own button/macro mappings. See profile-switching.md.
+        bool    bEnableInjection = true;
 
         bool    bHoldForBoost = true;   // Pause throttle injection while boost is held; cancel on release
         // [ShipButtons]
@@ -209,7 +214,23 @@ private:
     static std::atomic<float> s_currentThrottle;
     static std::thread s_thread;
 
-    static void LoadConfig();
+    // Load the layered config into the active globals. slotFile, when non-null,
+    // is appended as a fourth overlay (main -> user -> macros -> slot) so a switch
+    // profile's overrides win. See docs/reference/profile-switching.md.
+    static void LoadConfig(const std::string* slotFile = nullptr);
+
     static void ControlLoop();
     static float NormalizeAxis(long rawValue, long axisMin, long axisMax);
+
+    // --- Profile switching ---
+    // Resolve every BindingRef in the active config + ship bindings + macros to a
+    // device index and open the device. Runs per slot during preload.
+    static void ResolveActiveDevices();
+    // Build, resolve, and snapshot every slot ([Profiles] in the user file), then
+    // make the base profile active. Runs at control-loop start and on hot-reload.
+    static void PreloadProfiles();
+    // Swap the active configuration to a preloaded slot: release held outputs and
+    // macro keys, copy the slot's snapshot into the live globals, and consume any
+    // physically-held button so it will not re-fire under its new meaning.
+    static void ActivateProfile(int slot);
 };

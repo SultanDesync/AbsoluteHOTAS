@@ -314,6 +314,28 @@ void ReleaseShipButtonBindingOutputs() {
     for (auto& b : s_shipButtonBindings) b.previousPressed = false;
 }
 
+// ---- Profile snapshot / restore (see profile-switching.md) ----
+
+std::vector<ShipButtonBinding> SnapshotBindings() {
+    // Safe to copy: actionId/sourceIniKey/outputIniKey point at static string
+    // literals in the BindingDef table, so the copies keep valid pointers.
+    return s_shipButtonBindings;
+}
+
+void RestoreBindings(const std::vector<ShipButtonBinding>& bindings) {
+    s_shipButtonBindings = bindings;
+    // previousPressed rides along in the copy; SeedDownButtonsConsumed fixes up
+    // whatever is physically held after the caller has released held outputs.
+}
+
+void SeedDownButtonsConsumed() {
+    // After a swap, a button still physically held must NOT re-fire as its meaning
+    // in the newly-active profile. Mark every currently-down button as already
+    // seen, so its output only triggers on the next genuine press edge.
+    for (auto& b : s_shipButtonBindings)
+        b.previousPressed = IsButtonPressedImpl(b.buttonRef);
+}
+
 bool IsBoostOutputHeld() {
     if (s_shipButtonBindings.empty()) return false;
     const auto& boostBinding = s_shipButtonBindings[0];

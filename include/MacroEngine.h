@@ -58,4 +58,11 @@ void Update();
 // overlay open, stop, or config reload so no macro key is left stuck down.
 void ReleaseAll();
 
+// ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
+// A profile swap preloads each slot's resolved macro set and restores one on swap.
+// RestoreMacros resets the parallel runtime array, so call ReleaseAll first to
+// free any keys the outgoing set was holding.
+std::vector<Macro> SnapshotMacros();
+void RestoreMacros(const std::vector<Macro>& macros);
+
 } // namespace MacroEngine

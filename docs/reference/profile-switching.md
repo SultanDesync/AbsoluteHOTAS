@@ -1,8 +1,25 @@
 # Profile Switching (design)
 
-Status: design. **Supersedes the shift-layer design** this file previously held. A
-profile slot binds a physical button to a whole configuration, swapped live:
-bindings, macros, axis assignments, curves, deadzones, aim mode — the lot.
+Status: **engine implemented** (3.1-beta), in-game-unverified; no wizard UI yet
+(slots are hand-configured in `[Profiles]`). Supersedes the shift-layer design this
+file previously held. A profile slot binds a physical button to a whole
+configuration, swapped live: bindings, macros, axis assignments, curves, deadzones,
+aim mode — the lot.
+
+## Known limitations (v1 engine)
+
+- **Throttle hardware range is not re-detected on swap.** `axisMin/axisMax` are
+  measured once at control-loop start for the base throttle axis; a slot that binds
+  the throttle to a *different physical axis* would normalize against the base
+  axis's range. The existing hot-reload has the same limitation, and the cruise
+  recipe *unbinds* the throttle (no range needed), so the flagship case is fine.
+  Re-detecting on swap is future work.
+- **`pollRateHz` and `bAlwaysOn` don't change on swap.** The loop rate and the
+  startup arm-state are read once; a slot changing them takes effect on the next
+  hot-reload, not on the swap. Both are startup concerns, not per-mode tuning.
+- **No wizard UI yet.** Slots are defined by hand-editing `[Profiles]`. The collapsed
+  profiles header, edit-target Save, sparse override writes, seed profiles, and the
+  overlay-vs-copy creation choice are specified under "Wizard UI" below but not built.
 
 ## Why this instead of shift layers
 
@@ -28,17 +45,102 @@ and every binding site that consumes it. Profile switching adds one piece of sta
 
 ### Activation modes
 
-| Mode | Behavior |
-| --- | --- |
-| `momentary` | Active while the button is held; on release, return to the previously active profile. |
-| `toggle` | Press flips between base and this profile; press again returns. |
+Three modes, chosen per slot to match the hardware — none is the default mechanism;
+a rig may use any mix.
 
-Momentary save/restore composes with a latched toggle: holding a momentary slot on
-top of a toggled one returns to the toggled one on release.
+| Mode | Driven by | Behavior |
+| --- | --- | --- |
+| `momentary` | edge | Active while the button is held; on release, return to the profile that was active when it was pressed. For a spring-return shift button. |
+| `toggle` | edge | Press flips into this profile; press again returns to the base selection. |
+| `selector` | **level** | Active while its button is *held*, evaluated by position not edge. For a rotary/detent switch where each position keeps a distinct button held (e.g. a 5-way where positions map to buttons 3–7). |
 
-**Deactivate returns to base.** The master toggle, the stop binding, and the pilot
-gate all reset to slot 0. There is always a way home that does not depend on a
-latched slot being in the state the user thinks it is.
+**Why `selector` is level-driven, not just another momentary.** A rotary holds its
+position, so the binding is a sustained state, not a press. Two things fall out that
+an edge model gets wrong:
+
+- **Startup sync.** At launch the switch is already at some position, its button
+  already held — there is no press edge. An edge mode would sit on base while the
+  detent, LED, and label all say "3." A level read picks up the held position on the
+  first armed tick, so software matches the physical indicator immediately.
+- **Self-healing.** After the overlay closes or the mod re-arms, a level read
+  re-asserts the physical position on its own; an edge mode would need a manual
+  wiggle of the switch.
+
+Selector acts only when the position **changes** (not every tick), so an override
+layered on top is not stomped. A gap with no position held — a break-before-make
+rotary between detents — **holds the last position** rather than flickering through
+base. A rotary is always *somewhere*; make one detent your default by pointing its
+profile at a near-empty overlay, or a **parked** profile (below) for an off position.
+
+### How the modes compose
+
+All three share one active slot and coexist:
+
+- **The base selection** is the selector's current position, or slot 0 if no selector
+  is engaged. Momentary release and toggle-off both return *here* — so a momentary
+  shift held over rotary-position-3 returns to 3 on release, not to slot 0.
+- Momentary nests: each press records the slot that was active at that instant, so
+  stacked momentaries unwind in order.
+- **Deactivate returns to base.** The master toggle, the stop binding, the pilot gate,
+  and opening the overlay all reset to slot 0; on resume the selector re-syncs to its
+  physical position. There is always a way home that does not depend on a latched slot
+  being in the state the user thinks it is.
+
+### Binding a trigger — settle-to-quiescence capture
+
+Two switch types the old first-edge-wins capture could not bind:
+
+- a **rotary/selector detent**, which holds its button continuously — the capture
+  ignored anything already down, so a resting detent was invisible;
+- the **deep stage of a 2-stage trigger**, because the capture committed on the
+  first edge (the soft stage) and never saw the hard pull.
+
+Both are solved by one rule: **the last press to land wins, and every new press
+resets a short settle timer.** When input goes quiet for the window, whatever was
+pressed last commits. A 2-stage pull ends on the hard edge; a rotary you turn (or
+sweep) to ends on the final detent. Already-held buttons produce no down-edge, so
+they are still ignored — for a detent already at the target, *turn the switch to it*
+(the standard binding gesture).
+
+The window is the only tuned quantity, and it trades two ways: tight so a trigger
+commits crisply and two edges this close must be one physical pull; generous for a
+selector so it bridges the gap between detents as you turn. So it is mode-tuned —
+`kButtonCaptureMs` (~50 ms) for buttons/triggers, `kSelectorCaptureMs` (~300 ms) for
+selector binds. A short per-edge bounce guard keeps a contact bounce from posing as a
+later press, and a max-capture timeout stops a noisy device from spinning forever.
+The cost is inherent: the commit trails your last input by the window — imperceptible
+at 50 ms, a deliberate "I've stopped turning" pause at 300 ms.
+
+### Parking — `bEnableInjection` as a profile option
+
+There is no special "disabled" mode. Turning flight injection off is a **profile
+option**, so a "parked" position is just a profile like any other — one whose config
+sets `[Injection] bEnableInjection = false` and carries whatever on-foot button
+bindings, custom key outputs, and macros you want. The user defines what parking
+means; the engine only tracks the flag.
+
+`bEnableInjection = false` suppresses **all memory injection** — the flight cluster
+(pitch/yaw/roll/throttle/strafe) and the source-object aim — while leaving
+**SendInput untouched**: ship-button outputs, `[ButtonExpansion]` custom keys, and
+macros/turbos all keep working. It is the same mechanism the pilot gate's
+`InjectionOnly` mode already uses; the profile flag just folds into the one
+`injectionAllowed` check, so landing on a parked profile parks injection through the
+existing release/disarm transition — no separate logic, and no touching the master
+`active` gate.
+
+This is why the earlier "disable detent that points at the ScrollLock kill" idea was
+dropped. Two tiers cover everything, and they are different tools:
+
+| | Rotary-parked profile | Master toggle (ScrollLock / stop) |
+| --- | --- | --- |
+| Flight injection | off | off |
+| Button/macro outputs | **your parked mappings still run** | all released |
+| Granularity | per-profile, surgical | global panic kill |
+
+**A parked profile is a manual pilot-state signal that actually works.** Automatic
+"am I on foot" detection has been a dead end every time; a physical detent is a
+reliable manual answer — dial to parked, injection stops, on-foot mappings take over —
+with none of the auto-detection that never panned out.
 
 ### Sparse profiles are fallthrough
 
@@ -173,12 +275,44 @@ has been a dead end, and a headline feature should not hang on another one.
 Slot definitions are user-owned → `AbsoluteHOTAS_User.ini`. Profile files live in
 `Profiles/`, the same directory Export writes to.
 
+Discrete keys per slot, not one packed value — a device-name button ref contains
+spaces and can't be split from a mode keyword cleanly. `File` is resolved against
+`Profiles/`. `Mode` is `momentary` (default), `toggle`, or `selector`.
+
 ```ini
 [Profiles]
-; Slot<N> = <file> <button ref> <momentary|toggle>
-Slot1 = precision.ini  VKBSim Gunfighter@11  momentary
-Slot2 = cruise.ini     VKBSim Gunfighter@12  toggle
+; A pinky shift and a mode toggle
+Slot1File   = precision.ini
+Slot1Button = VKBSim Gunfighter@11
+Slot1Mode   = momentary
+
+Slot2File   = cruise.ini
+Slot2Button = VKBSim Gunfighter@12
+Slot2Mode   = toggle
+
+; A 5-position throttle rotary (buttons 3..7), one profile per detent. Position 1
+; (button 3) is "parked": its profile disables flight injection for on-foot use.
+Slot3File   = parked.ini
+Slot3Button = S-TECS SPACE-L THROTTLE STANDARD STEM@3
+Slot3Mode   = selector
+Slot4File   = combat.ini
+Slot4Button = S-TECS SPACE-L THROTTLE STANDARD STEM@4
+Slot4Mode   = selector
+Slot5File   = precision.ini
+Slot5Button = S-TECS SPACE-L THROTTLE STANDARD STEM@5
+Slot5Mode   = selector
+; ... buttons 6, 7 for the remaining detents
 ```
+
+```ini
+; Profiles/parked.ini — on-foot: no flight injection, but keep menu/on-foot mappings
+[Injection]
+bEnableInjection = false
+; ...plus whatever [ButtonExpansion] custom keys and [Macro:*] you want on foot
+```
+
+Slots are read `Slot1..Slot16`; a gap in the numbering is tolerated (a slot with no
+`File` key is skipped).
 
 ## Worked example — HOSAS cruise mode
 
@@ -257,18 +391,69 @@ and it is the same artifact Export produces.
 
 ## Wizard UI
 
-- **Profiles section:** three slots, each with a file picker over `Profiles/*.ini`,
-  a Bind capture for the trigger button, and a momentary/toggle combo.
-- **Slot pills** — `Base | 1 | 2 | 3` — at the top of the Buttons, Flight Axes, and
-  Macros tabs. Editing with a slot selected writes to that slot's profile file;
-  values inherited from base render greyed, so the user sees the *effective* config
-  rather than a sparse one, and can tell at a glance what this slot actually changes.
-  Overridden rows are marked and carry a **Revert to base**; the pill shows the
-  slot's override count. See "No copy base into this slot" above — the greyed
-  inherited values *are* the starting point, and materializing them would be a
-  regression, not a convenience.
-- **Live indicator** in the wizard footer showing the active profile — the test
-  surface for momentary/toggle behavior.
+Design principle: **ignorable, but easy to get into if you look at it.** Profiles
+must cost the single-config user nothing, while teaching the interested user by
+example rather than by manual.
+
+### Collapsed profiles header (every tab)
+
+A **collapsed-by-default "Profiles" header** sits at the top of each binding tab
+(Buttons, Flight Axes, Macros). A basic user never expands it and binds straight to
+the default flight profile — the feature has zero footprint. Putting it on every tab
+(not a separate tab) keeps the current edit target in view wherever you are binding.
+
+Expanded, it shows:
+
+- **A profile dropdown**, defaulting to the flight profile (the base config). Plus an
+  **Add Profile…** entry.
+- **Activation controls** for the selected profile, right beside the dropdown: a
+  Bind capture for the trigger and a mode combo — **toggle**, **per-button**
+  (momentary), or **selector** — matching the engine's `SwapMode`.
+- A **live active-profile indicator**, the test surface for the swap behavior.
+
+### The edit target follows the dropdown
+
+Selecting a profile makes it the **Save target**: binding edits on any tab write to
+*that* profile. This is the one behavior the engine does not already provide —
+`SaveBindingsToINI` writes `_User.ini` today; it must instead write the selected
+profile's file.
+
+- Dropdown entry 0 (the flight profile) **is** base → Save writes `_User.ini`, full,
+  as today.
+- Any other profile → Save writes a **sparse `Profiles/<name>.ini`**: only the keys
+  that differ from base. **This is the hard requirement everything rests on.** A full
+  dump turns an overlay into a frozen copy and the inherit model collapses (see "No
+  copy base into this slot"). Overridden rows are marked with a **Revert to base**;
+  the dropdown shows each profile's override count.
+
+### Two seed profiles (teach by example)
+
+When the header is first expanded, offer two ready-made profiles — both **overlays**,
+so they track the flight profile until deliberately diverged:
+
+- **Walking** — a parked profile: `{ bEnableInjection = false }`. Teaches the
+  injection-disable option; usable on foot immediately once a trigger is bound.
+- **Aux flight** — an empty overlay. Teaches config override: "a second flight
+  profile identical to your main one; change only what you want."
+
+Both ship **inert** — no trigger bound — so they never activate until the user binds
+one. The single-config user who never expands the header is unaffected.
+
+### Creating a profile — overlay vs copy
+
+**Add Profile…** prompts for the kind, because the choice determines whether the new
+profile tracks base or freezes:
+
+> ( ) **Overlay** — starts as your main config and follows it *(recommended)*
+> ( ) **Independent copy of [ profile ▾ ]** — a separate config that won't follow changes
+
+- **Overlay** = an empty file that inherits base and keeps tracking it (`sKind =
+  overlay`). "Blank" and "inherit my settings" are the *same thing* here — an empty
+  overlay already looks like base and follows it.
+- **Independent copy** = a full snapshot of the chosen source (`sKind = full`), the
+  same artifact Export/Detach produces. Overlays can only inherit **base** (the engine
+  overlays each slot on the user config, not on other slots), so "start from another
+  profile" is necessarily a copy, and it detaches.
 
 ## Test checklist
 
@@ -282,6 +467,19 @@ and it is the same artifact Export produces.
 - Master toggle / stop while a slot is latched → returns to base.
 - Swap with an accumulator throttle mid-integration → value is preserved.
 - Wizard Save while a slot is active → all slots rebuild; no disk write on swap.
+- **Selector startup sync:** launch with the rotary already at a detent → that
+  profile is active on the first armed tick, no wiggle needed.
+- **Selector transition:** turn the dial one detent → single swap to the new
+  position; a break-before-make gap does not flicker through base.
+- **Selector + shift compose:** hold a momentary shift over a rotary detent →
+  override active; release → back to the detent's profile, not slot 0.
+- **Selector re-sync:** open the overlay (snaps to base) with the rotary held at a
+  detent, close it → the detent's profile re-asserts.
+- **Parked profile:** swap to a profile with `bEnableInjection = false` → flight
+  injection stops (stick no longer moves the ship; the game reclaims the cluster),
+  but that profile's button/macro outputs still fire. Swap away → injection resumes.
+- **Parked on foot:** with a parked detent selected, walking around shows no phantom
+  movement/sprint interference, while the parked profile's on-foot key mappings work.
 - Edit one field under a slot → the slot file gains exactly one key; everything else
   still follows base when base changes.
 - Revert to base on that field → the key is removed from the slot file, not zeroed.
