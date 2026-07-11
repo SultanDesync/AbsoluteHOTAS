@@ -1,7 +1,8 @@
 # Profile Switching (design)
 
-Status: **engine implemented** (3.1-beta), in-game-unverified; no wizard UI yet
-(slots are hand-configured in `[Profiles]`). Supersedes the shift-layer design this
+Status: **engine implemented** (3.1-beta), in-game-unverified; wizard edit-target
+foundation implemented, but slot activation UI is not yet built (slots are still
+hand-configured in `[Profiles]`). Supersedes the shift-layer design this
 file previously held. A profile slot binds a physical button to a whole
 configuration, swapped live: bindings, macros, axis assignments, curves, deadzones,
 aim mode — the lot.
@@ -17,9 +18,14 @@ aim mode — the lot.
 - **`pollRateHz` and `bAlwaysOn` don't change on swap.** The loop rate and the
   startup arm-state are read once; a slot changing them takes effect on the next
   hot-reload, not on the swap. Both are startup concerns, not per-mode tuning.
-- **No wizard UI yet.** Slots are defined by hand-editing `[Profiles]`. The collapsed
-  profiles header, edit-target Save, sparse override writes, seed profiles, and the
-  overlay-vs-copy creation choice are specified under "Wizard UI" below but not built.
+- **Wizard UI is partial.** The collapsed profile selector, effective-load for editing
+  existing profiles, edit-target Save, sparse override writes, starter profiles,
+  add-overlay flow, trigger capture, activation modes, and import/export controls are
+  implemented. Override markers/revert and independent-copy creation remain to be built.
+
+The Flight Axes tab exposes `Axis injection enabled`, backed by
+`[Injection] bEnableInjection`. It is editable in base and profiles; the FPS starter
+overlay opens with it disabled while retaining button and macro output.
 
 ## Why this instead of shift layers
 
@@ -38,7 +44,7 @@ and every binding site that consumes it. Profile switching adds one piece of sta
 ## Model
 
 - **Base profile** — what loads today: `AbsoluteHOTAS.ini` overlaid by
-  `AbsoluteHOTAS_User.ini`. Always slot 0.
+  `AbsoluteHOTAS_Custom.ini`. Always slot 0.
 - Up to **3 switch slots** (1–3), each naming a profile file and a trigger button.
   Bounded so the wizard stays a 4-pill selector; nobody flies 5 configs.
 - **One profile is active at a time.** Slots do not compose.
@@ -169,13 +175,13 @@ These are easy to conflate, and conflating them eats the user's config.
 
 | | Import | Swap |
 | --- | --- | --- |
-| Effect | Replaces `_User.ini` + `_Macros.ini` | Overlays the base, in memory |
+| Effect | Replaces `_Custom.ini` | Overlays the base, in memory |
 | Persistence | Written to disk, survives restart | Transient, gone on restart |
-| Disk I/O | Writes both user files, auto-backs up first | **None** |
+| Disk I/O | Writes the custom file, auto-backs up first | **None** |
 | Trigger | Wizard button, deliberate | Physical button, mid-flight |
 | Reversible by | Importing something else | Releasing / re-pressing the button |
 
-**A swap must never call `ImportProfile`.** That writes `_User.ini`, so a shift
+**A swap must never call `ImportProfile`.** That writes `_Custom.ini`, so a shift
 button would overwrite the user's base config with the layer, fire an auto-backup on
 every press, and — via `ReloadConfig` → `LoadShipButtonBindings` — re-read
 `ControlMap_Custom.txt` from the Documents folder on every press.
@@ -272,7 +278,7 @@ has been a dead end, and a headline feature should not hang on another one.
 
 ## INI form
 
-Slot definitions are user-owned → `AbsoluteHOTAS_User.ini`. Profile files live in
+Slot definitions are user-owned → `AbsoluteHOTAS_Custom.ini`. Profile files live in
 `Profiles/`, the same directory Export writes to.
 
 Discrete keys per slot, not one packed value — a device-name button ref contains
@@ -303,6 +309,9 @@ Slot5Button = S-TECS SPACE-L THROTTLE STANDARD STEM@5
 Slot5Mode   = selector
 ; ... buttons 6, 7 for the remaining detents
 ```
+
+Keyboard triggers use `key:<VK>` in the same `SlotNButton` field. The starter FPS
+and Flight Aux overlays use `key:0x79` (F10) and `key:0x7A` (F11), respectively.
 
 ```ini
 ; Profiles/parked.ini — on-foot: no flight injection, but keep menu/on-foot mappings
@@ -352,7 +361,7 @@ explanation; slots accept either.
 
 | Written by | `sKind` | Contents |
 | --- | --- | --- |
-| Export Profile | `full` | Complete snapshot of the user files |
+| Export Profile | `full` | Materialized effective configuration |
 | Slot editor | `overlay` | Only the keys this slot overrides |
 | Slot editor → "Detach from base" | `full` | Snapshot of the slot's effective config |
 
@@ -415,10 +424,10 @@ Expanded, it shows:
 
 Selecting a profile makes it the **Save target**: binding edits on any tab write to
 *that* profile. This is the one behavior the engine does not already provide —
-`SaveBindingsToINI` writes `_User.ini` today; it must instead write the selected
+`SaveBindingsToINI` writes `_Custom.ini` today; it must instead write the selected
 profile's file.
 
-- Dropdown entry 0 (the flight profile) **is** base → Save writes `_User.ini`, full,
+- Dropdown entry 0 (the flight profile) **is** base → Save writes `_Custom.ini`,
   as today.
 - Any other profile → Save writes a **sparse `Profiles/<name>.ini`**: only the keys
   that differ from base. **This is the hard requirement everything rests on.** A full

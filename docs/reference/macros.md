@@ -102,8 +102,8 @@ for a chord (`key:0x2A+key:0x11` = L Shift + W).
 Macros get their **own tab**, not a section on the Buttons tab. A macro editor is a
 list-of-lists (per macro: button, turbo flag, N step rows) — a full-height editor,
 and the Buttons tab already carries four collapsing headers. It also gives a clean
-1:1 support story: *Macros tab ↔ `AbsoluteHOTAS_Macros.ini`* (see
-[config-layout.md](config-layout.md)), separate save path from `_User.ini`.
+1:1 support story: *Macros tab ↔ `[Macro:*]` sections in
+`AbsoluteHOTAS_Custom.ini`* (see [config-layout.md](config-layout.md)).
 
 Renames that landed with it (the old name promised what it did not deliver):
 
@@ -124,7 +124,7 @@ editor. Chord-ness is a property of the row, not a different kind of row.
 `ShipOutput`s — the token `NextSystem` is gone by the time the engine has it. If the
 wizard round-tripped through `MacroEngine`, saving would rewrite every action target
 as a raw `key:0xNN` and silently destroy the control-map-follows-your-rebinds
-property. So the wizard parses and writes `AbsoluteHOTAS_Macros.ini` itself, at the
+property. So the wizard parses and writes the custom INI's macro sections itself, at the
 token level. Two parsers, one grammar; they must stay in step.
 
 **Half-built macros persist.** A macro with no trigger button or no steps is still
@@ -134,9 +134,9 @@ would make a macro vanish while the user was still building it. Only unnamed and
 duplicate-named macros are skipped, since neither can be an INI section; the tab
 flags both in red.
 
-**Save is a full rewrite** of the macros file. That is the whole reason macros got
-their own file: no enumerate-and-delete of `[Macro:*]` sections against the user's
-other keys.
+**Save is a targeted rewrite** of `[Macro:*]` sections in the custom file. The wizard
+preserves every non-macro section while removing stale macro sections before writing
+the current macro rows.
 
 **Deferred: the Test button.** Firing a macro from the wizard would emit keys into
 the game behind the open overlay (macros are suppressed while it's up), which is

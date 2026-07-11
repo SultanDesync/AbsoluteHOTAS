@@ -11,6 +11,8 @@
 #include <unordered_map>
 
 struct WizardState {
+    bool        axisInjectionEnabled = true;
+
     // Axis bindings
     std::string axisBindings[kNumAxisSlots];
     bool        axisInvert[kNumAxisSlots];
@@ -20,6 +22,7 @@ struct WizardState {
 
     // Control buttons
     std::string buttonBindings[kNumButtonSlots];
+    std::string controlExtensionBindings[kNumControlExtensionSlots];
 
     // Ship actions (runtime-populated)
     std::vector<ShipActionSlot> shipActionSlots;
@@ -80,7 +83,7 @@ struct WizardState {
     // Custom button expansion bindings
     std::vector<CustomBindingRow> customBindings;
 
-    // Macro editor rows, read from / written to AbsoluteHOTAS_Macros.ini
+    // Macro editor rows, read from / written to AbsoluteHOTAS_Custom.ini
     std::vector<MacroRow> macros;
 
     bool loaded = false;
@@ -88,30 +91,39 @@ struct WizardState {
 
 namespace WizardConfig {
 
+struct ProfileSummary {
+    std::string name;
+    std::string kind;
+    std::string filename;
+    std::string trigger = "(unbound)";
+    std::string mode = "momentary";
+    int sequence = 0;
+    int slot = 0;
+};
+
 WizardState& GetState();
 
 // Load bindings from ThrottleController::GetConfig() into WizardState.
 void LoadCurrentBindings();
+bool LoadProfileForEditing(const std::string& name, std::string& err);
 
-// Save all wizard state back to AbsoluteHOTAS_User.ini (+ macros to
-// AbsoluteHOTAS_Macros.ini) and request a config reload.
+// Save all wizard state and macros to AbsoluteHOTAS_Custom.ini and reload.
 void SaveBindingsToINI();
 
 // --- Profile edit target ---
-// Which config the wizard's Save writes to: "" = base (_User.ini, full save);
+// Which config the wizard's Save writes to: "" = base (_Custom.ini, full save);
 // otherwise a Profiles/<name> sparse overlay. The dropdown in the profiles header
 // sets this; the Save button routes through SaveActiveProfile.
 const std::string& GetEditProfile();
 void SetEditProfile(const std::string& name);
 
-// Save to the current edit target: base -> full _User.ini; a profile -> a sparse
+// Save to the current edit target: base -> full _Custom.ini; a profile -> a sparse
 // overlay of only the keys that differ from base. See docs/reference/profile-switching.md.
 void SaveActiveProfile();
 void SaveProfileOverlay(const std::string& name);
 
-// Rewrite AbsoluteHOTAS_Macros.ini from WizardState::macros. The file holds only
-// [Macro:*] sections, so this is a full rewrite — which is exactly why macros were
-// given their own file (no enumerate-and-delete against the user's other keys).
+// Replace the [Macro:*] sections in AbsoluteHOTAS_Custom.ini while preserving all
+// other custom settings.
 //
 // Half-built macros (no trigger button, no steps) ARE written: MacroEngine ignores
 // them at load, and dropping them would delete work-in-progress out from under the
@@ -123,18 +135,26 @@ void SaveMacrosToINI();
 std::string FormatBindingDisplay(const std::string& binding);
 
 // --- Profiles (Export/Import) ---
-// A profile is one INI = the user file + macros file merged (disjoint by
-// ownership) plus a [Profile] header. See docs/reference/config-layout.md.
+// A profile is one INI payload plus a [Profile] header.
 
 // Names of exportable profiles in ProfilesDir() (stems, no extension). Hides the
 // underscore-prefixed auto-backups so the import list stays the user's own saves.
 std::vector<std::string> ListProfiles();
+std::vector<ProfileSummary> ListProfileSummaries();
 
-// Merge the current user + macros files into ProfilesDir()/<name>.ini. Returns
+// Create the two optional starter overlays. Flight is the base and has no file;
+// FPS parks axis injection, while Flight Aux initially inherits base unchanged.
+bool EnsureStarterProfiles(std::string& err);
+bool CreateOverlayProfile(const std::string& name, std::string& err);
+bool SetProfileActivation(const std::string& name, const std::string& trigger,
+                          const std::string& mode, std::string& err);
+bool ResetBaseToDefaults(std::string& err);
+
+// Materialize the effective base config into a managed profile file. Returns
 // false with a reason in `err` (empty name, nothing saved yet, write failure).
 bool ExportProfile(const std::string& name, std::string& err);
 
-// Replace the current user + macros files with the named profile, after
+// Replace the current custom control payload with the named full profile, after
 // auto-backing up the current pair. Triggers a live reload. Returns false with a
 // reason in `err`.
 bool ImportProfile(const std::string& name, std::string& err);

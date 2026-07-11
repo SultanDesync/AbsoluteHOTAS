@@ -64,6 +64,10 @@ public:
         BindingRef activateButton;
         BindingRef stopButton;
         BindingRef toggleWizardButton;
+        BindingRef cruiseHoldButton;
+        BindingRef fullStopButton;
+        BindingRef cruiseHalfButton;
+        BindingRef cruiseMaxButton;
         bool    alwaysOn = true;          // Auto-arm discovery when the standalone controller starts
         int     toggleActiveKey = 0x91;   // Keyboard VK code that toggles the master on/off gate (0=disabled, default ScrollLock)
 
@@ -226,7 +230,7 @@ private:
     // Resolve every BindingRef in the active config + ship bindings + macros to a
     // device index and open the device. Runs per slot during preload.
     static void ResolveActiveDevices();
-    // Build, resolve, and snapshot every slot ([Profiles] in the user file), then
+    // Build, resolve, and snapshot every slot ([Profiles] in the custom file), then
     // make the base profile active. Runs at control-loop start and on hot-reload.
     static void PreloadProfiles();
     // Swap the active configuration to a preloaded slot: release held outputs and

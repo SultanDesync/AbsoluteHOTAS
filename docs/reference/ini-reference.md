@@ -109,6 +109,21 @@ Plugin control buttons. Button IDs are 1-indexed DirectInput button numbers (1�
 
 ---
 
+## [ControlExtensions]
+
+Native AbsoluteHOTAS flight-assist commands. They are mutually exclusive toggles:
+pressing a command latches its throttle target, pressing it again returns control to
+the hardware axis, and pressing another command changes the target.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `iCruiseHoldButton` | `-1` | Capture and hold the current throttle target |
+| `iFullStopButton` | `-1` | Hold throttle at 0% |
+| `iCruiseHalfButton` | `-1` | Hold throttle at 50% |
+| `iCruiseMaxButton` | `-1` | Hold throttle at 100% without firing boost |
+
+---
+
 ## [ShipButtons]
 
 Map physical buttons to ship actions. All use 1-indexed DirectInput button IDs with optional `DeviceName@` prefix. Set to `-1` to leave unbound.
@@ -328,4 +343,3 @@ Reverse throttle requires velocity awareness: the ship must reach near-zero spee
 | `fAccumulatorRate` | float | `1.0` | Throttle units per second at full stick deflection. At `1.0`, full forward stick reaches max throttle in 1 second. Range: `0.1`–`10.0`. |
 | `fAccumulatorDecay` | float | `2.0` | Throttle units per second of decay when the stick is centered. At `2.0`, throttle drops from `1.0` to `0.0` in 0.5 seconds. Range: `0.0`–`20.0`. Set to `0.0` to disable decay (throttle holds its position). |
 | `fReverseGateVelocity` | float | `5.0` | Ship velocity (m/s, HUD-displayed) below which reverse throttle is allowed. While velocity exceeds this, backward stick writes `0.0` to decelerate instead of writing negative throttle. Range: `0.0`–`100.0`. |
-

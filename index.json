@@ -82,15 +82,11 @@
     },
     "src/WizardConfig.cpp": {
       "role": "Binding Wizard Config Serializer",
-      "purpose": "Serializes wizard state to the user-owned AbsoluteHOTAS_User.ini (never the mod-owned AbsoluteHOTAS.ini), and implements profile export/import to and from the Profiles/ directory."
-    },
-    "src/ConfigMigration.cpp": {
-      "role": "Config Split Migration",
-      "purpose": "One-time migration of the pre-3.1 monolithic AbsoluteHOTAS.ini into the split layout: backs up the old file, lifts user-owned sections into AbsoluteHOTAS_User.ini, relocates bHoldForBoost to [DualStick], and stamps iConfigVersion."
+      "purpose": "Atomically serializes wizard state and macros to AbsoluteHOTAS_Custom.ini, and manages full/overlay profile records in Profiles/."
     },
     "config/AbsoluteHOTAS.ini": {
-      "role": "User Configuration File",
-      "purpose": "Provides user-definable mapping settings for flight axes, gain parameters, physical button assignments, custom scancodes, and idle deadzones."
+      "role": "Shipped Default Configuration",
+      "purpose": "Provides the complete documented default schema; replaced on update and overlaid by user-owned AbsoluteHOTAS_Custom.ini."
     },
     "src/DeviceManager.cpp": {
       "role": "HID & DirectInput Device Discovery",

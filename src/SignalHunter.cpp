@@ -226,7 +226,8 @@ void Tick(int candCount, float /*throttle*/, float /*dt*/, uint64_t iter) {
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t /*iter*/,
             bool reverseHeld, bool suppressPitchYaw,
-            bool strafeLatActive, bool strafeVertActive)
+            bool strafeLatActive, bool strafeVertActive,
+            bool cruiseOverride, float cruiseTarget)
 {
     if (!s_activeThrottlePtr) return;
 
@@ -293,7 +294,10 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
             const float kDeadzone = std::max(cfg.fThrottleDeadzone, 0.05f);
 
-            if (stickDeflection > kDeadzone) {
+            if (cruiseOverride) {
+                ThrottleHook::SetReverseOverride(false);
+                s_accumulatorThrottle = std::clamp(cruiseTarget, 0.0f, 1.0f);
+            } else if (stickDeflection > kDeadzone) {
                 ThrottleHook::SetReverseOverride(false);
                 s_accumulatorThrottle += stickDeflection * cfg.fAccumulatorRate * dt;
                 s_accumulatorThrottle = std::clamp(s_accumulatorThrottle, 0.0f, 1.0f);
@@ -401,7 +405,7 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         // no source mutes those keys AND pins the lever at 0; lifting the silence is
         // what actually releases the channel. Unbinding the axis alone used to leave
         // it muted, which is what users hit when they tried to fall back to keyboard.
-        const bool throttleBound = cfg.throttleAxis.IsValid() && cfg.throttleAxis.value > 0;
+        const bool throttleBound = cruiseOverride || (cfg.throttleAxis.IsValid() && cfg.throttleAxis.value > 0);
         ThrottleHook::SetSilenceEnabled(throttleBound);
         ThrottleHook::SetSilence6CEnabled(throttleBound);
 
@@ -425,6 +429,10 @@ void Inject(float throttle, float pitch, float yaw, float roll,
             }
         }
     }
+}
+
+float GetCurrentThrottleTarget() {
+    return std::clamp(s_accumulatorThrottle, 0.0f, 1.0f);
 }
 
 } // namespace SignalHunter

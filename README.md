@@ -4,9 +4,9 @@ Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy
 
 ## Changelog
 ### v3.1.0-beta (in development)
-- **Update-Safe Config:** Your bindings, calibration, and tuning now live in `AbsoluteHOTAS_User.ini`, separate from the shipped `AbsoluteHOTAS.ini`. Copying a new release over an existing install no longer overwrites your setup. Existing v3.0.x configs are migrated automatically on first launch, and the old file is preserved as `AbsoluteHOTAS.ini.v30.bak`.
+- **Update-Safe Config:** Your bindings, calibration, tuning, macros, and profile routing live in `AbsoluteHOTAS_Custom.ini`, separate from the shipped `AbsoluteHOTAS.ini`. Updates replace only the DLL and default INI. Version 3.1 is a fresh configuration baseline; pre-3.1 settings are not imported automatically.
 - **Profiles:** Export your whole setup to a named profile and import it back from the binding wizard. Profiles are plain INI files under `Profiles/`, so they can be backed up or shared. Importing auto-backs up your current setup first.
-- **Macros:** A macro engine that plays an ordered key sequence — chords, taps, holds, and turbo repeat — from a single button press. Configured via `[Macro:*]` sections in `AbsoluteHOTAS_Macros.ini`; a wizard tab is in development.
+- **Macros:** A macro engine that plays an ordered key sequence — chords, taps, holds, and turbo repeat — from a single button press. Configured via `[Macro:*]` sections in `AbsoluteHOTAS_Custom.ini`; a wizard tab is in development.
 - **Opt-In Logging:** Diagnostics are off by default (`bEnableLog`). A normal run writes no log file at all.
 
 ### v3.0.2-beta

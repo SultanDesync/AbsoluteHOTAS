@@ -70,12 +70,12 @@ target("AbsoluteHOTAS")
         --    Both the DLL and the INI are overwritten every build. The INI used to be
         --    seeded only-if-absent to keep tuned bindings from being clobbered, but
         --    since the config split it is mod-owned and holds no user data: bindings,
-        --    calibration, and macros live in AbsoluteHOTAS_User.ini and
-        --    AbsoluteHOTAS_Macros.ini, which nothing here writes. Overwriting the main
+        --    calibration, macros, and profile routing live in
+        --    AbsoluteHOTAS_Custom.ini, which nothing here writes. Overwriting the main
         --    INI is therefore what a real 3.2+ update does, and testing that path on
         --    every build is the point.
         --
-        --    Under MO2 the user/macros/profile files are written to `overwrite/`, not
+        --    Under MO2 the custom/profile files are written to `overwrite/`, not
         --    to the mod folder this deploys into, so a rebuild cannot reach them.
         local dst = config.get("deploydir")
         if not dst or dst == "" then dst = os.getenv("ABSOLUTEHOTAS_DEPLOY_DIR") end
@@ -105,23 +105,6 @@ target("control_map_reader_test")
 
     -- MapVirtualKeyW (VK -> scancode) in TokenToOutput.
     add_syslinks("user32")
-
--- Standalone unit test for ConfigMigration::SplitUserConfig (the pure monolith->
--- split transform). Not built by default; opt in with:
---   xmake build config_migration_test
---   xmake run   config_migration_test
--- Compiles ConfigMigration.cpp + RuntimePaths.cpp (its only link dependency) with
--- no PCH, so it stays independent of the plugin target.
-target("config_migration_test")
-    set_kind("binary")
-    set_default(false)
-
-    add_packages("simpleini")
-    add_includedirs("include")
-
-    add_files("tests/config_migration_test.cpp")
-    add_files("src/ConfigMigration.cpp")
-    add_files("src/RuntimePaths.cpp")
 
 -- Standalone unit test for ProfileOverlay::ComputeDiff (the sparse profile-overlay
 -- diff). Not built by default; opt in with:

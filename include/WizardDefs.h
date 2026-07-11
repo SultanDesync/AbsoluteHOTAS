@@ -20,6 +20,8 @@ namespace CaptureSlot {
     constexpr int kToggleAimMode   = 705;
     constexpr int kTurnAssistBtn   = 706;
     constexpr int kMacroBase       = 800;   // 800..899, one per macro trigger button
+    constexpr int kProfileTrigger  = 900;
+    constexpr int kControlExtensionBase = 920; // 920..935
 
     inline bool IsAxis(int slot) {
         return (slot >= kAxisBase && slot < kButtonBase)
@@ -61,6 +63,15 @@ inline const ButtonSlot kButtonSlots[] = {
     {"Toggle Wizard",  "iToggleWizardButton"},
 };
 inline constexpr int kNumButtonSlots = sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
+
+inline const ButtonSlot kControlExtensionSlots[] = {
+    {"Hold Current Throttle", "iCruiseHoldButton"},
+    {"Full Stop",             "iFullStopButton"},
+    {"Cruise 50%",            "iCruiseHalfButton"},
+    {"Cruise Max",            "iCruiseMaxButton"},
+};
+inline constexpr int kNumControlExtensionSlots =
+    sizeof(kControlExtensionSlots) / sizeof(kControlExtensionSlots[0]);
 
 // --- Digital axis button slot ---
 struct DigitalAxisSlot {
@@ -123,7 +134,7 @@ struct CustomBindingRow {
 
 // --- Macro editor rows (wizard-owned mirror of the [Macro:*] sections) ---
 //
-// The wizard reads and writes AbsoluteHOTAS_Macros.ini directly rather than going
+// The wizard reads and writes [Macro:*] sections in AbsoluteHOTAS_Custom.ini rather than going
 // through MacroEngine. Two reasons, both about not losing the user's work:
 //   1. MacroStep stores *resolved* ShipOutputs, so "NextSystem" would round-trip
 //      out as "key:0x4D" — silently breaking the control-map-follows-your-rebinds

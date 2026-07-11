@@ -27,7 +27,9 @@ void Tick(int candCount, float throttle, float dt, uint64_t iter);
 void Inject(float throttle, float pitch, float yaw, float roll,
             float strafeX, float strafeY, float dt, uint64_t iter,
             bool reverseHeld, bool suppressPitchYaw = false,
-            bool strafeLatActive = false, bool strafeVertActive = false);
+            bool strafeLatActive = false, bool strafeVertActive = false,
+            bool cruiseOverride = false, float cruiseTarget = 0.0f);
+float GetCurrentThrottleTarget();
 
 // Disarm all state (called on pilot-seat exit).
 void Disarm();

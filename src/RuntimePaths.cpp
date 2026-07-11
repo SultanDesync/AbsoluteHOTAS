@@ -35,14 +35,9 @@ namespace RuntimePaths {
         return PluginDirectory() / L"AbsoluteHOTAS.ini";
     }
 
-    std::filesystem::path UserIniPath()
+    std::filesystem::path CustomIniPath()
     {
-        return PluginDirectory() / L"AbsoluteHOTAS_User.ini";
-    }
-
-    std::filesystem::path MacrosIniPath()
-    {
-        return PluginDirectory() / L"AbsoluteHOTAS_Macros.ini";
+        return PluginDirectory() / L"AbsoluteHOTAS_Custom.ini";
     }
 
     std::filesystem::path ProfilesDir()
@@ -70,7 +65,16 @@ namespace RuntimePaths {
         // OS INI reader keeps logging available from the very first line of startup.
         // Do not "unify" this onto SimpleIni — there is no config object yet.
         wchar_t value[32]{};
-        GetPrivateProfileStringW(L"Injection", L"bEnableLog", L"0", value, static_cast<DWORD>(std::size(value)), IniPath().c_str());
+        GetPrivateProfileStringW(L"Injection", L"bEnableLog", L"0", value,
+                                 static_cast<DWORD>(std::size(value)), IniPath().c_str());
+        // Bootstrap follows the normal defaults -> custom precedence even though the
+        // controller's SimpleIni object does not exist yet.
+        if (std::filesystem::exists(CustomIniPath())) {
+            wchar_t customValue[32]{};
+            GetPrivateProfileStringW(L"Injection", L"bEnableLog", value, customValue,
+                                     static_cast<DWORD>(std::size(customValue)), CustomIniPath().c_str());
+            std::copy(std::begin(customValue), std::end(customValue), std::begin(value));
+        }
 
         std::wstring_view text{ value };
         while (!text.empty() && std::iswspace(text.front())) {

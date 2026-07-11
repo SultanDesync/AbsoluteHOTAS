@@ -11,13 +11,9 @@ namespace RuntimePaths {
     // and mod-owned sections ([General], [Injection], [Gate]) read from this file.
     std::filesystem::path IniPath();
 
-    // User-owned bindings, calibration, tuning, and shift layers. Written by the
-    // wizard, never shipped, never overwritten on update. Overlays IniPath() at load.
-    std::filesystem::path UserIniPath();
-
-    // User-owned [Macro:*] sections. Written by the wizard Macros tab; own file so a
-    // wizard save never has to enumerate-and-delete macro sections from the monolith.
-    std::filesystem::path MacrosIniPath();
+    // User-owned bindings, tuning, calibration, macros, and profile routing. Written
+    // by the wizard, never shipped, never overwritten. Overlays IniPath() at load.
+    std::filesystem::path CustomIniPath();
 
     // Directory for user-initiated profile snapshots (Export/Import). Created on first
     // export; may not exist yet.

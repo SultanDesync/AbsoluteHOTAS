@@ -19,6 +19,9 @@ static void WizLog(const std::string& msg) {
     RuntimePaths::Log("[BindingWizard]", msg);
 }
 
+static std::string s_profileCaptureName;
+static std::string s_profileCaptureMode = "momentary";
+
 // --- Capture commit callback ---
 static void OnCaptureCommit(int slot, const char* binding) {
     auto& s = WizardConfig::GetState();
@@ -45,6 +48,13 @@ static void OnCaptureCommit(int slot, const char* binding) {
     } else if (slot >= CaptureSlot::kMacroBase && slot < CaptureSlot::kMacroBase + 100) {
         int idx = slot - CaptureSlot::kMacroBase;
         if (idx < (int)s.macros.size()) s.macros[idx].buttonBinding = binding;
+    } else if (slot >= CaptureSlot::kControlExtensionBase
+               && slot < CaptureSlot::kControlExtensionBase + kNumControlExtensionSlots) {
+        s.controlExtensionBindings[slot - CaptureSlot::kControlExtensionBase] = binding;
+    } else if (slot == CaptureSlot::kProfileTrigger && !s_profileCaptureName.empty()) {
+        std::string err;
+        WizardConfig::SetProfileActivation(s_profileCaptureName, binding, s_profileCaptureMode, err);
+        s_profileCaptureName.clear();
     }
 }
 
@@ -407,7 +417,7 @@ static void DrawDevicesTab(WizardState& s) {
                     for (auto* bp : allBindings) doSwap(*bp);
                     for (auto* bp : allBindings) finalize(*bp);
 
-                    WizardConfig::SaveBindingsToINI();
+                    WizardConfig::SaveActiveProfile();
                     WizLog("Swapped device indices #" + std::to_string(d) + " <-> #" + std::to_string(d + 1));
                 }
             }
@@ -494,6 +504,8 @@ static void DrawDevicesTab(WizardState& s) {
 // --- Tab: Axes & Settings ---
 static void DrawAxesTab(WizardState& s) {
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Flight Axis Assignments");
+    ImGui::Checkbox("Axis injection enabled", &s.axisInjectionEnabled);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Controls flight-axis memory injection; button and macro outputs remain active.");
     ImGui::TextWrapped("Click 'Bind' then move the physical axis you want to assign.");
     ImGui::SameLine(500);
     ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), ">> Save & Apply to commit changes");
@@ -822,6 +834,19 @@ static void DrawButtonsTab(WizardState& s) {
 
     ImGui::Spacing();
 
+    if (ImGui::CollapsingHeader("Flight Assist", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(12);
+        for (int i = 0; i < kNumControlExtensionSlots; ++i) {
+            ImGui::PushID(6000 + i);
+            DrawBindingRow(kControlExtensionSlots[i].label, s.controlExtensionBindings[i],
+                           CaptureSlot::kControlExtensionBase + i, false);
+            ImGui::PopID();
+        }
+        ImGui::Unindent(12);
+    }
+
+    ImGui::Spacing();
+
     if (ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) {
         ImGui::Indent(12);
         ImGui::TextWrapped("Bind controller buttons to emit a single custom keyboard/mouse output. Use Starfield's vanilla binding menu to assign matching secondary bindings. For multi-key sequences or chords, use the Macros tab.");
@@ -1135,62 +1160,151 @@ static void DrawMacrosTab(WizardState& s) {
     if (removeMacro >= 0) s.macros.erase(s.macros.begin() + removeMacro);
 }
 
-// --- Profiles footer row (Export / Import) ---
-static void DrawProfilesRow() {
-    static char profileName[64] = "";
-    static int  selectedProfile = 0;
-    static std::string profileStatus;
+static void DrawProfileEditorHeader() {
+    if (!ImGui::CollapsingHeader("Profiles")) return;
 
-    ImGui::Spacing();
-
-    // Export: name field + button.
-    ImGui::PushItemWidth(160);
-    ImGui::InputTextWithHint("##profilename", "profile name", profileName, sizeof(profileName));
-    ImGui::PopItemWidth();
-    ImGui::SameLine();
-    if (ImGui::Button("Export")) {
+    static bool initialized = false;
+    static char newProfileName[64] = "";
+    static char exportName[64] = "";
+    static int importIndex = 0;
+    static std::string status;
+    if (!initialized) {
+        initialized = true;
         std::string err;
-        if (WizardConfig::ExportProfile(profileName, err))
-            profileStatus = std::string("Exported '") + profileName + "'.";
-        else
-            profileStatus = "Export failed: " + err;
+        if (!WizardConfig::EnsureStarterProfiles(err)) status = err;
     }
 
+    // The one authoritative "which profile am I looking at" control. Every binding
+    // tab shows and saves THIS profile, so it is stated plainly and kept visually
+    // distinct from the management actions (which are tucked into "Manage profiles").
+    const std::string current = WizardConfig::GetEditProfile();
+    const char* preview = current.empty() ? "Flight profile (base)" : current.c_str();
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing profile:");
     ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    // Import: profile dropdown + button. The list is the user's own exports;
-    // auto-backups are hidden but remain on disk under Profiles/ as a safety net.
-    auto profiles = WizardConfig::ListProfiles();
-    if (selectedProfile >= (int)profiles.size()) selectedProfile = 0;
-    const char* preview = profiles.empty() ? "(no profiles)" : profiles[selectedProfile].c_str();
-    ImGui::PushItemWidth(160);
-    if (ImGui::BeginCombo("##profilelist", preview)) {
-        for (int i = 0; i < (int)profiles.size(); i++) {
-            bool sel = (i == selectedProfile);
-            if (ImGui::Selectable(profiles[i].c_str(), sel)) selectedProfile = i;
-            if (sel) ImGui::SetItemDefaultFocus();
+    ImGui::SetNextItemWidth(260.0f);
+    if (ImGui::BeginCombo("##editprofile", preview)) {
+        if (ImGui::Selectable("Flight profile (base)", current.empty())) {
+            std::string err;
+            WizardConfig::LoadProfileForEditing("", err);
+        }
+        for (const auto& name : WizardConfig::ListProfiles()) {
+            if (ImGui::Selectable(name.c_str(), name == current)) {
+                std::string err;
+                WizardConfig::LoadProfileForEditing(name, err);
+            }
         }
         ImGui::EndCombo();
     }
-    ImGui::PopItemWidth();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(profiles.empty());
-    if (ImGui::Button("Import")) {
-        std::string err;
-        if (WizardConfig::ImportProfile(profiles[selectedProfile], err))
-            profileStatus = std::string("Imported '") + profiles[selectedProfile] +
-                            "'. Previous setup auto-backed up.";
-        else
-            profileStatus = "Import failed: " + err;
-    }
-    ImGui::EndDisabled();
+    ImGui::TextDisabled("Every tab shows and saves this profile%s.",
+        current.empty() ? " (your base setup)" : " (overrides on base)");
 
-    if (!profileStatus.empty()) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.9f, 1.0f), "%s", profileStatus.c_str());
+    if (!current.empty()) {
+        auto summaries = WizardConfig::ListProfileSummaries();
+        auto it = std::find_if(summaries.begin(), summaries.end(),
+            [&](const auto& p) { return p.name == current; });
+        if (it != summaries.end()) {
+            ImGui::TextDisabled("%s  |  %s  |  slot %d", it->kind.c_str(),
+                it->filename.c_str(), it->slot);
+
+            ImGui::Text("Activation");
+            ImGui::SameLine(120);
+            ImGui::TextColored(it->trigger == "(unbound)"
+                    ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f),
+                "%s", WizardConfig::FormatBindingDisplay(it->trigger).c_str());
+            ImGui::SameLine(430);
+            if (ImGui::Button("Bind trigger")) {
+                s_profileCaptureName = current;
+                s_profileCaptureMode = it->mode;
+                WizardCapture::StartButtonCapture(0, CaptureSlot::kProfileTrigger,
+                    "Profile trigger", it->mode == "selector"
+                        ? WizardCapture::kSelectorCaptureMs : WizardCapture::kButtonCaptureMs);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear trigger")) {
+                std::string err;
+                if (!WizardConfig::SetProfileActivation(current, "(unbound)", it->mode, err)) status = err;
+            }
+
+            const char* modes[] = {"momentary", "toggle", "selector"};
+            int modeIndex = it->mode == "toggle" ? 1 : it->mode == "selector" ? 2 : 0;
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::Combo("Activation mode", &modeIndex, modes, 3)) {
+                std::string err;
+                if (!WizardConfig::SetProfileActivation(current, it->trigger, modes[modeIndex], err)) status = err;
+            }
+        }
+    } else {
+        ImGui::TextDisabled("Flight is the base profile. Other profiles return here when deactivated.");
     }
+
+    // Management actions live in a collapsed subsection so the second (import)
+    // profile dropdown doesn't sit next to the "Editing profile" selector above and
+    // muddy which one is the profile you're looking at.
+    ImGui::Spacing();
+    if (ImGui::TreeNode("Manage profiles")) {
+        ImGui::SetNextItemWidth(190.0f);
+        ImGui::InputTextWithHint("##newprofile", "new overlay name", newProfileName, sizeof(newProfileName));
+        ImGui::SameLine();
+        if (ImGui::Button("Add overlay")) {
+            std::string err;
+            if (WizardConfig::CreateOverlayProfile(newProfileName, err)) {
+                WizardConfig::LoadProfileForEditing(newProfileName, err);
+                newProfileName[0] = '\0';
+                status = "Overlay created.";
+            } else status = err;
+        }
+
+        ImGui::SetNextItemWidth(190.0f);
+        ImGui::InputTextWithHint("##exportprofile", "independent profile name", exportName, sizeof(exportName));
+        ImGui::SameLine();
+        if (ImGui::Button("Export base setup")) {
+            std::string err;
+            if (WizardConfig::ExportProfile(exportName, err)) {
+                exportName[0] = '\0';
+                status = "Independent profile exported.";
+            } else status = err;
+        }
+
+        auto profiles = WizardConfig::ListProfileSummaries();
+        if (importIndex >= (int)profiles.size()) importIndex = 0;
+        const char* importPreview = profiles.empty() ? "(no profiles)" : profiles[importIndex].name.c_str();
+        ImGui::SetNextItemWidth(190.0f);
+        if (ImGui::BeginCombo("Import file", importPreview)) {
+            for (int i = 0; i < (int)profiles.size(); ++i) {
+                if (ImGui::Selectable(profiles[i].name.c_str(), i == importIndex)) importIndex = i;
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        const bool canImport = !profiles.empty() && profiles[importIndex].kind == "full";
+        ImGui::BeginDisabled(!canImport);
+        if (ImGui::Button("Import as base")) {
+            std::string err;
+            if (WizardConfig::ImportProfile(profiles[importIndex].name, err)) status = "Imported; previous base backed up.";
+            else status = err;
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        if (ImGui::Button("Reset base to defaults")) ImGui::OpenPopup("Reset base configuration?");
+        if (ImGui::BeginPopupModal("Reset base configuration?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("This clears base bindings, tuning, calibration, custom outputs, and macros. Profile files and their activation slots are preserved. A backup is created first.");
+            ImGui::Spacing();
+            if (ImGui::Button("Reset", ImVec2(120, 0))) {
+                std::string err;
+                if (WizardConfig::ResetBaseToDefaults(err)) status = "Base reset to shipped defaults; backup created.";
+                else status = err;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::TreePop();
+    }
+
+    if (!status.empty()) ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.9f, 1.0f), "%s", status.c_str());
+    ImGui::Separator();
 }
 
 // --- Main Draw ---
@@ -1207,12 +1321,18 @@ void BindingWizard::Draw() {
     // changed generation guarantees GetConfig() already reflects the reload.
     static uint32_t s_lastConfigGen = ThrottleController::ConfigGeneration();
     const uint32_t configGen = ThrottleController::ConfigGeneration();
+    std::string profileToReload;
     if (configGen != s_lastConfigGen) {
         s_lastConfigGen = configGen;
+        profileToReload = WizardConfig::GetEditProfile();
         WizardConfig::GetState() = WizardState{};
     }
 
     WizardConfig::LoadCurrentBindings();
+    if (!profileToReload.empty()) {
+        std::string err;
+        WizardConfig::LoadProfileForEditing(profileToReload, err);
+    }
     WizardCapture::UpdateCapture(OnCaptureCommit);
     auto& s = WizardConfig::GetState();
 
@@ -1224,6 +1344,8 @@ void BindingWizard::Draw() {
 
     float footerHeightToReserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + 20.0f;
     ImGui::BeginChild("WizardTabsChild", ImVec2(0, -footerHeightToReserve), false);
+
+    DrawProfileEditorHeader();
 
     if (ImGui::BeginTabBar("WizardTabs")) {
 
@@ -1269,14 +1391,12 @@ void BindingWizard::Draw() {
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
     if (ImGui::Button("Save & Apply", ImVec2(160, 36))) {
-        WizardConfig::SaveBindingsToINI();
+        WizardConfig::SaveActiveProfile();
     }
     ImGui::PopStyleColor(3);
 
     ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Writes to AbsoluteHOTAS_User.ini and reloads live.");
-
-    DrawProfilesRow();
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Saves the selected profile and reloads live.");
 
     ImGui::End();
 }
