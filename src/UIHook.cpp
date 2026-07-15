@@ -34,6 +34,7 @@ static void UILog(const std::string& msg) {
 // ============================================================================
 static std::atomic<bool>   g_isOpen{ false };
 static std::atomic<bool>   g_initialized{ false };
+static std::atomic<bool>   g_logNextOverlaySubmit{ false };
 static std::mutex          g_initMutex;
 static UIHook::DrawCallback g_drawCallback = nullptr;
 static RECT                g_savedClipRect{};
@@ -48,6 +49,14 @@ static ID3D12GraphicsCommandList*   g_cmdList = nullptr;
 // The game's command queue — captured via CreateSwapChainForHwnd (primary) or
 // ExecuteCommandLists (fallback). Held as a non-owning reference; the game retains ownership.
 static std::atomic<ID3D12CommandQueue*> g_gameCommandQueue{nullptr};
+static std::atomic<ID3D12CommandQueue*> g_recentDirectQueue{nullptr};
+
+// COM identity pointer -> presentation queue. Keys are identity values only (we
+// deliberately do not retain the swap chain, which could prevent flip-model chain
+// replacement). Queue references are retained until shutdown so an association
+// never becomes a dangling pointer while another renderer layer rebuilds its chain.
+static std::mutex g_swapChainQueuesMutex;
+static std::unordered_map<IUnknown*, ID3D12CommandQueue*> g_swapChainQueues;
 
 // Fence for GPU synchronization
 static ID3D12Fence*                 g_fence = nullptr;
@@ -94,11 +103,164 @@ static Present1Fn               g_origPresent1 = nullptr;
 static ResizeBuffersFn          g_origResizeBuffers = nullptr;
 static ExecuteCommandListsFn    g_origExecuteCommandLists = nullptr;
 static CreateSwapChainForHwndFn g_origCreateSwapChainForHwnd = nullptr;
+static void*                    g_presentTarget = nullptr;
+static void*                    g_present1Target = nullptr;
+static void*                    g_resizeBuffersTarget = nullptr;
+
+static IUnknown* GetComIdentity(IUnknown* object);
+static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain*, UINT, UINT);
+static HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+
+struct InstanceRenderHooks {
+    PresentFn present = nullptr;
+    Present1Fn present1 = nullptr;
+    ResizeBuffersFn resizeBuffers = nullptr;
+    void** shadowVtable = nullptr;
+};
+
+static std::mutex g_instanceHooksMutex;
+static std::unordered_map<IUnknown*, InstanceRenderHooks> g_instanceHooks;
+
+static void InstallInstanceRenderHooks(IDXGISwapChain1* swapChain) {
+    if (!swapChain) return;
+    IUnknown* identity = GetComIdentity(swapChain);
+    if (!identity) return;
+
+    std::lock_guard<std::mutex> lock(g_instanceHooksMutex);
+    if (g_instanceHooks.contains(identity)) {
+        identity->Release();
+        return;
+    }
+
+    // IDXGISwapChain4 has 41 slots. A private table avoids modifying DXGI's
+    // process-wide vtable and remains attached if RTSS later repatches the
+    // canonical function prologue.
+    constexpr size_t kSwapChain4VtableSlots = 41;
+    void*** objectVtable = reinterpret_cast<void***>(swapChain);
+    void** current = *objectVtable;
+    void** shadow = new void*[kSwapChain4VtableSlots];
+    std::copy_n(current, kSwapChain4VtableSlots, shadow);
+
+    InstanceRenderHooks hooks{};
+    hooks.present = reinterpret_cast<PresentFn>(current[8]);
+    hooks.resizeBuffers = reinterpret_cast<ResizeBuffersFn>(current[13]);
+    hooks.present1 = reinterpret_cast<Present1Fn>(current[22]);
+    hooks.shadowVtable = shadow;
+    shadow[8] = reinterpret_cast<void*>(&HookedPresent);
+    shadow[13] = reinterpret_cast<void*>(&HookedResizeBuffers);
+    shadow[22] = reinterpret_cast<void*>(&HookedPresent1);
+
+    g_instanceHooks.emplace(identity, hooks);
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(objectVtable), shadow);
+    UILog(std::format("Installed per-instance render hooks on swap chain 0x{:X} (identity 0x{:X}).",
+        reinterpret_cast<uintptr_t>(swapChain), reinterpret_cast<uintptr_t>(identity)));
+    identity->Release();
+}
+
+static InstanceRenderHooks FindInstanceRenderHooks(IUnknown* swapChain) {
+    InstanceRenderHooks hooks{};
+    IUnknown* identity = GetComIdentity(swapChain);
+    if (!identity) return hooks;
+    {
+        std::lock_guard<std::mutex> lock(g_instanceHooksMutex);
+        auto it = g_instanceHooks.find(identity);
+        if (it != g_instanceHooks.end()) hooks = it->second;
+    }
+    identity->Release();
+    return hooks;
+}
+
+static PresentFn OriginalPresentFor(IDXGISwapChain* swapChain) {
+    PresentFn fn = FindInstanceRenderHooks(swapChain).present;
+    return reinterpret_cast<void*>(fn) == g_presentTarget ? g_origPresent : (fn ? fn : g_origPresent);
+}
+
+static Present1Fn OriginalPresent1For(IDXGISwapChain1* swapChain) {
+    Present1Fn fn = FindInstanceRenderHooks(swapChain).present1;
+    return reinterpret_cast<void*>(fn) == g_present1Target ? g_origPresent1 : (fn ? fn : g_origPresent1);
+}
+
+static ResizeBuffersFn OriginalResizeBuffersFor(IDXGISwapChain* swapChain) {
+    ResizeBuffersFn fn = FindInstanceRenderHooks(swapChain).resizeBuffers;
+    return reinterpret_cast<void*>(fn) == g_resizeBuffersTarget ? g_origResizeBuffers : (fn ? fn : g_origResizeBuffers);
+}
 
 // Re-entrancy guard: RenderOverlayFrame calls ExecuteCommandLists on the game queue to
 // submit overlay draw commands. Without this flag, HookedExecuteCommandLists would see
 // our own submission and could overwrite the captured queue or emit spurious log lines.
 static thread_local bool g_inOverlaySubmit = false;
+
+static IUnknown* GetComIdentity(IUnknown* object) {
+    if (!object) return nullptr;
+    IUnknown* identity = nullptr;
+    if (FAILED(object->QueryInterface(IID_PPV_ARGS(&identity)))) return nullptr;
+    return identity;
+}
+
+static void AssociateSwapChainQueue(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
+    IUnknown* identity = GetComIdentity(swapChain);
+    if (!identity || !queue) {
+        if (identity) identity->Release();
+        return;
+    }
+
+    queue->AddRef();
+    {
+        std::lock_guard<std::mutex> lock(g_swapChainQueuesMutex);
+        auto [it, inserted] = g_swapChainQueues.emplace(identity, queue);
+        if (!inserted) {
+            it->second->Release();
+            it->second = queue;
+        }
+    }
+
+    UILog(std::format("Associated swap chain 0x{:X} (identity 0x{:X}) with D3D12 queue 0x{:X}.",
+        reinterpret_cast<uintptr_t>(swapChain), reinterpret_cast<uintptr_t>(identity),
+        reinterpret_cast<uintptr_t>(queue)));
+    identity->Release();
+}
+
+static ID3D12CommandQueue* FindAssociatedQueue(IDXGISwapChain* swapChain) {
+    IUnknown* identity = GetComIdentity(swapChain);
+    if (!identity) return nullptr;
+
+    ID3D12CommandQueue* queue = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_swapChainQueuesMutex);
+        auto it = g_swapChainQueues.find(identity);
+        if (it != g_swapChainQueues.end()) queue = it->second;
+    }
+    identity->Release();
+    return queue;
+}
+
+static bool QueueMatchesSwapChainDevice(ID3D12CommandQueue* queue, IDXGISwapChain* swapChain) {
+    if (!queue || !swapChain) return false;
+    ID3D12Device* queueDevice = nullptr;
+    ID3D12Device* swapDevice = nullptr;
+    const bool ok = SUCCEEDED(queue->GetDevice(IID_PPV_ARGS(&queueDevice))) &&
+                    SUCCEEDED(swapChain->GetDevice(IID_PPV_ARGS(&swapDevice))) &&
+                    queueDevice == swapDevice;
+    if (queueDevice) queueDevice->Release();
+    if (swapDevice) swapDevice->Release();
+    return ok;
+}
+
+static ID3D12CommandQueue* SelectPresentQueue(IDXGISwapChain* swapChain) {
+    if (ID3D12CommandQueue* queue = FindAssociatedQueue(swapChain)) return queue;
+    ID3D12CommandQueue* recent = g_recentDirectQueue.load(std::memory_order_relaxed);
+    return QueueMatchesSwapChainDevice(recent, swapChain) ? recent : nullptr;
+}
+
+static void ReleaseSwapChainQueueAssociations() {
+    std::lock_guard<std::mutex> lock(g_swapChainQueuesMutex);
+    for (auto& [identity, queue] : g_swapChainQueues) {
+        (void)identity;
+        queue->Release();
+    }
+    g_swapChainQueues.clear();
+}
 
 static UINT GetToggleUIMessage() {
     static UINT msg = RegisterWindowMessageW(L"AbsoluteHOTAS_ToggleUI");
@@ -181,6 +343,7 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
     DXGI_SWAP_CHAIN_DESC desc{};
     pSwapChain->GetDesc(&desc);
 
+    const UINT oldBackBufferCount = g_numBackBuffers;
     g_numBackBuffers = desc.BufferCount;
     g_backBufferFormat = desc.BufferDesc.Format;
     g_lastSwapWidth = desc.BufferDesc.Width;
@@ -191,7 +354,7 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
     if (g_rtvHandles) delete[] g_rtvHandles;
     if (g_cmdAllocators) {
         // Release old allocators
-        for (UINT i = 0; i < g_numBackBuffers; i++) {
+        for (UINT i = 0; i < oldBackBufferCount; i++) {
             if (g_cmdAllocators[i]) g_cmdAllocators[i]->Release();
         }
         delete[] g_cmdAllocators;
@@ -274,8 +437,22 @@ static HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
                   "\u2014 queue capture deferred to ExecuteCommandLists fallback.");
         }
     }
-    return g_origCreateSwapChainForHwnd(
+    HRESULT hr = g_origCreateSwapChainForHwnd(
         pThis, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain);
+    if (SUCCEEDED(hr) && ppSwapChain && *ppSwapChain && pDevice) {
+        ID3D12CommandQueue* queue = nullptr;
+        if (SUCCEEDED(pDevice->QueryInterface(IID_PPV_ARGS(&queue)))) {
+            // Associate the chain returned by the complete hook stack. An earlier
+            // injector may have replaced the native chain with its proxy object.
+            AssociateSwapChainQueue(*ppSwapChain, queue);
+            queue->Release();
+        }
+        InstallInstanceRenderHooks(*ppSwapChain);
+    }
+    // Selection belongs to HandlePresent, where the returned swap-chain identity
+    // can be matched to its queue. Do not preserve the legacy process-wide latch.
+    g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);
+    return hr;
 }
 
 // ============================================================================
@@ -288,14 +465,10 @@ static HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
 //      submit the overlay command list; g_inOverlaySubmit prevents that from
 //      overwriting the captured queue or emitting spurious fallback log entries.
 static void STDMETHODCALLTYPE HookedExecuteCommandLists(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
-    if (!g_inOverlaySubmit && !g_gameCommandQueue.load(std::memory_order_relaxed)) {
+    if (!g_inOverlaySubmit) {
         D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
         if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-            ID3D12CommandQueue* expected = nullptr;
-            if (g_gameCommandQueue.compare_exchange_strong(expected, pQueue)) {
-                UILog("Captured game command queue from ExecuteCommandLists (fallback): 0x"
-                    + std::format("{:X}", reinterpret_cast<uintptr_t>(pQueue)));
-            }
+            g_recentDirectQueue.store(pQueue, std::memory_order_relaxed);
         }
     }
     g_origExecuteCommandLists(pQueue, NumCommandLists, ppCommandLists);
@@ -564,6 +737,15 @@ static bool RebindRenderTargetsIfNeeded(IDXGISwapChain* pSwapChain) {
     return true;
 }
 
+static void LogOverlaySubmission(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue,
+    UINT backBufferIdx)
+{
+    UILog(std::format("Overlay command list submitted: swapChain=0x{:X}, queue=0x{:X}, "
+        "backBuffer={}, targetSwapChain=0x{:X}.",
+        reinterpret_cast<uintptr_t>(swapChain), reinterpret_cast<uintptr_t>(queue),
+        backBufferIdx, reinterpret_cast<uintptr_t>(g_targetSwapChain)));
+}
+
 static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
     __try {
         if (!RebindRenderTargetsIfNeeded(pSwapChain)) return;
@@ -614,6 +796,9 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
             ID3D12CommandQueue* pQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
             if (pQueue) {
                 pQueue->ExecuteCommandLists(1, ppCmdLists);
+                if (g_logNextOverlaySubmit.exchange(false, std::memory_order_relaxed)) {
+                    LogOverlaySubmission(pSwapChain, pQueue, backBufferIdx);
+                }
             }
             g_inOverlaySubmit = false;
         }
@@ -629,6 +814,18 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
 // swap-chain state monitor, lazy init, and overlay render. The caller forwards to
 // the appropriate original function afterward.
 static void HandlePresent(IDXGISwapChain* pSwapChain) {
+    ID3D12CommandQueue* selectedQueue = SelectPresentQueue(pSwapChain);
+    ID3D12CommandQueue* activeQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
+    if (selectedQueue && selectedQueue != activeQueue) {
+        if (g_initialized.load(std::memory_order_relaxed)) {
+            HandleRenderException();
+        }
+        g_gameCommandQueue.store(selectedQueue, std::memory_order_relaxed);
+        UILog(std::format("Present selected swap chain 0x{:X} with queue 0x{:X} ({}).",
+            reinterpret_cast<uintptr_t>(pSwapChain), reinterpret_cast<uintptr_t>(selectedQueue),
+            FindAssociatedQueue(pSwapChain) ? "creation association" : "temporal fallback"));
+    }
+
     // Monitor swap chain state every frame — catches display mode changes that
     // bypass our ResizeBuffers hook (e.g., ResizeBuffers1, swap chain recreation).
     if (g_initialized.load(std::memory_order_relaxed)) {
@@ -673,14 +870,14 @@ static void HandlePresent(IDXGISwapChain* pSwapChain) {
 
 static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
     HandlePresent(pSwapChain);
-    return g_origPresent(pSwapChain, SyncInterval, Flags);
+    return OriginalPresentFor(pSwapChain)(pSwapChain, SyncInterval, Flags);
 }
 
 // IDXGISwapChain1::Present1 — same overlay handling, different present entry point.
 // IDXGISwapChain1 derives from IDXGISwapChain, so the upcast to HandlePresent is safe.
 static HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
     HandlePresent(pSwapChain);
-    return g_origPresent1(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
+    return OriginalPresent1For(pSwapChain)(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
 }
 
 // ============================================================================
@@ -699,7 +896,7 @@ static HRESULT InvokeOrigResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCo
 {
     HRESULT hr = DXGI_ERROR_INVALID_CALL;
     __try {
-        hr = g_origResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        hr = OriginalResizeBuffersFor(pSwapChain)(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         HandleResizeBuffersException();
     }
@@ -714,7 +911,8 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
     // Frame Generation reconfigures the presentation pipeline on enable/disable,
     // invalidating both our D3D12 resources and the command queue pointer.
     g_isOpen.store(false);
-    g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);  // force fresh recapture on next Present
+    // Keep the authoritative creation-time swap-chain/queue association. Clearing
+    // it here used to make RTSS's next DIRECT submission win the fallback race.
 
     if (g_initialized.load()) {
         g_initialized.store(false);
@@ -881,6 +1079,39 @@ static bool LooksHooked(void* fn, std::string& firstBytesOut) {
     return false;
 }
 
+static void* ResolveInitialJump(void* fn) {
+    if (!fn) return nullptr;
+    const auto* p = reinterpret_cast<const unsigned char*>(fn);
+    if (p[0] == 0xE9) {
+        const auto displacement = *reinterpret_cast<const std::int32_t*>(p + 1);
+        return const_cast<unsigned char*>(p + 5 + displacement);
+    }
+    if (p[0] == 0xEB) {
+        const auto displacement = *reinterpret_cast<const std::int8_t*>(p + 1);
+        return const_cast<unsigned char*>(p + 2 + displacement);
+    }
+    if (p[0] == 0xFF && p[1] == 0x25) {
+        const auto displacement = *reinterpret_cast<const std::int32_t*>(p + 2);
+        auto slot = reinterpret_cast<void* const*>(p + 6 + displacement);
+        return *slot;
+    }
+    return nullptr;
+}
+
+static std::string ModuleForAddress(void* address) {
+    if (!address) return "<unresolved>";
+    MEMORY_BASIC_INFORMATION memory{};
+    if (!VirtualQuery(address, &memory, sizeof(memory)) || !memory.AllocationBase) {
+        return "<unknown>";
+    }
+    char path[MAX_PATH]{};
+    if (!GetModuleFileNameA(static_cast<HMODULE>(memory.AllocationBase), path,
+        static_cast<DWORD>(std::size(path)))) {
+        return "<anonymous executable memory>";
+    }
+    return std::filesystem::path(path).filename().string();
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -897,6 +1128,9 @@ bool UIHook::Install() {
         UILog("ERROR: Vtable discovery failed. UI overlay disabled.");
         return false;
     }
+    g_presentTarget = pPresent;
+    g_present1Target = pPresent1;
+    g_resizeBuffersTarget = pResizeBuffers;
 
     // Diagnose prior render-chain hooks BEFORE we patch anything ourselves.
     // Another layer hooking these entry points first is the common cause of
@@ -916,7 +1150,10 @@ bool UIHook::Install() {
         for (const auto& t : targets) {
             if (LooksHooked(t.fn, firstBytes)) {
                 ++priorHooks;
-                UILog(std::string("Note: render entry already hooked by another layer: ") + t.name + " (first bytes: " + firstBytes + ").");
+                void* destination = ResolveInitialJump(t.fn);
+                UILog(std::string("Note: render entry already hooked by another layer: ") + t.name
+                    + " (first bytes: " + firstBytes + ", destination module: "
+                    + ModuleForAddress(destination) + ").");
             }
         }
         if (priorHooks > 0) {
@@ -1008,6 +1245,9 @@ void UIHook::Shutdown() {
 
     delete[] g_backBuffers;  g_backBuffers = nullptr;
     delete[] g_rtvHandles;   g_rtvHandles = nullptr;
+    g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);
+    g_recentDirectQueue.store(nullptr, std::memory_order_relaxed);
+    ReleaseSwapChainQueueAssociations();
 }
 
 void UIHook::ToggleUI() {
@@ -1021,6 +1261,10 @@ void UIHook::ToggleUI() {
     g_isOpen.store(nowOpen);
 
     if (nowOpen) {
+        g_logNextOverlaySubmit.store(true, std::memory_order_relaxed);
+        UILog(std::format("Overlay toggle requested: OPEN (initialized={}, swapChain=0x{:X}, queue=0x{:X}).",
+            g_initialized.load(std::memory_order_relaxed), reinterpret_cast<uintptr_t>(g_targetSwapChain),
+            reinterpret_cast<uintptr_t>(g_gameCommandQueue.load(std::memory_order_relaxed))));
         // --- Opening the overlay ---
         // Save the game's cursor clip rect so we can restore it on close
         g_hadClipRect = (GetClipCursor(&g_savedClipRect) != 0);
@@ -1037,6 +1281,7 @@ void UIHook::ToggleUI() {
             io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         }
     } else {
+        UILog("Overlay toggle requested: CLOSE.");
         // --- Closing the overlay ---
         // Hide the software cursor
         if (g_initialized.load()) {

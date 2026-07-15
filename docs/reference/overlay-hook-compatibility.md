@@ -60,26 +60,33 @@ Studied rather than reinvented:
 
 ## Adopted best practice
 
-1. **Present-queue association (temporal capture).** Capture the DIRECT queue
-   that submits *immediately before each Present on the target swapchain*, not
-   the first DIRECT queue seen. Multi-queue interposers (Streamline FG) defeat
-   first-seen; they don't defeat "the queue that fed the present." This replaces
-   the first-seen heuristic in `HookedExecuteCommandLists`.
+1. **Per-swapchain presentation-queue association.** Intercept
+   `CreateSwapChainForHwnd` and associate the returned swapchain's COM identity
+   with the D3D12 DIRECT queue passed to DXGI. Keep that authoritative mapping
+   across `ResizeBuffers`; clearing it creates a race in which RTSS or a
+   frame-generation helper queue can be mistaken for the game's queue.
 
-2. **Per-instance swapchain hooking (robustness).** Prefer hooking the vtable of
-   the actual swapchain instance handed to the game so a proxy's own `Present`
-   is caught, over patching only the canonical dxgi function harvested from a
-   dummy device. (Secondary — only needed when the proxy presents through its
-   own entry point.)
+2. **Temporal late-injection fallback.** If the swapchain predates hook
+   installation, sample the most recently submitting DIRECT queue at Present
+   and require its D3D12 device to match the presented swapchain. This is still
+   heuristic, but is strictly better than permanently latching the first DIRECT
+   queue observed.
 
-3. **Detect-and-tell.** We already detect a prior hook on the render entry
+3. **Per-instance swapchain hooking (robustness).** Install a private vtable on
+   the actual swapchain returned through the completed hook chain. This keeps
+   `Present`, `Present1`, and `ResizeBuffers` observable when RTSS or another
+   layer routes later calls around the canonical DXGI functions harvested from
+   a dummy device. Forward native entries through the MinHook trampoline so the
+   earlier injector remains downstream in the chain.
+
+4. **Detect-and-tell.** We already detect a prior hook on the render entry
    points (the `[Compat]` diagnostic). Promote that into the shipping build as a
    clear log line so a silent no-overlay becomes a self-serve diagnosis, e.g.:
    *"Incompatible prior render hook detected on Present — another frame-gen /
    capture / overlay layer owns the chain; the overlay may not render. Try
    disabling frame generation or capture overlays."*
 
-4. **Documented incompatibilities + workarounds.** For injectors we can't
+5. **Documented incompatibilities + workarounds.** For injectors we can't
    coexist with, name the conflict and the fix rather than chasing a universal
    solution. The overlay is a config-time tool (Ctrl+Alt+B), so toggling a
    conflicting layer off during setup is an acceptable workaround.
@@ -88,10 +95,18 @@ Studied rather than reinvented:
 
 | Practice | Where |
 | --- | --- |
+| Per-swapchain queue registry | `AssociateSwapChainQueue`, `SelectPresentQueue` |
 | Queue capture (primary / fallback) | `HookedCreateSwapChainForHwnd`, `HookedExecuteCommandLists` |
 | Prior-hook detection | `[Compat]` instrumentation at hook install |
 | Proxy/FG swapchain rebind | `RebindRenderTargetsIfNeeded`, per-frame monitor in `HandlePresent` |
+| Returned-instance hook | `InstallInstanceRenderHooks`, `OriginalPresentFor` |
 | Submit to present queue | `RenderOverlayFrame` → `pQueue->ExecuteCommandLists` |
+
+## Verified combinations
+
+| Layer | Result |
+| --- | --- |
+| RTSS 7.3.5, D3D12, RTSS loaded first | Verified: wizard renders through the returned-instance hook |
 
 ## Known incompatibilities
 

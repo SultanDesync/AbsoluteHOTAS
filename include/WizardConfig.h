@@ -148,6 +148,9 @@ bool EnsureStarterProfiles(std::string& err);
 bool CreateOverlayProfile(const std::string& name, std::string& err);
 bool SetProfileActivation(const std::string& name, const std::string& trigger,
                           const std::string& mode, std::string& err);
+// Read the base config's own activation (the "(base)" swap slot), so the wizard can
+// bind base as a first-class swap position (e.g. a rotary detent for base flight).
+void GetBaseActivation(std::string& trigger, std::string& mode);
 bool ResetBaseToDefaults(std::string& err);
 
 // Materialize the effective base config into a managed profile file. Returns

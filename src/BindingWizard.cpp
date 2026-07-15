@@ -19,8 +19,9 @@ static void WizLog(const std::string& msg) {
     RuntimePaths::Log("[BindingWizard]", msg);
 }
 
-static std::string s_profileCaptureName;
+static std::string s_profileCaptureName;   // "" = base (see s_profileCapturePending)
 static std::string s_profileCaptureMode = "momentary";
+static bool        s_profileCapturePending = false;  // a profile-trigger capture is in flight
 
 // --- Capture commit callback ---
 static void OnCaptureCommit(int slot, const char* binding) {
@@ -51,10 +52,12 @@ static void OnCaptureCommit(int slot, const char* binding) {
     } else if (slot >= CaptureSlot::kControlExtensionBase
                && slot < CaptureSlot::kControlExtensionBase + kNumControlExtensionSlots) {
         s.controlExtensionBindings[slot - CaptureSlot::kControlExtensionBase] = binding;
-    } else if (slot == CaptureSlot::kProfileTrigger && !s_profileCaptureName.empty()) {
+    } else if (slot == CaptureSlot::kProfileTrigger && s_profileCapturePending) {
         std::string err;
+        // s_profileCaptureName may be empty — that is the base config's own trigger.
         WizardConfig::SetProfileActivation(s_profileCaptureName, binding, s_profileCaptureMode, err);
         s_profileCaptureName.clear();
+        s_profileCapturePending = false;
     }
 }
 
@@ -362,6 +365,62 @@ static void DrawThrottleCalibrationPanel(WizardState& s) {
     }
 }
 
+// Reverse is one capability with three hardware strategies. Keep them together in
+// the main binding path so users do not have to discover a dedicated axis, a digital
+// button, and a throttle zone in three different parts of the wizard.
+static void DrawReverseSetup(WizardState& s) {
+    ImGui::Spacing();
+    if (!ImGui::CollapsingHeader("Reverse", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+    ImGui::Indent(12.0f);
+    ImGui::TextWrapped("Choose the reverse control that fits your hardware. Most users should bind a button; a dedicated axis is only useful when you have a spare slider or lever.");
+    ImGui::Spacing();
+
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Hold a button (recommended)");
+    ImGui::PushID("reverseButton");
+    DrawBindingRow("Reverse button", s.digitalAxisBindings[0], CaptureSlot::kDigitalAxisBase, false);
+    ImGui::PopID();
+    ImGui::TextDisabled("Hold to brake to zero and continue into reverse.");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Use the bottom of the throttle axis");
+    ImGui::Checkbox("Enable throttle reverse zone##reverseSetup", &s.unipolarReverse);
+    ImGui::TextDisabled("Pull below the zero-thrust point to reverse; push above it for forward thrust.");
+    if (s.unipolarReverse) {
+        ImGui::Spacing();
+        DrawThrottleRangeGraph(s, 300.0f, 14.0f);
+        if (s.calibratingReverseZone) {
+            if (ImGui::Button("Done##reverseSetup")) {
+                s.calibratingReverseZone = false;
+                WizLog("Reverse zone set to: " + std::to_string(s.reverseZoneCenter));
+            }
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
+                "Move throttle to zero thrust... %ld", s.reverseZoneCenter);
+        } else {
+            if (ImGui::Button("Set Zero-Thrust##reverseSetup")) s.calibratingReverseZone = true;
+            ImGui::SameLine();
+            ImGui::Text("Zero-Thrust: %ld", s.reverseZoneCenter);
+        }
+        ImGui::TextDisabled("Fine-tune the dead-stop range under Tune > Flight Axes.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Use a dedicated analog control");
+    ImGui::PushID("reverseAxis");
+    DrawBindingRow("Reverse axis", s.axisBindings[kNumAxisSlots - 1], kNumAxisSlots - 1, true);
+    ImGui::PopID();
+    ImGui::TextDisabled("A bound reverse button takes precedence over this axis.");
+
+    ImGui::Unindent(12.0f);
+}
+
 // --- Tab: Devices ---
 static void DrawDevicesTab(WizardState& s) {
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Connected HID Devices");
@@ -501,31 +560,78 @@ static void DrawDevicesTab(WizardState& s) {
     }
 }
 
+static void DrawMouseSteeringOptions(WizardState& s) {
+    ImGui::Indent(180.0f);
+    ImGui::Checkbox("Alignment assist", &s.alignmentAssist);
+    if (s.alignmentAssist) {
+        ImGui::TextDisabled("Gently centers steering when the mouse is idle near center.");
+        ImGui::PushItemWidth(180.0f);
+        ImGui::SliderFloat("Assist radius##mouseSteering", &s.alignmentRadius, 1.0f, 200.0f, "%.0f units");
+        int idleMs = s.alignmentIdleMs;
+        if (ImGui::SliderInt("Idle time##mouseSteering", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
+        ImGui::SliderFloat("Centering speed##mouseSteering", &s.alignmentDecayRate, 0.5f, 30.0f, "%.1f");
+        ImGui::PopItemWidth();
+    }
+    ImGui::Unindent(180.0f);
+}
+
 // --- Tab: Axes & Settings ---
-static void DrawAxesTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Flight Axis Assignments");
-    ImGui::Checkbox("Axis injection enabled", &s.axisInjectionEnabled);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Controls flight-axis memory injection; button and macro outputs remain active.");
-    ImGui::TextWrapped("Click 'Bind' then move the physical axis you want to assign.");
-    ImGui::SameLine(500);
-    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), ">> Save & Apply to commit changes");
+static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
+        tuningOnly ? "Flight Axis Tuning" : "Flight Axis Assignments");
+    if (!tuningOnly) {
+        ImGui::Checkbox("Axis injection enabled", &s.axisInjectionEnabled);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Controls flight-axis memory injection; button and macro outputs remain active.");
+        ImGui::TextWrapped("Click 'Bind' then move the physical axis you want to assign.");
+        ImGui::SameLine(500);
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), ">> Save & Apply to commit changes");
+    } else {
+        ImGui::TextWrapped("Adjust response, deadzones, saturation, and throttle behavior for the axes already bound under Bind Controls.");
+    }
     ImGui::Separator();
     ImGui::Spacing();
 
     for (int i = 0; i < kNumAxisSlots; i++) {
+        if (!tuningOnly && i == kNumAxisSlots - 1) continue;  // grouped under Reverse below
+        if (!tuningOnly && i == 1) {
+            ImGui::Spacing();
+            ImGui::SeparatorText("Steering input");
+            ImGui::Checkbox("Mouse steering (HOSAM)", &s.hosamMode);
+            ImGui::SameLine();
+            ImGui::TextDisabled(s.hosamMode
+                ? "Mouse controls steering; saved Pitch/Yaw bindings are inactive"
+                : "Use the bound Pitch and Yaw axes below");
+            if (s.hosamMode) DrawMouseSteeringOptions(s);
+            ImGui::Spacing();
+        }
         ImGui::PushID(i);
         if (i > 0) { ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing(); }
 
+        const bool steeringAxisDisabled = !tuningOnly && s.hosamMode && (i == 1 || i == 2);
+        if (steeringAxisDisabled) ImGui::BeginDisabled();
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", kAxisSlots[i].label);
         ImGui::SameLine(180);
-        DrawBindingRow("", s.axisBindings[i], i, true);
+        if (tuningOnly) {
+            ImGui::TextDisabled("%s", WizardConfig::FormatBindingDisplay(s.axisBindings[i]).c_str());
+        } else {
+            DrawBindingRow("", s.axisBindings[i], i, true);
+            if (i == 0) {
+                ImGui::Indent(180.0f);
+                ImGui::Checkbox("Gamepad-style throttle (HOSAS)", &s.accumulatorThrottle);
+                ImGui::TextDisabled(s.accumulatorThrottle
+                    ? "Like vanilla: deflect to change throttle, center to hold, pull back through zero for reverse"
+                    : "Use with a self-centering stick, like the gamepad left stick");
+                ImGui::Unindent(180.0f);
+            }
+        }
+        if (steeringAxisDisabled) ImGui::EndDisabled();
 
-        if (kAxisSlots[i].invertIniKey) {
+        if (tuningOnly && kAxisSlots[i].invertIniKey) {
             ImGui::SameLine(640);
             ImGui::Checkbox("Inv", &s.axisInvert[i]);
         }
 
-        if (kAxisSlots[i].sensitivityKey) {
+        if (tuningOnly && kAxisSlots[i].sensitivityKey) {
             ImGui::Indent(180);
             ImGui::PushItemWidth(120);
             ImGui::SliderFloat("Sens", &s.axisSensitivity[i], 0.1f, 3.0f, "%.2f");
@@ -533,7 +639,7 @@ static void DrawAxesTab(WizardState& s) {
             ImGui::Unindent(180);
         }
 
-        if (kAxisSlots[i].saturationKey) {
+        if (tuningOnly && kAxisSlots[i].saturationKey) {
             ImGui::Indent(180);
             ImGui::PushItemWidth(120);
             ImGui::SliderFloat("Sat", &s.axisSaturation[i], 0.05f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
@@ -615,7 +721,7 @@ static void DrawAxesTab(WizardState& s) {
         }
 
         // Per-axis deadzone
-        if (kAxisSlots[i].deadzoneKey) {
+        if (tuningOnly && kAxisSlots[i].deadzoneKey) {
             ImGui::Indent(180);
             ImGui::PushItemWidth(120);
             char dzLabel[32];
@@ -633,6 +739,8 @@ static void DrawAxesTab(WizardState& s) {
 
         ImGui::PopID();
     }
+
+    if (!tuningOnly) DrawReverseSetup(s);
 }
 
 // --- Tab: Aiming ---
@@ -728,15 +836,15 @@ static void DrawAimingTab(WizardState& s) {
     ImGui::PopID();
 }
 
-static void DrawAdvancedModesTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "HOSAM / HOSAS");
-    ImGui::TextWrapped("Configure paradigm-shifting playstyles that fundamentally change how the ship is controlled.");
+static void DrawGamepadThrottleTab(WizardState& s) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Vanilla / Gamepad-Style Throttle (HOSAS)");
+    ImGui::TextWrapped("Works like Starfield's gamepad throttle: push or pull a self-centering stick to change throttle, then return it to center to hold the current setting.");
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (ImGui::CollapsingHeader("Dual-Stick / Accumulator Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Gamepad-Style Throttle Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
-        ImGui::Checkbox("Enable Accumulator Throttle", &s.accumulatorThrottle);
+        ImGui::Checkbox("Use gamepad-style throttle", &s.accumulatorThrottle);
         if (s.accumulatorThrottle) {
             ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Rate)");
             ImGui::SameLine();
@@ -776,43 +884,18 @@ static void DrawAdvancedModesTab(WizardState& s) {
         }
         ImGui::Unindent(12);
     }
-    
-    ImGui::Spacing();
-
-    if (ImGui::CollapsingHeader("HOSAM Mode (Stick + Mouse)", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(12);
-        ImGui::Checkbox("Enable HOSAM Mode", &s.hosamMode);
-        if (s.hosamMode) {
-            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Active)");
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Mouse drives steering. Pitch/Yaw axes released to native mouse.");
-            ImGui::Spacing();
-            ImGui::Checkbox("Alignment Assist", &s.alignmentAssist);
-            if (s.alignmentAssist) {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Gently centers steering when mouse is idle near center.");
-                ImGui::PushItemWidth(180);
-                ImGui::SliderFloat("Radius##alignRad", &s.alignmentRadius, 1.0f, 200.0f, "%.0f units");
-                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "of 200 max");
-                int idleMs = s.alignmentIdleMs;
-                if (ImGui::SliderInt("Idle Time##alignIdle", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
-                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Before decay starts");
-                ImGui::SliderFloat("Decay Speed##alignDecay", &s.alignmentDecayRate, 0.5f, 30.0f, "%.1f");
-                ImGui::SameLine(); ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Higher = faster snap");
-                ImGui::PopItemWidth();
-            }
-        } else {
-            ImGui::TextWrapped("Use a joystick for throttle/strafe and your mouse for steering. Pitch and Yaw are released to the game's native mouse pipeline.");
-        }
-        ImGui::Unindent(12);
-    }
 }
 
-static void DrawButtonsTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Buttons");
-    ImGui::TextWrapped("Configure button bindings for vanilla ship actions and plugin controls.");
+static void DrawButtonsTab(WizardState& s, bool advancedOnly = false) {
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
+        advancedOnly ? "Advanced Button Tools" : "Ship Buttons");
+    ImGui::TextWrapped(advancedOnly
+        ? "Optional custom outputs, digital axis emulation, and plugin controls."
+        : "Bind the ship actions and flight assists you use while flying.");
     ImGui::Separator();
     ImGui::Spacing();
 
+    if (!advancedOnly) {
     if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
         ImGui::TextWrapped("These are vanilla ship bindings. Bind your controller buttons to emit the default keyboard/mouse outputs set in Starfield's 'Spaceflight Bindings' menu.");
@@ -844,7 +927,9 @@ static void DrawButtonsTab(WizardState& s) {
         }
         ImGui::Unindent(12);
     }
+    }
 
+    if (advancedOnly) {
     ImGui::Spacing();
 
     if (ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) {
@@ -909,9 +994,9 @@ static void DrawButtonsTab(WizardState& s) {
 
     if (ImGui::CollapsingHeader("Digital Axis Emulation", ImGuiTreeNodeFlags_None)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("Bind buttons to emulate axis input digitally (on/off). Useful for hat switches.");
+        ImGui::TextWrapped("Bind buttons to emulate roll and strafe axes digitally. Reverse is configured under Bind Controls > Flight Axes.");
         ImGui::Spacing();
-        for (int i = 0; i < kNumDigitalAxisSlots; i++) {
+        for (int i = 1; i < kNumDigitalAxisSlots; i++) {
             ImGui::PushID(4000 + i);
             DrawBindingRow(kDigitalAxisSlots[i].label, s.digitalAxisBindings[i], CaptureSlot::kDigitalAxisBase + i, false);
             ImGui::PopID();
@@ -936,6 +1021,7 @@ static void DrawButtonsTab(WizardState& s) {
             ImGui::PopID();
         }
         ImGui::Unindent(12);
+    }
     }
 }
 
@@ -1076,7 +1162,7 @@ static void DrawMacrosTab(WizardState& s) {
     ImGui::SameLine();
     if (ImGui::Button("Add \"Grav -> Shields\" Preset")) {
         MacroRow m;
-        m.name = "GravToShields";
+        m.name = "Power Grav to Shields";
         m.steps.push_back({ {"NextSystem"},          false, 6,    5 });  // right edge = GRV (clamps)
         m.steps.push_back({ {"DecreaseSystemPower"}, true,  1200, 0 });  // drain grav -> surplus
         m.steps.push_back({ {"PreviousSystem"},      false, 1,    5 });  // GRV -> SHD (adjacent)
@@ -1102,16 +1188,20 @@ static void DrawMacrosTab(WizardState& s) {
         auto& m = s.macros[mi];
         ImGui::PushID(6000 + mi);
 
-        // Duplicate names collide into one INI section, so the save skips the later
-        // one. Say so here rather than letting a macro silently not persist.
-        bool duplicate = false;
-        for (int j = 0; j < mi; j++) {
-            if (s.macros[j].name == m.name) { duplicate = true; break; }
+        // Duplicate friendly names are allowed now (they get distinct section keys on
+        // save). Disambiguate them for display only, with an integer suffix in paste
+        // order: "Power Grav to Shield (0)", "(1)", ...
+        int ordinal = 0, sameName = 0;
+        for (int j = 0; j < (int)s.macros.size(); j++) {
+            if (s.macros[j].name == m.name) { sameName++; if (j < mi) ordinal++; }
         }
+        char disp[96];
+        if (sameName > 1) std::snprintf(disp, sizeof(disp), "%s (%d)", m.name.c_str(), ordinal);
+        else              std::snprintf(disp, sizeof(disp), "%s", m.name.c_str());
 
         char header[160];
         std::snprintf(header, sizeof(header), "%s%s###macro%d",
-                      m.name.empty() ? "(unnamed)" : m.name.c_str(),
+                      m.name.empty() ? "(unnamed)" : disp,
                       m.buttonBinding == "(unbound)" ? "  [no button]" : "", mi);
 
         if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1125,9 +1215,6 @@ static void DrawMacrosTab(WizardState& s) {
             if (m.name.empty()) {
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "name required - will not save");
-            } else if (duplicate) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "duplicate name - will not save");
             }
 
             if (mi < 100) {
@@ -1160,8 +1247,15 @@ static void DrawMacrosTab(WizardState& s) {
     if (removeMacro >= 0) s.macros.erase(s.macros.begin() + removeMacro);
 }
 
-static void DrawProfileEditorHeader() {
-    if (!ImGui::CollapsingHeader("Profiles")) return;
+static void DrawProfileEditorHeader(bool showManagement = false) {
+    const std::string current = WizardConfig::GetEditProfile();
+    const std::string visibleName = current.empty() ? "Main controls" : current;
+    const std::string header = "Editing: " + visibleName + "###ProfileContext";
+
+    if (!current.empty()) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.10f, 0.28f, 0.48f, 0.85f));
+    const bool expanded = ImGui::CollapsingHeader(header.c_str());
+    if (!current.empty()) ImGui::PopStyleColor();
+    if (!expanded) return;
 
     static bool initialized = false;
     static char newProfileName[64] = "";
@@ -1177,13 +1271,12 @@ static void DrawProfileEditorHeader() {
     // The one authoritative "which profile am I looking at" control. Every binding
     // tab shows and saves THIS profile, so it is stated plainly and kept visually
     // distinct from the management actions (which are tucked into "Manage profiles").
-    const std::string current = WizardConfig::GetEditProfile();
-    const char* preview = current.empty() ? "Flight profile (base)" : current.c_str();
+    const char* preview = current.empty() ? "Main controls" : current.c_str();
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing profile:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(260.0f);
     if (ImGui::BeginCombo("##editprofile", preview)) {
-        if (ImGui::Selectable("Flight profile (base)", current.empty())) {
+        if (ImGui::Selectable("Main controls", current.empty())) {
             std::string err;
             WizardConfig::LoadProfileForEditing("", err);
         }
@@ -1195,8 +1288,7 @@ static void DrawProfileEditorHeader() {
         }
         ImGui::EndCombo();
     }
-    ImGui::TextDisabled("Every tab shows and saves this profile%s.",
-        current.empty() ? " (your base setup)" : " (overrides on base)");
+    ImGui::TextDisabled("Changes on this tab will be saved to %s.", visibleName.c_str());
 
     if (!current.empty()) {
         auto summaries = WizardConfig::ListProfileSummaries();
@@ -1215,6 +1307,7 @@ static void DrawProfileEditorHeader() {
             if (ImGui::Button("Bind trigger")) {
                 s_profileCaptureName = current;
                 s_profileCaptureMode = it->mode;
+                s_profileCapturePending = true;
                 WizardCapture::StartButtonCapture(0, CaptureSlot::kProfileTrigger,
                     "Profile trigger", it->mode == "selector"
                         ? WizardCapture::kSelectorCaptureMs : WizardCapture::kButtonCaptureMs);
@@ -1234,14 +1327,48 @@ static void DrawProfileEditorHeader() {
             }
         }
     } else {
-        ImGui::TextDisabled("Flight is the base profile. Other profiles return here when deactivated.");
+        // Base is the config everything overlays and returns to — but it can ALSO be a
+        // first-class swap position, so a rotary detent (or a hold key) can select base
+        // flight directly. Toggle is omitted: toggling base<->base is a no-op.
+        ImGui::TextDisabled("Base flight config. Other profiles overlay it and return here on release.");
+
+        std::string bTrigger, bMode;
+        WizardConfig::GetBaseActivation(bTrigger, bMode);
+
+        ImGui::Text("Activation");
+        ImGui::SameLine(120);
+        ImGui::TextColored(bTrigger == "(unbound)"
+                ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f),
+            "%s", WizardConfig::FormatBindingDisplay(bTrigger).c_str());
+        ImGui::SameLine(430);
+        if (ImGui::Button("Bind trigger##base")) {
+            s_profileCaptureName = "";  // base
+            s_profileCaptureMode = bMode;
+            s_profileCapturePending = true;
+            WizardCapture::StartButtonCapture(0, CaptureSlot::kProfileTrigger,
+                "Base trigger", bMode == "selector"
+                    ? WizardCapture::kSelectorCaptureMs : WizardCapture::kButtonCaptureMs);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear trigger##base")) {
+            std::string err;
+            if (!WizardConfig::SetProfileActivation("", "(unbound)", bMode, err)) status = err;
+        }
+
+        const char* baseModes[] = {"momentary", "selector"};
+        int bModeIndex = (bMode == "selector") ? 1 : 0;
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::Combo("Activation mode##base", &bModeIndex, baseModes, 2)) {
+            std::string err;
+            if (!WizardConfig::SetProfileActivation("", bTrigger, baseModes[bModeIndex], err)) status = err;
+        }
     }
 
     // Management actions live in a collapsed subsection so the second (import)
     // profile dropdown doesn't sit next to the "Editing profile" selector above and
     // muddy which one is the profile you're looking at.
     ImGui::Spacing();
-    if (ImGui::TreeNode("Manage profiles")) {
+    if (showManagement && ImGui::TreeNode("Manage profiles")) {
         ImGui::SetNextItemWidth(190.0f);
         ImGui::InputTextWithHint("##newprofile", "new overlay name", newProfileName, sizeof(newProfileName));
         ImGui::SameLine();
@@ -1345,37 +1472,62 @@ void BindingWizard::Draw() {
     float footerHeightToReserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + 20.0f;
     ImGui::BeginChild("WizardTabsChild", ImVec2(0, -footerHeightToReserve), false);
 
-    DrawProfileEditorHeader();
-
     if (ImGui::BeginTabBar("WizardTabs")) {
-
-        if (ImGui::BeginTabItem("Hardware & Devices")) {
-            DrawDevicesTab(s);
+        if (ImGui::BeginTabItem("Bind Controls")) {
+            DrawProfileEditorHeader(false);
+            ImGui::TextDisabled("Bind the controls you need, save, and get back to flying.");
+            if (ImGui::BeginTabBar("BindingSections")) {
+                if (ImGui::BeginTabItem("Flight Axes")) {
+                    DrawAxesTab(s, false);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Ship Buttons")) {
+                    DrawButtonsTab(s);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Flight Axes")) {
-            DrawAxesTab(s);
+        if (ImGui::BeginTabItem("Tune")) {
+            DrawProfileEditorHeader(false);
+            if (ImGui::BeginTabBar("TuningSections")) {
+                if (ImGui::BeginTabItem("Flight Axes")) {
+                    DrawAxesTab(s, true);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Aiming & Combat")) {
+                    DrawAimingTab(s);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Gamepad Throttle")) {
+                    DrawGamepadThrottleTab(s);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Aiming & Combat")) {
-            DrawAimingTab(s);
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Buttons")) {
-            DrawButtonsTab(s);
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Macros")) {
-            DrawMacrosTab(s);
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("HOSAM/HOSAS")) {
-            DrawAdvancedModesTab(s);
+        if (ImGui::BeginTabItem("Advanced")) {
+            DrawProfileEditorHeader(true);
+            ImGui::TextDisabled("Optional profiles, macros, special control modes, and device tools.");
+            if (ImGui::BeginTabBar("AdvancedSections")) {
+                if (ImGui::BeginTabItem("Macros")) {
+                    DrawMacrosTab(s);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Button Tools")) {
+                    DrawButtonsTab(s, true);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Devices")) {
+                    DrawDevicesTab(s);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
             ImGui::EndTabItem();
         }
 

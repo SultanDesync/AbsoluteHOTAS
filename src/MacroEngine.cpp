@@ -141,7 +141,12 @@ void LoadMacros(CSimpleIniA& ini) {
         if (section.rfind("Macro:", 0) != 0) continue;  // only [Macro:*] sections
 
         Macro m;
-        m.name   = std::string(section.substr(6));
+        // Friendly name (sName) for logs; fall back to the section key for a pasted
+        // chunk that predates sName. Firing is by button, so name is cosmetic here.
+        if (const char* disp = ini.GetValue(s.pItem, "sName", nullptr); disp && *disp)
+            m.name = disp;
+        else
+            m.name = std::string(section.substr(6));
         m.button = ParseBindingRef(ini.GetValue(s.pItem, "iButton", ""), -1);
         m.turbo  = ini.GetBoolValue(s.pItem, "bTurbo", false);
 

@@ -84,7 +84,8 @@ else.
 One section per macro, indexed steps (maps 1:1 to the wizard tab):
 
 ```ini
-[Macro:GravToShields]
+[Macro:power_grav_to_shield]
+sName   = Power Grav to Shield
 iButton = VKBSim Gunfighter@7
 bTurbo  = false
 ; Step<N> = <targets> <tap|hold> <amount> [gapMs]
@@ -96,6 +97,40 @@ Step3 = IncreaseSystemPower hold 1200
 
 Targets: a ship action id, a `key:0xNN` / `mouse:N`, or several joined with `+`
 for a chord (`key:0x2A+key:0x11` = L Shift + W).
+
+### Identity vs. label — `sName` and the section key
+
+Two fields, deliberately separate:
+
+- **The section key** (`power_grav_to_shield`) is a slug the wizard generates from the
+  name — filename-safe, stable across saves, unique. It is identity, not something the
+  user types.
+- **`sName`** (`Power Grav to Shield`) is the free-form label shown in the tab —
+  spaces, caps, duplicates all fine.
+
+Splitting them is what makes a macro **portable**. The steps were already
+system-agnostic (logical ship actions, or raw keys); the trigger (`iButton`) is the
+only hardware-specific field, and it is simply **absent** in a shared chunk. So the
+sharing story is: paste `[Macro:*]` sections into `AbsoluteHOTAS_Custom.ini`, and they
+show up **resolved** in the Macros tab with no trigger, ready for you to bind to *your*
+device. Grabbing a batch off a forum thread is copy-paste, then assign.
+
+Collisions are handled at the right layer:
+
+- **Same `sName`** is allowed. The tab disambiguates for display only, numbering in
+  paste order — `Power Grav to Shield (0)`, `(1)`. On save each still gets a distinct
+  section key (`..._2`, `..._3`), so they never merge.
+- **Same section key** is the one thing INI can't recover — two identical `[Macro:x]`
+  headers merge into one section before any parser sees them. So the wizard *owns* key
+  generation: on save it slugs the name and appends a collision index, guaranteeing
+  uniqueness. A pasted chunk only needs a distinct header, which two different macros
+  naturally have. `sName` is missing from a pre-`sName` chunk? The tab falls back to the
+  section key as the label.
+
+Deliberately **not** done: a profile binding that points at a macro by name (so the
+same sequence fires from different buttons per profile). The trigger still lives in the
+macro's own section. This delivers shareability — the stated goal — at a fraction of
+the cost; the fuller binding→macro decouple is a separate future step.
 
 ## Wizard "Macros" tab — dedicated tab
 
@@ -130,9 +165,9 @@ token level. Two parsers, one grammar; they must stay in step.
 **Half-built macros persist.** A macro with no trigger button or no steps is still
 written (as `iButton = -1` / no `Step` keys). The engine already ignores such macros
 at load, and the wizard reloads from this file after every Save — so dropping them
-would make a macro vanish while the user was still building it. Only unnamed and
-duplicate-named macros are skipped, since neither can be an INI section; the tab
-flags both in red.
+would make a macro vanish while the user was still building it. Only an **unnamed**
+macro is skipped (no `sName` = no section to key); the tab flags it in red.
+Duplicate names are *not* skipped — they get distinct generated keys (see above).
 
 **Save is a targeted rewrite** of `[Macro:*]` sections in the custom file. The wizard
 preserves every non-macro section while removing stale macro sections before writing

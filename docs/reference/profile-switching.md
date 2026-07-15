@@ -307,11 +307,26 @@ Slot4Mode   = selector
 Slot5File   = precision.ini
 Slot5Button = S-TECS SPACE-L THROTTLE STANDARD STEM@5
 Slot5Mode   = selector
-; ... buttons 6, 7 for the remaining detents
+
+; Base as a first-class detent: File = (base) selects the base config directly, so a
+; rotary always has a "home" position instead of only reaching base by leaving all
+; detents. Momentary and selector only — toggling base<->base is a no-op.
+Slot6File   = (base)
+Slot6Button = S-TECS SPACE-L THROTTLE STANDARD STEM@6
+Slot6Mode   = selector
 ```
 
-Keyboard triggers use `key:<VK>` in the same `SlotNButton` field. The starter FPS
-and Flight Aux overlays use `key:0x79` (F10) and `key:0x7A` (F11), respectively.
+**`File = (base)`** makes a slot select the base config itself — essential for a
+rotary, which is always in *some* position and so needs an explicit base detent. The
+engine models it as a slot whose snapshot equals base, so it flows through the swap
+state machine unchanged.
+
+**Keyboard triggers** use `key:<VK>` in `SlotNButton`, and accept a **modifier chord**
+as a `+`-joined VK list — `key:0x11+0x31` is Ctrl+1 (`0x11` Ctrl, `0x10` Shift, `0x12`
+Alt fold into modifiers; the remaining VK is the key). Chords matter because the
+game claims the plain keys: F5/F9 are quicksave/quickload and the F-row is otherwise
+spoken for. The starter FPS and Flight Aux overlays default to **Ctrl+1 / Ctrl+2**
+(`key:0x11+0x31`, `key:0x11+0x32`) for exactly this reason.
 
 ```ini
 ; Profiles/parked.ini — on-foot: no flight injection, but keep menu/on-foot mappings
@@ -404,17 +419,21 @@ Design principle: **ignorable, but easy to get into if you look at it.** Profile
 must cost the single-config user nothing, while teaching the interested user by
 example rather than by manual.
 
-### Collapsed profiles header (every tab)
+### Profile context header (every tab)
 
-A **collapsed-by-default "Profiles" header** sits at the top of each binding tab
-(Buttons, Flight Axes, Macros). A basic user never expands it and binds straight to
-the default flight profile — the feature has zero footprint. Putting it on every tab
-(not a separate tab) keeps the current edit target in view wherever you are binding.
+A compact, collapsed-by-default **"Editing: Main controls"** header sits at the top
+of each primary tab: **Bind Controls**, **Tune**, and **Advanced**. When a non-base
+profile is selected, its name replaces "Main controls" and the header gains a blue
+accent so it is difficult to edit the wrong target by accident. A basic user never
+needs to expand it, but always knows where Save & Apply will write.
+
+Profile selection and activation settings are revealed by expanding the header.
+Creation, import/export, and reset actions appear only from the Advanced tab's
+additional **Manage profiles** disclosure.
 
 Expanded, it shows:
 
-- **A profile dropdown**, defaulting to the flight profile (the base config). Plus an
-  **Add Profile…** entry.
+- **A profile dropdown**, defaulting to **Main controls** (the base config).
 - **Activation controls** for the selected profile, right beside the dropdown: a
   Bind capture for the trigger and a mode combo — **toggle**, **per-button**
   (momentary), or **selector** — matching the engine's `SwapMode`.

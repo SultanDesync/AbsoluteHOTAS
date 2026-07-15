@@ -158,8 +158,9 @@ namespace {
         return true;
     }
 
-    // Macro names become INI section names, so anything that would break the
-    // section header (or the ';' comment scanner) is stripped.
+    // Trim a friendly macro name (the sName shown in the tab). Only strips the few
+    // characters that would break the INI header/comment scanner if the raw name ever
+    // leaked into a key; the display name itself keeps spaces and case.
     std::string SanitizeMacroName(const std::string& in) {
         std::string out;
         for (char c : in) {
@@ -170,6 +171,29 @@ namespace {
         const size_t b = out.find_last_not_of(' ');
         if (a == std::string::npos) return "";
         return out.substr(a, b - a + 1);
+    }
+
+    // Slugify a friendly name into a stable, filename-safe INI section key:
+    // "Power Grav to Shield" -> "power_grav_to_shield". Same name -> same key across
+    // saves (no churn); MakeUniqueMacroKey appends _2/_3 only on a genuine collision,
+    // so two macros that share a display name still get distinct sections.
+    std::string SlugifyMacroName(const std::string& in) {
+        std::string out;
+        for (char c : in) {
+            if (std::isalnum((unsigned char)c)) out.push_back((char)std::tolower((unsigned char)c));
+            else if (c == ' ' || c == '-' || c == '_') { if (!out.empty() && out.back() != '_') out.push_back('_'); }
+        }
+        while (!out.empty() && out.back() == '_') out.pop_back();
+        return out.empty() ? "macro" : out;
+    }
+
+    std::string MakeUniqueMacroKey(const std::string& sName, std::vector<std::string>& used) {
+        const std::string base = SlugifyMacroName(sName);
+        std::string key = base;
+        for (int n = 2; std::find(used.begin(), used.end(), key) != used.end(); ++n)
+            key = base + "_" + std::to_string(n);
+        used.push_back(key);
+        return key;
     }
 
     void LoadMacroRows(WizardState& s, const std::filesystem::path* profilePath = nullptr) {
@@ -189,7 +213,10 @@ namespace {
             if (name.rfind("Macro:", 0) != 0) continue;
 
             MacroRow row;
-            row.name = std::string(name.substr(6));
+            // Friendly display name from sName; a pasted chunk without one falls back
+            // to the section key so it still shows up resolved and ready to bind.
+            const char* disp = ini.GetValue(sec.pItem, "sName", nullptr);
+            row.name = (disp && *disp) ? disp : std::string(name.substr(6));
 
             const char* btn = ini.GetValue(sec.pItem, "iButton", "");
             row.buttonBinding = (btn && *btn && std::strcmp(btn, "-1") != 0) ? btn : "(unbound)";
@@ -842,20 +869,16 @@ void SaveMacrosToINI() {
     // persist them rather than dropping them — otherwise the wizard, which reloads
     // from this file after every Save, would make them vanish as the user typed.
     int saved = 0;
-    std::vector<std::string> used;
+    std::vector<std::string> usedKeys;
     for (const auto& m : s_state.macros) {
-        const std::string name = SanitizeMacroName(m.name);
-        if (name.empty()) continue;  // no name = no INI section; wizard flags it
+        const std::string sName = SanitizeMacroName(m.name);
+        if (sName.empty()) continue;  // no display name = nothing to show; wizard flags it
 
-        // Two macros with one name would share an INI section and silently merge
-        // their steps. Skip the later one; the wizard flags it in red.
-        if (std::find(used.begin(), used.end(), name) != used.end()) {
-            WizLog("Skipped duplicate macro name: " + name);
-            continue;
-        }
-        used.push_back(name);
-
-        const std::string section = "Macro:" + name;
+        // The section key is generated (slug + collision index), NOT the display name,
+        // so two macros sharing a friendly name get distinct sections instead of
+        // merging. The friendly name rides along as sName.
+        const std::string section = "Macro:" + MakeUniqueMacroKey(sName, usedKeys);
+        ini.SetValue(section.c_str(), "sName", sName.c_str());
         const bool bound = (m.buttonBinding != "(unbound)");
         ini.SetValue(section.c_str(), "iButton", bound ? m.buttonBinding.c_str() : "-1");
         ini.SetBoolValue(section.c_str(), "bTurbo", m.turbo);
@@ -994,16 +1017,43 @@ bool EnsureStarterProfiles(std::string& err) {
     if (FindProfilePath("Flight Aux").empty() && !CreateOverlayProfile("Flight Aux", err)) return false;
     for (const auto& profile : ListProfileSummaries()) {
         if (profile.slot != 0) continue;
-        if (profile.name == "FPS" && !SetProfileActivation("FPS", "key:0x79", "toggle", err)) return false;
-        if (profile.name == "Flight Aux" && !SetProfileActivation("Flight Aux", "key:0x7A", "toggle", err)) return false;
+        // Ctrl+1 / Ctrl+2, not F-keys: F5/F9 are quicksave/quickload and the F-row is
+        // otherwise game-claimed. A Ctrl+digit chord is collision-safe out of the box.
+        if (profile.name == "FPS" && !SetProfileActivation("FPS", "key:0x11+0x31", "toggle", err)) return false;
+        if (profile.name == "Flight Aux" && !SetProfileActivation("Flight Aux", "key:0x11+0x32", "toggle", err)) return false;
     }
     return true;
 }
 
+void GetBaseActivation(std::string& trigger, std::string& mode) {
+    trigger = "(unbound)";
+    mode = "momentary";
+    CSimpleIniA custom;
+    custom.SetUnicode(false);
+    if (custom.LoadFile(RuntimePaths::CustomIniPath().string().c_str()) != SI_OK) return;
+    for (int slot = 1; slot <= 16; ++slot) {
+        const std::string prefix = "Slot" + std::to_string(slot);
+        const char* file = custom.GetValue("Profiles", (prefix + "File").c_str(), nullptr);
+        if (!file || _stricmp(file, "(base)") != 0) continue;
+        const char* t = custom.GetValue("Profiles", (prefix + "Button").c_str(), "-1");
+        trigger = (!t || !*t || std::strcmp(t, "-1") == 0) ? "(unbound)" : t;
+        mode = custom.GetValue("Profiles", (prefix + "Mode").c_str(), "momentary");
+        return;
+    }
+}
+
 bool SetProfileActivation(const std::string& name, const std::string& trigger,
                           const std::string& mode, std::string& err) {
-    const auto path = FindProfilePath(name);
-    if (path.empty()) { err = "Profile not found."; return false; }
+    // An empty name is the base config — a first-class swap position identified by the
+    // sentinel "(base)" instead of a profile file (see ParseProfileSlots).
+    std::string fileId;
+    if (name.empty()) {
+        fileId = "(base)";
+    } else {
+        const auto path = FindProfilePath(name);
+        if (path.empty()) { err = "Profile not found."; return false; }
+        fileId = path.filename().string();
+    }
 
     CSimpleIniA custom;
     custom.SetUnicode(false);
@@ -1018,7 +1068,7 @@ bool SetProfileActivation(const std::string& name, const std::string& trigger,
     for (int slot = 1; slot <= 16; ++slot) {
         const std::string prefix = "Slot" + std::to_string(slot);
         const char* file = custom.GetValue("Profiles", (prefix + "File").c_str(), nullptr);
-        if (file && _stricmp(file, path.filename().string().c_str()) == 0) { assigned = slot; break; }
+        if (file && _stricmp(file, fileId.c_str()) == 0) { assigned = slot; break; }
     }
     if (!assigned) {
         for (int slot = 1; slot <= 16; ++slot) {
@@ -1029,7 +1079,7 @@ bool SetProfileActivation(const std::string& name, const std::string& trigger,
     if (!assigned) { err = "No activation slots are available."; return false; }
 
     const std::string prefix = "Slot" + std::to_string(assigned);
-    custom.SetValue("Profiles", (prefix + "File").c_str(), path.filename().string().c_str());
+    custom.SetValue("Profiles", (prefix + "File").c_str(), fileId.c_str());
     custom.SetValue("Profiles", (prefix + "Button").c_str(),
                     trigger == "(unbound)" ? "-1" : trigger.c_str());
     const char* normalizedMode = mode == "toggle" ? "toggle" : mode == "selector" ? "selector" : "momentary";

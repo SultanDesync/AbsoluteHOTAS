@@ -48,6 +48,7 @@ struct ProfileSlot {
     // Activation (unused for slot 0).
     BindingRef  trigger;
     int         triggerKey = 0;
+    int         triggerMods = 0;     // keyboard modifier chord (bit0 Ctrl, bit1 Shift, bit2 Alt)
     SwapMode    mode       = SwapMode::Momentary;
     bool        prevDown   = false;  // momentary/toggle edge-detect state
     int         restoreSlot = 0;     // momentary: slot that was active when this was pressed
@@ -398,11 +399,33 @@ void ThrottleController::ResolveActiveDevices() {
 // Slot<N>Button / Slot<N>Mode) rather than one packed value, because a device-name
 // button ref contains spaces and could not be split from the value cleanly.
 struct ProfileSlotDef {
-    std::string file;     // resolved absolute path under Profiles/
+    std::string file;              // resolved absolute path under Profiles/ (empty if base)
+    bool        targetsBase = false;  // File = (base): this slot selects the base config
     BindingRef  trigger;
-    int         triggerKey = 0;
+    int         triggerKey  = 0;   // keyboard VK, 0 = none
+    int         triggerMods = 0;   // keyboard modifier chord: bit0 Ctrl, bit1 Shift, bit2 Alt
     SwapMode    mode = SwapMode::Momentary;
 };
+
+// Parse a "key:" trigger value into a VK plus a modifier mask. Accepts a '+'-joined
+// list of VK codes; Ctrl/Shift/Alt (0x11/0x10/0x12) fold into mods, the remaining VK
+// is the key. So "key:0x11+0x31" = Ctrl+1. Modifiers avoid colliding with the game's
+// own single-key bindings (F5/F9 quicksave/load, etc.).
+static void ParseKeyTrigger(const char* value, int& outKey, int& outMods) {
+    outKey = 0; outMods = 0;
+    const char* p = value + 4;  // skip "key:"
+    while (*p) {
+        char* end = nullptr;
+        const long vk = std::strtol(p, &end, 0);
+        if (end == p) break;
+        if      (vk == 0x11) outMods |= 1;  // Ctrl
+        else if (vk == 0x10) outMods |= 2;  // Shift
+        else if (vk == 0x12) outMods |= 4;  // Alt
+        else                 outKey = (int)vk;
+        p = end;
+        while (*p == '+' || *p == ' ') ++p;
+    }
+}
 
 static std::vector<ProfileSlotDef> ParseProfileSlots() {
     std::vector<ProfileSlotDef> out;
@@ -422,20 +445,26 @@ static std::vector<ProfileSlotDef> ParseProfileSlots() {
         if (!file || !*file) continue;
 
         ProfileSlotDef def;
-        def.file    = (RuntimePaths::ProfilesDir() / file).string();
-        CSimpleIniA profileMeta;
-        profileMeta.SetUnicode(false);
-        if (profileMeta.LoadFile(def.file.c_str()) != SI_OK) continue;
-        const char* kind = profileMeta.GetValue("Profile", "sKind", nullptr);
-        const long version = profileMeta.GetLongValue("Profile", "iConfigVersion", -1);
-        if (!kind || (_stricmp(kind, "full") != 0 && _stricmp(kind, "overlay") != 0)
-            || version < 1 || version > 1) {
-            CtrlLog("Ignored invalid or unsupported profile: " + def.file);
-            continue;
+        // "(base)" selects the base config itself — a first-class swap position (e.g.
+        // a rotary detent for base flight), not a profile file.
+        if (_stricmp(file, "(base)") == 0 || _stricmp(file, "base") == 0) {
+            def.targetsBase = true;
+        } else {
+            def.file = (RuntimePaths::ProfilesDir() / file).string();
+            CSimpleIniA profileMeta;
+            profileMeta.SetUnicode(false);
+            if (profileMeta.LoadFile(def.file.c_str()) != SI_OK) continue;
+            const char* kind = profileMeta.GetValue("Profile", "sKind", nullptr);
+            const long version = profileMeta.GetLongValue("Profile", "iConfigVersion", -1);
+            if (!kind || (_stricmp(kind, "full") != 0 && _stricmp(kind, "overlay") != 0)
+                || version < 1 || version > 1) {
+                CtrlLog("Ignored invalid or unsupported profile: " + def.file);
+                continue;
+            }
         }
         const char* trigger = ini.GetValue("Profiles", (base + "Button").c_str(), "");
         if (_strnicmp(trigger, "key:", 4) == 0)
-            def.triggerKey = (int)std::strtol(trigger + 4, nullptr, 0);
+            ParseKeyTrigger(trigger, def.triggerKey, def.triggerMods);
         else
             def.trigger = ParseBindingRef(trigger, -1);
         const char* mode = ini.GetValue("Profiles", (base + "Mode").c_str(), "momentary");
@@ -466,14 +495,24 @@ void ThrottleController::PreloadProfiles() {
 
     // Slots 1..N = switch profiles, each a fourth overlay on the base stack.
     for (const ProfileSlotDef& def : defs) {
-        LoadConfig(&def.file);
-        ResolveActiveDevices();
         ProfileSlot slot;
-        slot.config       = s_config;
-        slot.shipBindings = ShipOutputSystem::SnapshotBindings();
-        slot.macros       = MacroEngine::SnapshotMacros();
+        if (def.targetsBase) {
+            // A base-target slot IS base: copy slot 0's snapshot. Activating it restores
+            // the base config, so the swap state machine treats it like any other slot —
+            // no special-casing needed there. This is the rotary "base flight" detent.
+            slot.config       = s_profiles[0].config;
+            slot.shipBindings = s_profiles[0].shipBindings;
+            slot.macros       = s_profiles[0].macros;
+        } else {
+            LoadConfig(&def.file);
+            ResolveActiveDevices();
+            slot.config       = s_config;
+            slot.shipBindings = ShipOutputSystem::SnapshotBindings();
+            slot.macros       = MacroEngine::SnapshotMacros();
+        }
         slot.trigger      = def.trigger;
         slot.triggerKey   = def.triggerKey;
+        slot.triggerMods  = def.triggerMods;
         slot.mode         = def.mode;
         // Resolve the trigger's device too — it is not part of the active config, so
         // ResolveActiveDevices above never touched it. Without this a name-based
@@ -664,7 +703,13 @@ void ThrottleController::ControlLoop() {
         {
             const bool swapEnabled = active && !UIHook::IsUIOpen();
             auto IsProfileTriggerDown = [&](const ProfileSlot& slot) {
-                if (slot.triggerKey > 0) return (GetAsyncKeyState(slot.triggerKey) & 0x8000) != 0;
+                if (slot.triggerKey > 0) {
+                    if (!(GetAsyncKeyState(slot.triggerKey) & 0x8000)) return false;
+                    if ((slot.triggerMods & 1) && !(GetAsyncKeyState(0x11) & 0x8000)) return false;  // Ctrl
+                    if ((slot.triggerMods & 2) && !(GetAsyncKeyState(0x10) & 0x8000)) return false;  // Shift
+                    if ((slot.triggerMods & 4) && !(GetAsyncKeyState(0x12) & 0x8000)) return false;  // Alt
+                    return true;
+                }
                 return slot.trigger.IsValid() && IsButtonPressed(slot.trigger);
             };
             if (!swapEnabled) {
