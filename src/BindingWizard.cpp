@@ -646,9 +646,13 @@ static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
         }
         if (steeringAxisDisabled) ImGui::EndDisabled();
 
-        if (tuningOnly && kAxisSlots[i].invertIniKey) {
+        // Direction is part of choosing an axis, not advanced tuning. Keep it
+        // available beside every binding as well as on the Tune tab; both views
+        // edit the same state so hardware with unusual axis direction is obvious
+        // and immediately testable.
+        if (kAxisSlots[i].invertIniKey) {
             ImGui::SameLine(640);
-            ImGui::Checkbox("Inv", &s.axisInvert[i]);
+            ImGui::Checkbox("Invert", &s.axisInvert[i]);
         }
 
         if (tuningOnly && kAxisSlots[i].sensitivityKey) {
