@@ -150,6 +150,26 @@ static void DrawThrottleRangeGraph(WizardState& s, float barWidth, float barHeig
         return std::clamp(rawVal / 65535.0f, 0.0f, 1.0f);
     };
 
+    // The zone values below are stored in the throttle's logical coordinate
+    // system, but the live HID sample is still in hardware coordinates. Mirror
+    // only that live sample when inverted, exactly as NormalizeAxis does at
+    // runtime. Calibration capture must continue storing the untouched raw value.
+    auto NormThrottleLive = [&](long rawVal) -> float {
+        if (s.axisInvert[0]) {
+            long axisMin = 0;
+            long axisMax = 65535;
+            if (tDevIdx >= 0) {
+                auto calibIt = s.calibData.find((tDevIdx << 8) | tUsage);
+                if (calibIt != s.calibData.end() && calibIt->second.second > calibIt->second.first) {
+                    axisMin = calibIt->second.first;
+                    axisMax = calibIt->second.second;
+                }
+            }
+            rawVal = axisMin + axisMax - std::clamp(rawVal, axisMin, axisMax);
+        }
+        return NormThrottleRaw(rawVal);
+    };
+
     // Compute center and zone norms
     float centerNorm = NormThrottleRaw(s.detentCenter);
     float dzNorm = (float)s.detentDeadzone / 65535.0f;
@@ -246,7 +266,7 @@ static void DrawThrottleRangeGraph(WizardState& s, float barWidth, float barHeig
         const auto* st = DeviceManager::GetCachedState(tDevIdx);
         if (st) {
             long rawVal = DeviceManager::GetAxisFromState(st, tUsage);
-            float liveX = NormThrottleRaw(rawVal) * barWidth;
+            float liveX = NormThrottleLive(rawVal) * barWidth;
             dl->AddLine(ImVec2(pos.x + liveX, pos.y - 1), ImVec2(pos.x + liveX, pos.y + barHeight + 1),
                 IM_COL32(255, 220, 50, 255), 2.0f);
 
