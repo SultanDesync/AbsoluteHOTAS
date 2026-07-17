@@ -2,6 +2,11 @@
 
 Complete reference for `AbsoluteHOTAS.ini` key=value pairs. Most users should configure the plugin via the in-game wizard (`Ctrl+Alt+B`).
 
+Managed profile files may also contain `[Profile] sKeyboardShortcut`. It accepts a
+Windows virtual-key chord such as `key:0x11+0x31` (Ctrl+1), operates independently
+of the profile's controller/custom activation, and can be set to `-1` to disable the
+keyboard shortcut.
+
 > **Tip**: The wizard saves to this INI on each **Save & Apply**, so manual edits and wizard changes coexist.
 
 ---
@@ -98,7 +103,7 @@ Center deadzone for bipolar axes. After normalizing to [-1.0, +1.0], deflections
 
 ## [Buttons]
 
-Plugin control buttons. Button IDs are 1-indexed DirectInput button numbers (1–128). Supports `DeviceName@ID` for multi-device. Set to `-1` to disable.
+Plugin control buttons. IDs 1–128 are physical DirectInput buttons and 129–144 are virtual POV/hat directions. Supports `DeviceName@ID` for multi-device. Set to `-1` to disable.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -159,7 +164,7 @@ Map physical buttons to ship actions. All use 1-indexed DirectInput button IDs w
 
 ## [ShipButtonOutputs]
 
-Keyboard/mouse outputs emitted when ship buttons are pressed. Defaults match vanilla Starfield bindings. Omit a key to use its default.
+Optional keyboard/mouse overrides emitted when ship buttons are pressed. When a key is omitted, AbsoluteHOTAS reconciles the named action against the player's `ControlMap_Custom.txt` binding and falls back to the listed vanilla output only when necessary. An explicit value always wins.
 
 **Format**: `key:0xNN` (DirectInput scancode), `mouse:1..4` (mouse button), or `none` (disabled).
 
@@ -197,7 +202,7 @@ See [key-output-reference.md](key-output-reference.md) for the full scancode tab
 
 Free-form button → keyboard/mouse output passthroughs. Configure via the wizard Custom Bindings tab.
 
-**Syntax**: `iButton<1..128> = key:0xNN` or `mouse:1..4` or `none`
+**Syntax**: `iButton<1..144> = key:0xNN` or `mouse:1..4` or `none` (129–144 are POV/hat directions)
 
 Multi-device: `DeviceName@iButton42 = key:0x14`
 

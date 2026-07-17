@@ -4,7 +4,9 @@
 #include "WizardDefs.h"
 #include "WizardCapture.h"
 #include "WizardConfig.h"
+#include "WizardSession.h"
 #include "ThrottleController.h"
+#include "ThrottleHook.h"
 #include "UIHook.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
@@ -22,6 +24,38 @@ static void WizLog(const std::string& msg) {
 static std::string s_profileCaptureName;   // "" = base (see s_profileCapturePending)
 static std::string s_profileCaptureMode = "momentary";
 static bool        s_profileCapturePending = false;  // a profile-trigger capture is in flight
+
+static bool AreGameMenusClosed() {
+    const uintptr_t source = ThrottleHook::GetSourceBasePtr();
+    if (source < 0x10000) return false;
+
+    // Previously validated while investigating automatic pilot detection:
+    // source+0x1B4 is nonzero during gameplay and zero while a game menu is open.
+    // Treat an unavailable/stale pointer as unknown so the warning is never shown
+    // from a failed read.
+    __try {
+        return *reinterpret_cast<volatile uint8_t*>(source + 0x1B4) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static std::string VisibleProfileName(const std::string& name) {
+    return WizardSession::VisibleProfileName(name);
+}
+
+static void SetStatus(const std::string& message, bool isError = false) {
+    WizardSession::SetStatus(message, isError
+        ? WizardSession::StatusKind::Error : WizardSession::StatusKind::Success);
+}
+
+static bool SaveCurrentProfile() {
+    return WizardSession::SaveCurrentProfile();
+}
+
+static bool LoadEditorProfile(const std::string& name) {
+    return WizardSession::LoadEditorProfile(name);
+}
 
 // --- Capture commit callback ---
 static void OnCaptureCommit(int slot, const char* binding) {
@@ -53,56 +87,92 @@ static void OnCaptureCommit(int slot, const char* binding) {
                && slot < CaptureSlot::kControlExtensionBase + kNumControlExtensionSlots) {
         s.controlExtensionBindings[slot - CaptureSlot::kControlExtensionBase] = binding;
     } else if (slot == CaptureSlot::kProfileTrigger && s_profileCapturePending) {
-        std::string err;
         // s_profileCaptureName may be empty — that is the base config's own trigger.
-        WizardConfig::SetProfileActivation(s_profileCaptureName, binding, s_profileCaptureMode, err);
+        if (WizardSession::SetActivationDraft(s_profileCaptureName, binding, s_profileCaptureMode)) {
+            WizardSession::SetStatus("Profile activation staged. Save & Apply to commit it.",
+                                     WizardSession::StatusKind::Warning);
+        } else {
+            SetStatus("Could not stage profile activation.", true);
+        }
         s_profileCaptureName.clear();
         s_profileCapturePending = false;
     }
 }
 
 // --- Shared UI helper: draw a binding row with Bind/Clear ---
-static void DrawBindingRow(const char* label, std::string& binding, int captureSlot, bool isAxis) {
-    auto& pending = WizardCapture::GetPendingBind();
-
-    if (label[0] != '\0') {
-        ImGui::Text("%-22s", label);
-        ImGui::SameLine(180);
-    }
-
+static void DrawBindingRow(const char* label, std::string& binding, int captureSlot,
+                           bool isAxis, bool* invert = nullptr) {
+    const auto& pending = WizardSession::Capture();
     std::string displayStr = WizardConfig::FormatBindingDisplay(binding);
-    ImVec4 color = (binding == "(unbound)")
+    const ImVec4 color = (binding == "(unbound)")
         ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f)
         : ImVec4(0.4f, 1.0f, 0.6f, 1.0f);
-    ImGui::TextColored(color, "%s", displayStr.c_str());
-    ImGui::SameLine(500);
+    const bool isCapturing = pending.active && pending.targetConfigSlot == captureSlot;
 
-    bool isCapturing = pending.active && pending.targetConfigSlot == captureSlot;
-    if (isCapturing) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.2f, 1.0f), isAxis ? ">> Move axis..." : ">> Press button...");
-        ImGui::SameLine();
-        ImGui::PushID(captureSlot + 90000);
-        if (ImGui::SmallButton("Cancel")) {
-            pending.active = false;
-        }
-        ImGui::PopID();
-    } else {
-        ImGui::PushID(captureSlot);
-        if (ImGui::SmallButton("Bind")) {
-            if (isAxis) {
-                WizardCapture::StartAxisCapture(captureSlot, label);
-            } else {
-                int category = (captureSlot / 100) * 100;
-                int index = captureSlot % 100;
-                WizardCapture::StartButtonCapture(index, category, label);
+    ImGui::PushID(captureSlot + 700000);
+    const int columns = invert ? 4 : 3;
+    if (ImGui::BeginTable("BindingRow", columns,
+            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch, 0.30f);
+        ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 112.0f);
+        if (invert) ImGui::TableSetupColumn("Direction", ImGuiTableColumnFlags_WidthFixed, 62.0f);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", label);
+        ImGui::TableNextColumn();
+        ImGui::TextColored(color, "%s", displayStr.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", displayStr.c_str());
+        ImGui::TableNextColumn();
+        if (isCapturing) {
+            if (ImGui::SmallButton("Cancel")) WizardSession::CancelCapture();
+        } else {
+            if (ImGui::SmallButton("Bind")) {
+                if (isAxis) {
+                    WizardSession::BeginAxisCapture(captureSlot, label);
+                } else {
+                    const int category = (captureSlot / 100) * 100;
+                    const int index = captureSlot % 100;
+                    WizardSession::BeginButtonCapture(index, category, label);
+                }
             }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear")) binding = "(unbound)";
         }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear")) {
-            binding = "(unbound)";
+        if (invert) {
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("Invert", invert);
         }
-        ImGui::PopID();
+        ImGui::EndTable();
     }
+    ImGui::PopID();
+}
+
+static void DrawBindingSummaryRow(const char* label, const std::string& binding,
+                                  bool* invert = nullptr) {
+    const std::string display = WizardConfig::FormatBindingDisplay(binding);
+    const ImVec4 color = binding == "(unbound)"
+        ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f);
+    ImGui::PushID(label);
+    const int columns = invert ? 3 : 2;
+    if (ImGui::BeginTable("BindingSummary", columns,
+            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+        ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        if (invert) ImGui::TableSetupColumn("Direction", ImGuiTableColumnFlags_WidthFixed, 62.0f);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", label);
+        ImGui::TableNextColumn();
+        ImGui::TextColored(color, "%s", display.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", display.c_str());
+        if (invert) {
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("Invert", invert);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::PopID();
 }
 
 // --- Throttle range visualization ---
@@ -441,14 +511,43 @@ static void DrawReverseSetup(WizardState& s) {
     ImGui::Unindent(12.0f);
 }
 
+// Hats and buttons are a normal fallback when a controller does not provide enough
+// analog axes. Keep these assignments beside the analog flight axes rather than
+// presenting them as an advanced plugin feature.
+static void DrawButtonBasedAxes(WizardState& s) {
+    ImGui::Spacing();
+    if (!ImGui::CollapsingHeader("Button-based axes (hats and buttons)", ImGuiTreeNodeFlags_None)) return;
+
+    static constexpr const char* kLabels[] = {
+        "Roll left", "Roll right",
+        "Strafe left", "Strafe right",
+        "Strafe up", "Strafe down"
+    };
+
+    ImGui::Indent(12.0f);
+    ImGui::TextWrapped("Use buttons or a hat switch for roll or strafe when you do not have enough analog axes.");
+    ImGui::Spacing();
+    for (int i = 1; i < kNumDigitalAxisSlots; ++i) {
+        ImGui::PushID(4000 + i);
+        DrawBindingRow(kLabels[i - 1], s.digitalAxisBindings[i], CaptureSlot::kDigitalAxisBase + i, false);
+        ImGui::PopID();
+    }
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::PushItemWidth(120.0f);
+    ImGui::SliderFloat("Roll strength", &s.digitalRollValue, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Strafe strength", &s.digitalStrafeValue, 0.0f, 1.0f, "%.2f");
+    ImGui::PopItemWidth();
+    ImGui::TextDisabled("Sets the axis output while a bound button is held.");
+    ImGui::Unindent(12.0f);
+}
+
 // --- Tab: Devices ---
 static void DrawDevicesTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Connected HID Devices");
-    ImGui::Separator();
-
     int devCount = DeviceManager::GetDeviceCount();
     if (devCount == 0) ImGui::TextWrapped("No DirectInput devices detected.");
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Device indices (#N) follow USB enumeration order.");
+    ImGui::TextDisabled("Device indices (#N) follow DirectInput enumeration order; name-based bindings survive index changes.");
     ImGui::Spacing();
 
     auto& devCalib = WizardCapture::GetCalibState();
@@ -466,7 +565,6 @@ static void DrawDevicesTab(WizardState& s) {
 
             // Swap button for duplicate device names
             if (d + 1 < devCount && info.productName == DeviceManager::GetDevice(d + 1).productName) {
-                ImGui::SameLine(400);
                 char swapLabel[64];
                 std::snprintf(swapLabel, sizeof(swapLabel), "Swap #%d <-> #%d", d, d + 1);
                 if (ImGui::SmallButton(swapLabel)) {
@@ -487,17 +585,31 @@ static void DrawDevicesTab(WizardState& s) {
                     std::vector<std::string*> allBindings;
                     for (auto& b : s.axisBindings) allBindings.push_back(&b);
                     for (auto& b : s.buttonBindings) allBindings.push_back(&b);
+                    for (auto& b : s.controlExtensionBindings) allBindings.push_back(&b);
                     for (auto& b : s.digitalAxisBindings) allBindings.push_back(&b);
                     for (auto& sa : s.shipActionSlots) allBindings.push_back(&sa.binding);
                     for (auto& cb : s.customBindings) allBindings.push_back(&cb.buttonBinding);
                     for (auto& b : s.aimAxisBindings) allBindings.push_back(&b);
                     for (auto& b : s.digitalAimBindings) allBindings.push_back(&b);
+                    allBindings.push_back(&s.toggleAimModeBinding);
+                    allBindings.push_back(&s.turnAssistBinding);
+                    for (auto& macro : s.macros) allBindings.push_back(&macro.buttonBinding);
 
                     for (auto* bp : allBindings) doSwap(*bp);
                     for (auto* bp : allBindings) finalize(*bp);
 
-                    WizardConfig::SaveActiveProfile();
-                    WizLog("Swapped device indices #" + std::to_string(d) + " <-> #" + std::to_string(d + 1));
+                    std::unordered_map<int, std::pair<long, long>> swappedCalibration;
+                    for (const auto& [key, range] : s.calibData) {
+                        int deviceIndex = key >> 8;
+                        if (deviceIndex == d) deviceIndex = d + 1;
+                        else if (deviceIndex == d + 1) deviceIndex = d;
+                        swappedCalibration[(deviceIndex << 8) | (key & 0xFF)] = range;
+                    }
+                    s.calibData.swap(swappedCalibration);
+                    WizardSession::SwapActivationDeviceIndices(d, d + 1);
+                    WizardSession::SetStatus("Device reassignment staged. Save & Apply to commit it.",
+                                             WizardSession::StatusKind::Warning);
+                    WizLog("Staged device index swap #" + std::to_string(d) + " <-> #" + std::to_string(d + 1));
                 }
             }
 
@@ -595,21 +707,28 @@ static void DrawMouseSteeringOptions(WizardState& s) {
     ImGui::Unindent(180.0f);
 }
 
-// --- Tab: Axes & Settings ---
+static void DrawWizardAccessSetup(WizardState& s) {
+    ImGui::SeparatorText("Wizard access");
+    ImGui::TextWrapped("Choose a controller button for one-touch access to this workbench. Ctrl+Alt+B always remains available as the keyboard recovery shortcut.");
+    if (s.buttonBindings[kToggleWizardButtonSlot] == "(unbound)") {
+        ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.25f, 1.0f),
+            "Recommended: set this now so you do not need to remember the three-key shortcut.");
+    }
+    ImGui::Spacing();
+    DrawBindingRow("Open / close wizard", s.buttonBindings[kToggleWizardButtonSlot],
+                   CaptureSlot::kButtonBase + kToggleWizardButtonSlot, false);
+    ImGui::Spacing();
+    ImGui::SeparatorText("Flight input");
+}
+
 static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
-        tuningOnly ? "Flight Axis Tuning" : "Flight Axis Assignments");
     if (!tuningOnly) {
+        DrawWizardAccessSetup(s);
         ImGui::Checkbox("Axis injection enabled", &s.axisInjectionEnabled);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Controls flight-axis memory injection; button and macro outputs remain active.");
-        ImGui::TextWrapped("Click 'Bind' then move the physical axis you want to assign.");
-        ImGui::SameLine(500);
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), ">> Save & Apply to commit changes");
     } else {
         ImGui::TextWrapped("Adjust response, deadzones, saturation, and throttle behavior for the axes already bound under Bind Controls.");
     }
-    ImGui::Separator();
-    ImGui::Spacing();
 
     for (int i = 0; i < kNumAxisSlots; i++) {
         if (!tuningOnly && i == kNumAxisSlots - 1) continue;  // grouped under Reverse below
@@ -622,6 +741,13 @@ static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
                 ? "Mouse controls steering; saved Pitch/Yaw bindings are inactive"
                 : "Use the bound Pitch and Yaw axes below");
             if (s.hosamMode) DrawMouseSteeringOptions(s);
+            const bool hasAimAxes = s.aimAxisBindings[0] != "(unbound)" || s.aimAxisBindings[1] != "(unbound)";
+            const char* aimSummary = !s.sourceObjectAim ? "Aim system disabled"
+                : hasAimAxes ? "Independent aim & steer" : "Aim-driven steering";
+            ImGui::TextDisabled("Aiming: %s", aimSummary);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Configure aiming & steering..."))
+                WizardSession::Navigate(WizardSession::Route::TuneAiming);
             ImGui::Spacing();
         }
         ImGui::PushID(i);
@@ -629,31 +755,22 @@ static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
 
         const bool steeringAxisDisabled = !tuningOnly && s.hosamMode && (i == 1 || i == 2);
         if (steeringAxisDisabled) ImGui::BeginDisabled();
-        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", kAxisSlots[i].label);
-        ImGui::SameLine(180);
         if (tuningOnly) {
-            ImGui::TextDisabled("%s", WizardConfig::FormatBindingDisplay(s.axisBindings[i]).c_str());
+            DrawBindingSummaryRow(kAxisSlots[i].label, s.axisBindings[i],
+                kAxisSlots[i].invertIniKey ? &s.axisInvert[i] : nullptr);
         } else {
-            DrawBindingRow("", s.axisBindings[i], i, true);
+            DrawBindingRow(kAxisSlots[i].label, s.axisBindings[i], i, true,
+                kAxisSlots[i].invertIniKey ? &s.axisInvert[i] : nullptr);
             if (i == 0) {
-                ImGui::Indent(180.0f);
                 ImGui::Checkbox("Gamepad-style throttle (HOSAS)", &s.accumulatorThrottle);
                 ImGui::TextDisabled(s.accumulatorThrottle
                     ? "Like vanilla: deflect to change throttle, center to hold, pull back through zero for reverse"
                     : "Use with a self-centering stick, like the gamepad left stick");
-                ImGui::Unindent(180.0f);
+                if (ImGui::SmallButton("Configure gamepad-style throttle..."))
+                    WizardSession::Navigate(WizardSession::Route::TuneGamepadThrottle);
             }
         }
         if (steeringAxisDisabled) ImGui::EndDisabled();
-
-        // Direction is part of choosing an axis, not advanced tuning. Keep it
-        // available beside every binding as well as on the Tune tab; both views
-        // edit the same state so hardware with unusual axis direction is obvious
-        // and immediately testable.
-        if (kAxisSlots[i].invertIniKey) {
-            ImGui::SameLine(640);
-            ImGui::Checkbox("Invert", &s.axisInvert[i]);
-        }
 
         if (tuningOnly && kAxisSlots[i].sensitivityKey) {
             ImGui::Indent(180);
@@ -764,19 +881,20 @@ static void DrawAxesTab(WizardState& s, bool tuningOnly = false) {
         ImGui::PopID();
     }
 
-    if (!tuningOnly) DrawReverseSetup(s);
+    if (!tuningOnly) {
+        DrawButtonBasedAxes(s);
+        DrawReverseSetup(s);
+        if (ImGui::SmallButton("Fine-tune throttle and reverse zones..."))
+            WizardSession::Navigate(WizardSession::Route::TuneFlightAxes);
+    }
 }
 
-// --- Tab: Aiming ---
 static void DrawAimingTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Aiming System");
     ImGui::TextWrapped("Controls how the aiming reticle and ship steering interact. Enable the aim system, then choose a mode below.");
-    ImGui::Separator();
-    ImGui::Spacing();
 
     ImGui::Checkbox("Enable Aim System", &s.sourceObjectAim);
     if (!s.sourceObjectAim) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Aim system disabled. Ship steering uses cluster gates only.");
+        ImGui::TextDisabled("Aim/reticle injection is off. The bound flight axes still steer the ship directly.");
         return;
     }
 
@@ -806,16 +924,10 @@ static void DrawAimingTab(WizardState& s) {
 
     for (int i = 0; i < kNumAimAxisSlots; i++) {
         ImGui::PushID(6000 + i);
-        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", kAimAxisSlots[i].label);
-        ImGui::SameLine(180);
-        DrawBindingRow("", s.aimAxisBindings[i], CaptureSlot::kAimAxisBase + i, true);
-        ImGui::SameLine(640);
-        ImGui::Checkbox("Inv", &s.aimAxisInvert[i]);
-        ImGui::Indent(180);
-        ImGui::PushItemWidth(120);
+        DrawBindingRow(kAimAxisSlots[i].label, s.aimAxisBindings[i],
+                       CaptureSlot::kAimAxisBase + i, true, &s.aimAxisInvert[i]);
+        ImGui::SetNextItemWidth(std::min(180.0f, ImGui::GetContentRegionAvail().x * 0.4f));
         ImGui::SliderFloat("Sens", &s.aimAxisSensitivity[i], 0.1f, 3.0f, "%.2f");
-        ImGui::PopItemWidth();
-        ImGui::Unindent(180);
         if (i < kNumAimAxisSlots - 1) { ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing(); }
         ImGui::PopID();
     }
@@ -861,15 +973,9 @@ static void DrawAimingTab(WizardState& s) {
 }
 
 static void DrawGamepadThrottleTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Vanilla / Gamepad-Style Throttle (HOSAS)");
     ImGui::TextWrapped("Works like Starfield's gamepad throttle: push or pull a self-centering stick to change throttle, then return it to center to hold the current setting.");
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    if (ImGui::CollapsingHeader("Gamepad-Style Throttle Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(12);
-        ImGui::Checkbox("Use gamepad-style throttle", &s.accumulatorThrottle);
-        if (s.accumulatorThrottle) {
+    ImGui::Checkbox("Use gamepad-style throttle", &s.accumulatorThrottle);
+    if (s.accumulatorThrottle) {
             ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "(Rate)");
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "Stick deflection controls throttle speed, not position.");
@@ -905,24 +1011,85 @@ static void DrawGamepadThrottleTab(WizardState& s) {
                     ImGui::PopID();
                 }
             }
-        }
-        ImGui::Unindent(12);
     }
 }
 
-static void DrawButtonsTab(WizardState& s, bool advancedOnly = false) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
-        advancedOnly ? "Advanced Button Tools" : "Ship Buttons");
-    ImGui::TextWrapped(advancedOnly
-        ? "Optional custom outputs, digital axis emulation, and plugin controls."
-        : "Bind the ship actions and flight assists you use while flying.");
-    ImGui::Separator();
+static void DrawCustomKeyBindings(WizardState& s) {
+    if (!ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) return;
+
+    ImGui::Indent(12);
+    ImGui::TextWrapped("Bind controller buttons to raw keyboard/mouse outputs for menus or actions outside the named Ship Actions list. Raw custom outputs are not reconciled automatically; bind the same key or mouse button to the desired action in Starfield's Controls menu. For chords or sequences, use Advanced > Macros.");
+    if (ImGui::SmallButton("Build a chord or sequence..."))
+        WizardSession::Navigate(WizardSession::Route::AdvancedMacros);
     ImGui::Spacing();
 
-    if (!advancedOnly) {
+    if (ImGui::Button("Add Binding")) s.customBindings.push_back({"(unbound)", "none"});
+    ImGui::SameLine();
+    if (ImGui::Button("Add menu-navigation preset")) {
+        s.customBindings.push_back({"(unbound)", "key:0x11"});
+        s.customBindings.push_back({"(unbound)", "key:0x1E"});
+        s.customBindings.push_back({"(unbound)", "key:0x1F"});
+        s.customBindings.push_back({"(unbound)", "key:0x20"});
+        s.customBindings.push_back({"(unbound)", "key:0x0F"});
+        s.customBindings.push_back({"(unbound)", "key:0x12"});
+        s.customBindings.push_back({"(unbound)", "key:0x01"});
+        WizLog("Added menu-navigation preset (WASD/Tab/E/Esc).");
+    }
+    ImGui::Spacing();
+
+    int removeIdx = -1;
+    for (int i = 0; i < (int)s.customBindings.size(); i++) {
+        auto& row = s.customBindings[i];
+        ImGui::PushID(5000 + i);
+        int currentOutput = FindOutputIndex(row.output);
+        const char* previewLabel = (currentOutput >= 0) ? kOutputCatalog[currentOutput].label : row.output.c_str();
+        if (ImGui::BeginTable("CustomBinding", 3,
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+            ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthStretch, 0.32f);
+            ImGui::TableSetupColumn("Output", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 156.0f);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            const std::string bindingDisplay = WizardConfig::FormatBindingDisplay(row.buttonBinding);
+            ImGui::TextColored(row.buttonBinding == "(unbound)"
+                    ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f),
+                "%s", bindingDisplay.c_str());
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::BeginCombo("##output", previewLabel)) {
+                for (int j = 0; j < kOutputCatalogSize; j++) {
+                    bool selected = (j == currentOutput);
+                    if (ImGui::Selectable(kOutputCatalog[j].label, selected)) row.output = kOutputCatalog[j].value;
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::TableNextColumn();
+            if (ImGui::SmallButton("Bind")) {
+                char label[64];
+                int outputIdx = FindOutputIndex(row.output);
+                std::snprintf(label, sizeof(label), "Custom #%d (%s)", i + 1,
+                    outputIdx >= 0 ? kOutputCatalog[outputIdx].label : "?");
+                WizardSession::BeginButtonCapture(i, CaptureSlot::kCustomBase, label);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear")) row.buttonBinding = "(unbound)";
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove")) removeIdx = i;
+            ImGui::EndTable();
+        }
+        ImGui::PopID();
+    }
+    if (removeIdx >= 0) s.customBindings.erase(s.customBindings.begin() + removeIdx);
+    if (s.customBindings.empty())
+        ImGui::TextDisabled("No custom bindings. Add one or use the menu-navigation preset to get started.");
+    ImGui::Unindent(12);
+}
+
+static void DrawButtonsTab(WizardState& s) {
     if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("These are vanilla ship bindings. Bind your controller buttons to emit the default keyboard/mouse outputs set in Starfield's 'Spaceflight Bindings' menu.");
+        ImGui::TextWrapped("Bind physical controller buttons to named Starfield ship actions. Each action follows your current in-game keyboard/mouse binding automatically.");
         ImGui::Spacing();
         for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
             ImGui::PushID(3000 + i);
@@ -951,102 +1118,22 @@ static void DrawButtonsTab(WizardState& s, bool advancedOnly = false) {
         }
         ImGui::Unindent(12);
     }
-    }
-
-    if (advancedOnly) {
-    ImGui::Spacing();
-
-    if (ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) {
-        ImGui::Indent(12);
-        ImGui::TextWrapped("Bind controller buttons to emit a single custom keyboard/mouse output. Use Starfield's vanilla binding menu to assign matching secondary bindings. For multi-key sequences or chords, use the Macros tab.");
-        ImGui::Spacing();
-
-        if (ImGui::Button("Add Binding")) s.customBindings.push_back({"(unbound)", "none"});
-        ImGui::SameLine();
-        if (ImGui::Button("Add Menu Cluster")) {
-            s.customBindings.push_back({"(unbound)", "key:0x11"});
-            s.customBindings.push_back({"(unbound)", "key:0x1E"});
-            s.customBindings.push_back({"(unbound)", "key:0x1F"});
-            s.customBindings.push_back({"(unbound)", "key:0x20"});
-            s.customBindings.push_back({"(unbound)", "key:0x0F"});
-            s.customBindings.push_back({"(unbound)", "key:0x12"});
-            s.customBindings.push_back({"(unbound)", "key:0x01"});
-            WizLog("Added menu cluster preset (WASD/Tab/E/Esc).");
-        }
-        ImGui::Spacing();
-
-        int removeIdx = -1;
-        for (int i = 0; i < (int)s.customBindings.size(); i++) {
-            auto& row = s.customBindings[i];
-            ImGui::PushID(5000 + i);
-            ImGui::Text("%-22s", row.buttonBinding.c_str());
-            ImGui::SameLine(180);
-
-            int currentOutput = FindOutputIndex(row.output);
-            const char* previewLabel = (currentOutput >= 0) ? kOutputCatalog[currentOutput].label : row.output.c_str();
-            ImGui::PushItemWidth(120);
-            if (ImGui::BeginCombo("##output", previewLabel)) {
-                for (int j = 0; j < kOutputCatalogSize; j++) {
-                    bool selected = (j == currentOutput);
-                    if (ImGui::Selectable(kOutputCatalog[j].label, selected)) row.output = kOutputCatalog[j].value;
-                    if (selected) ImGui::SetItemDefaultFocus();
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::PopItemWidth();
-
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Bind")) {
-                char label[64];
-                int outputIdx = FindOutputIndex(row.output);
-                std::snprintf(label, sizeof(label), "Custom #%d (%s)", i + 1, outputIdx >= 0 ? kOutputCatalog[outputIdx].label : "?");
-                WizardCapture::StartButtonCapture(i, CaptureSlot::kCustomBase, label);
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Clear")) row.buttonBinding = "(unbound)";
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Remove")) removeIdx = i;
-            ImGui::PopID();
-        }
-        if (removeIdx >= 0) s.customBindings.erase(s.customBindings.begin() + removeIdx);
-        if (s.customBindings.empty())
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No custom bindings. Click 'Add Binding' or 'Add Menu Cluster' to get started.");
-        ImGui::Unindent(12);
-    }
 
     ImGui::Spacing();
+    DrawCustomKeyBindings(s);
+}
 
-    if (ImGui::CollapsingHeader("Digital Axis Emulation", ImGuiTreeNodeFlags_None)) {
-        ImGui::Indent(12);
-        ImGui::TextWrapped("Bind buttons to emulate roll and strafe axes digitally. Reverse is configured under Bind Controls > Flight Axes.");
-        ImGui::Spacing();
-        for (int i = 1; i < kNumDigitalAxisSlots; i++) {
-            ImGui::PushID(4000 + i);
-            DrawBindingRow(kDigitalAxisSlots[i].label, s.digitalAxisBindings[i], CaptureSlot::kDigitalAxisBase + i, false);
-            ImGui::PopID();
-        }
-        ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
-        ImGui::PushItemWidth(120);
-        ImGui::SliderFloat("Roll Value", &s.digitalRollValue, 0.0f, 1.0f, "%.2f");
-        ImGui::SliderFloat("Strafe Value", &s.digitalStrafeValue, 0.0f, 1.0f, "%.2f");
-        ImGui::PopItemWidth();
-        ImGui::Unindent(12);
+static void DrawPluginControls(WizardState& s) {
+    ImGui::TextWrapped("Master runtime controls for enabling or parking AbsoluteHOTAS output.");
+    for (int i = 0; i < kToggleWizardButtonSlot; ++i) {
+        ImGui::PushID(2000 + i);
+        DrawBindingRow(kButtonSlots[i].label, s.buttonBindings[i], CaptureSlot::kButtonBase + i, false);
+        ImGui::PopID();
     }
-
     ImGui::Spacing();
-
-    if (ImGui::CollapsingHeader("Plugin Controls", ImGuiTreeNodeFlags_None)) {
-        ImGui::Indent(12);
-        ImGui::TextWrapped("Bind physical buttons to control the AbsoluteHOTAS plugin itself.");
-        ImGui::Spacing();
-        for (int i = 0; i < kNumButtonSlots; i++) {
-            ImGui::PushID(2000 + i);
-            DrawBindingRow(kButtonSlots[i].label, s.buttonBindings[i], CaptureSlot::kButtonBase + i, false);
-            ImGui::PopID();
-        }
-        ImGui::Unindent(12);
-    }
-    }
+    ImGui::TextDisabled("Wizard access is promoted to the start of Bind Controls so it can be configured first.");
+    if (ImGui::SmallButton("Go to wizard access"))
+        WizardSession::Navigate(WizardSession::Route::BindFlightAxes);
 }
 
 // --- Tab: Macros ---
@@ -1166,7 +1253,6 @@ static void DrawMacroSteps(MacroRow& m) {
 }
 
 static void DrawMacrosTab(WizardState& s) {
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Macros");
     ImGui::TextWrapped(
         "A macro plays an ordered sequence of key actions from one button press. Steps can target "
         "ship actions (which follow your in-game Starfield keybinds automatically) or raw keys. "
@@ -1174,9 +1260,6 @@ static void DrawMacrosTab(WizardState& s) {
     ImGui::TextWrapped(
         "One press runs the whole sequence to the end - you do not need to hold the button. "
         "Turbo instead repeats the sequence for as long as the button IS held.");
-    ImGui::Separator();
-    ImGui::Spacing();
-
     if (ImGui::Button("Add Macro")) {
         MacroRow m;
         m.name = UniqueMacroName(s);
@@ -1245,13 +1328,21 @@ static void DrawMacrosTab(WizardState& s) {
                 DrawBindingRow("Trigger Button", m.buttonBinding, CaptureSlot::kMacroBase + mi, false);
             }
 
-            ImGui::Checkbox("Turbo (repeat while held)", &m.turbo);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Off: one press plays the sequence once, to the end.\n"
-                                  "On:  the sequence repeats while the button is held,\n"
-                                  "     and stops as soon as you release it.");
-            ImGui::SameLine(500);
-            if (ImGui::SmallButton("Delete Macro")) removeMacro = mi;
+            if (ImGui::BeginTable("MacroOptions", 2,
+                    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn("Options", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Checkbox("Turbo (repeat while held)", &m.turbo);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Off: one press plays the sequence once, to the end.\n"
+                                      "On:  the sequence repeats while the button is held,\n"
+                                      "     and stops as soon as you release it.");
+                ImGui::TableNextColumn();
+                if (ImGui::SmallButton("Delete Macro")) removeMacro = mi;
+                ImGui::EndTable();
+            }
 
             ImGui::Spacing();
             ImGui::TextDisabled("Steps");
@@ -1271,120 +1362,166 @@ static void DrawMacrosTab(WizardState& s) {
     if (removeMacro >= 0) s.macros.erase(s.macros.begin() + removeMacro);
 }
 
-static void DrawProfileEditorHeader(bool showManagement = false) {
-    const std::string current = WizardConfig::GetEditProfile();
-    const std::string visibleName = current.empty() ? "Main controls" : current;
-    const std::string header = "Editing: " + visibleName + "###ProfileContext";
+static void RequestEditorProfile(const std::string& name) {
+    WizardSession::RequestEditorProfile(name);
+}
 
-    if (!current.empty()) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.10f, 0.28f, 0.48f, 0.85f));
-    const bool expanded = ImGui::CollapsingHeader(header.c_str());
-    if (!current.empty()) ImGui::PopStyleColor();
-    if (!expanded) return;
-
-    static bool initialized = false;
-    static char newProfileName[64] = "";
-    static char exportName[64] = "";
-    static int importIndex = 0;
-    static std::string status;
-    if (!initialized) {
-        initialized = true;
-        std::string err;
-        if (!WizardConfig::EnsureStarterProfiles(err)) status = err;
+static void DrawPendingProfileSwitchModal(const std::string& visibleName) {
+    static bool popupWasRequested = false;
+    if (WizardSession::HasPendingProfileSwitch() && !popupWasRequested) {
+        ImGui::OpenPopup("Unsaved profile changes");
+        popupWasRequested = true;
     }
+    if (!ImGui::BeginPopupModal("Unsaved profile changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 
-    // The one authoritative "which profile am I looking at" control. Every binding
-    // tab shows and saves THIS profile, so it is stated plainly and kept visually
-    // distinct from the management actions (which are tucked into "Manage profiles").
-    const char* preview = current.empty() ? "Main controls" : current.c_str();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing profile:");
+    ImGui::Text("%s has unsaved changes.", visibleName.c_str());
+    ImGui::TextDisabled("Choose what to do before editing %s.",
+        VisibleProfileName(WizardSession::PendingProfile()).c_str());
+    const auto& status = WizardSession::GetStatus();
+    if (status.kind == WizardSession::StatusKind::Error && !status.message.empty())
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", status.message.c_str());
+    ImGui::Spacing();
+    if (ImGui::Button("Save and switch", ImVec2(140, 0))) {
+        if (WizardSession::ResolveProfileSwitch(WizardSession::ProfileSwitchChoice::Save)) {
+            popupWasRequested = false;
+            ImGui::CloseCurrentPopup();
+        }
+    }
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(260.0f);
-    if (ImGui::BeginCombo("##editprofile", preview)) {
-        if (ImGui::Selectable("Main controls", current.empty())) {
-            std::string err;
-            WizardConfig::LoadProfileForEditing("", err);
+    if (ImGui::Button("Discard and switch", ImVec2(140, 0))) {
+        if (WizardSession::ResolveProfileSwitch(WizardSession::ProfileSwitchChoice::Discard)) {
+            popupWasRequested = false;
+            ImGui::CloseCurrentPopup();
         }
-        for (const auto& name : WizardConfig::ListProfiles()) {
-            if (ImGui::Selectable(name.c_str(), name == current)) {
-                std::string err;
-                WizardConfig::LoadProfileForEditing(name, err);
-            }
-        }
-        ImGui::EndCombo();
     }
-    ImGui::TextDisabled("Changes on this tab will be saved to %s.", visibleName.c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+        WizardSession::ResolveProfileSwitch(WizardSession::ProfileSwitchChoice::Cancel);
+        popupWasRequested = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
 
-    if (!current.empty()) {
-        auto summaries = WizardConfig::ListProfileSummaries();
-        auto it = std::find_if(summaries.begin(), summaries.end(),
-            [&](const auto& p) { return p.name == current; });
-        if (it != summaries.end()) {
-            ImGui::TextDisabled("%s  |  %s  |  slot %d", it->kind.c_str(),
-                it->filename.c_str(), it->slot);
-
-            ImGui::Text("Activation");
-            ImGui::SameLine(120);
-            ImGui::TextColored(it->trigger == "(unbound)"
-                    ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f),
-                "%s", WizardConfig::FormatBindingDisplay(it->trigger).c_str());
-            ImGui::SameLine(430);
-            if (ImGui::Button("Bind trigger")) {
-                s_profileCaptureName = current;
-                s_profileCaptureMode = it->mode;
-                s_profileCapturePending = true;
-                WizardCapture::StartButtonCapture(0, CaptureSlot::kProfileTrigger,
-                    "Profile trigger", it->mode == "selector"
-                        ? WizardCapture::kSelectorCaptureMs : WizardCapture::kButtonCaptureMs);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Clear trigger")) {
-                std::string err;
-                if (!WizardConfig::SetProfileActivation(current, "(unbound)", it->mode, err)) status = err;
-            }
-
-            const char* modes[] = {"momentary", "toggle", "selector"};
-            int modeIndex = it->mode == "toggle" ? 1 : it->mode == "selector" ? 2 : 0;
-            ImGui::SetNextItemWidth(160.0f);
-            if (ImGui::Combo("Activation mode", &modeIndex, modes, 3)) {
-                std::string err;
-                if (!WizardConfig::SetProfileActivation(current, it->trigger, modes[modeIndex], err)) status = err;
-            }
+static void DrawProfileActivation(const std::string& profile,
+                                  const std::string& trigger,
+                                  const std::string& mode,
+                                  const std::string& keyboardShortcut = "(unbound)",
+                                  const std::string& profileFilename = "") {
+    const bool base = profile.empty();
+    ImGui::PushID(base ? "baseActivation" : profile.c_str());
+    if (!base && keyboardShortcut != "(unbound)") {
+        if (ImGui::BeginTable("KeyboardShortcut", 2,
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+            ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+            ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted("Keyboard shortcut");
+            ImGui::TableNextColumn();
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "%s",
+                WizardConfig::FormatBindingDisplay(keyboardShortcut).c_str());
+            ImGui::EndTable();
         }
-    } else {
-        // Base is the config everything overlays and returns to — but it can ALSO be a
-        // first-class swap position, so a rotary detent (or a hold key) can select base
-        // flight directly. Toggle is omitted: toggling base<->base is a no-op.
-        ImGui::TextDisabled("Base flight config. Other profiles overlay it and return here on release.");
-
-        std::string bTrigger, bMode;
-        WizardConfig::GetBaseActivation(bTrigger, bMode);
-
-        ImGui::Text("Activation");
-        ImGui::SameLine(120);
-        ImGui::TextColored(bTrigger == "(unbound)"
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("This toggle shortcut is independent of the custom activation below. If it collides with another mod or utility, edit [Profile] sKeyboardShortcut in Profiles/%s and restart the game.",
+                           profileFilename.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+    }
+    if (ImGui::BeginTable("ActivationBinding", 3,
+            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+        ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 205.0f);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(base ? "Activation" : "Custom activation");
+        ImGui::TableNextColumn();
+        ImGui::TextColored(trigger == "(unbound)"
                 ? ImVec4(0.6f, 0.6f, 0.6f, 1.0f) : ImVec4(0.4f, 1.0f, 0.6f, 1.0f),
-            "%s", WizardConfig::FormatBindingDisplay(bTrigger).c_str());
-        ImGui::SameLine(430);
-        if (ImGui::Button("Bind trigger##base")) {
-            s_profileCaptureName = "";  // base
-            s_profileCaptureMode = bMode;
+            "%s", WizardConfig::FormatBindingDisplay(trigger).c_str());
+        ImGui::TableNextColumn();
+        if (ImGui::Button("Bind trigger")) {
+            s_profileCaptureName = profile;
+            s_profileCaptureMode = mode;
             s_profileCapturePending = true;
-            WizardCapture::StartButtonCapture(0, CaptureSlot::kProfileTrigger,
-                "Base trigger", bMode == "selector"
+            WizardSession::BeginButtonCapture(0, CaptureSlot::kProfileTrigger,
+                base ? "Base trigger" : "Profile trigger", mode == "selector"
                     ? WizardCapture::kSelectorCaptureMs : WizardCapture::kButtonCaptureMs);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Clear trigger##base")) {
-            std::string err;
-            if (!WizardConfig::SetProfileActivation("", "(unbound)", bMode, err)) status = err;
+        if (ImGui::Button("Clear trigger")) {
+            if (WizardSession::SetActivationDraft(profile, "(unbound)", mode))
+                WizardSession::SetStatus(base ? "Main-controls activation clear staged."
+                                              : "Profile activation clear staged.",
+                                         WizardSession::StatusKind::Warning);
         }
+        ImGui::EndTable();
+    }
 
-        const char* baseModes[] = {"momentary", "selector"};
-        int bModeIndex = (bMode == "selector") ? 1 : 0;
-        ImGui::SetNextItemWidth(160.0f);
-        if (ImGui::Combo("Activation mode##base", &bModeIndex, baseModes, 2)) {
-            std::string err;
-            if (!WizardConfig::SetProfileActivation("", bTrigger, baseModes[bModeIndex], err)) status = err;
+    const char* profileModes[] = {"momentary", "toggle", "selector"};
+    const char* baseModes[] = {"momentary", "selector"};
+    int modeIndex = mode == "selector" ? (base ? 1 : 2) : mode == "toggle" ? 1 : 0;
+    ImGui::SetNextItemWidth(160.0f);
+    const bool changed = base
+        ? ImGui::Combo("Activation mode", &modeIndex, baseModes, 2)
+        : ImGui::Combo("Activation mode", &modeIndex, profileModes, 3);
+    if (changed) {
+        const char* selectedMode = base ? baseModes[modeIndex] : profileModes[modeIndex];
+        if (WizardSession::SetActivationDraft(profile, trigger, selectedMode))
+            WizardSession::SetStatus(base ? "Main-controls activation mode staged."
+                                          : "Profile activation mode staged.",
+                                     WizardSession::StatusKind::Warning);
+    }
+    ImGui::PopID();
+}
+
+static void DrawProfileContextBar(bool dirty) {
+    const std::string current = WizardConfig::GetEditProfile();
+    const std::string visibleName = VisibleProfileName(current);
+    const auto& profiles = WizardSession::Profiles();
+    DrawPendingProfileSwitchModal(visibleName);
+
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(std::min(280.0f, ImGui::GetContentRegionAvail().x * 0.45f));
+    if (ImGui::BeginCombo("##editprofile", visibleName.c_str())) {
+        if (ImGui::Selectable("Main controls", current.empty())) RequestEditorProfile("");
+        for (const auto& profile : profiles) {
+            if (ImGui::Selectable(profile.name.c_str(), profile.name == current))
+                RequestEditorProfile(profile.name);
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (dirty)
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Unsaved changes");
+    else
+        ImGui::TextDisabled("All changes saved");
+}
+
+static void DrawProfileManagementPanel(bool dirty) {
+    const std::string current = WizardConfig::GetEditProfile();
+    const auto& profiles = WizardSession::Profiles();
+    if (!ImGui::CollapsingHeader("Profile activation and management")) return;
+
+    static char newProfileName[64] = "";
+    static char exportName[64] = "";
+    static int importIndex = 0;
+
+    if (current.empty()) {
+        ImGui::TextDisabled("Base flight config. Other profiles overlay it and return here when their activation ends or base is selected.");
+        DrawProfileActivation(current, WizardSession::BaseActivationTrigger(),
+                              WizardSession::BaseActivationMode());
+    } else {
+        const auto it = std::find_if(profiles.begin(), profiles.end(),
+            [&](const auto& profile) { return profile.name == current; });
+        if (it != profiles.end()) {
+            ImGui::TextDisabled("%s  |  %s  |  slot %d", it->kind.c_str(),
+                it->filename.c_str(), it->slot);
+            DrawProfileActivation(current, it->trigger, it->mode,
+                                  it->keyboardShortcut, it->filename);
         }
     }
 
@@ -1392,18 +1529,23 @@ static void DrawProfileEditorHeader(bool showManagement = false) {
     // profile dropdown doesn't sit next to the "Editing profile" selector above and
     // muddy which one is the profile you're looking at.
     ImGui::Spacing();
-    if (showManagement && ImGui::TreeNode("Manage profiles")) {
+    if (ImGui::TreeNode("Manage profiles")) {
+        if (dirty) ImGui::TextDisabled("Save or discard the current edits before adding, importing, or resetting profiles.");
         ImGui::SetNextItemWidth(190.0f);
         ImGui::InputTextWithHint("##newprofile", "new overlay name", newProfileName, sizeof(newProfileName));
         ImGui::SameLine();
+        ImGui::BeginDisabled(dirty);
         if (ImGui::Button("Add overlay")) {
             std::string err;
             if (WizardConfig::CreateOverlayProfile(newProfileName, err)) {
-                WizardConfig::LoadProfileForEditing(newProfileName, err);
-                newProfileName[0] = '\0';
-                status = "Overlay created.";
-            } else status = err;
+                WizardSession::RefreshProfiles();
+                if (LoadEditorProfile(newProfileName)) {
+                    newProfileName[0] = '\0';
+                    SetStatus("Overlay created and opened for editing.");
+                } else SetStatus(err, true);
+            } else SetStatus(err, true);
         }
+        ImGui::EndDisabled();
 
         ImGui::SetNextItemWidth(190.0f);
         ImGui::InputTextWithHint("##exportprofile", "independent profile name", exportName, sizeof(exportName));
@@ -1412,11 +1554,11 @@ static void DrawProfileEditorHeader(bool showManagement = false) {
             std::string err;
             if (WizardConfig::ExportProfile(exportName, err)) {
                 exportName[0] = '\0';
-                status = "Independent profile exported.";
-            } else status = err;
+                WizardSession::RefreshProfiles();
+                SetStatus("Independent profile exported.");
+            } else SetStatus(err, true);
         }
 
-        auto profiles = WizardConfig::ListProfileSummaries();
         if (importIndex >= (int)profiles.size()) importIndex = 0;
         const char* importPreview = profiles.empty() ? "(no profiles)" : profiles[importIndex].name.c_str();
         ImGui::SetNextItemWidth(190.0f);
@@ -1427,24 +1569,32 @@ static void DrawProfileEditorHeader(bool showManagement = false) {
             ImGui::EndCombo();
         }
         ImGui::SameLine();
-        const bool canImport = !profiles.empty() && profiles[importIndex].kind == "full";
+        const bool canImport = !dirty && !profiles.empty() && profiles[importIndex].kind == "full";
         ImGui::BeginDisabled(!canImport);
         if (ImGui::Button("Import as base")) {
             std::string err;
-            if (WizardConfig::ImportProfile(profiles[importIndex].name, err)) status = "Imported; previous base backed up.";
-            else status = err;
+            if (WizardConfig::ImportProfile(profiles[importIndex].name, err)) {
+                WizardSession::RefreshProfiles();
+                SetStatus("Imported; previous base backed up.");
+            }
+            else SetStatus(err, true);
         }
         ImGui::EndDisabled();
 
         ImGui::SameLine();
+        ImGui::BeginDisabled(dirty);
         if (ImGui::Button("Reset base to defaults")) ImGui::OpenPopup("Reset base configuration?");
+        ImGui::EndDisabled();
         if (ImGui::BeginPopupModal("Reset base configuration?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextWrapped("This clears base bindings, tuning, calibration, custom outputs, and macros. Profile files and their activation slots are preserved. A backup is created first.");
             ImGui::Spacing();
             if (ImGui::Button("Reset", ImVec2(120, 0))) {
                 std::string err;
-                if (WizardConfig::ResetBaseToDefaults(err)) status = "Base reset to shipped defaults; backup created.";
-                else status = err;
+                if (WizardConfig::ResetBaseToDefaults(err)) {
+                    WizardSession::RefreshProfiles();
+                    SetStatus("Base reset to shipped defaults; backup created.");
+                }
+                else SetStatus(err, true);
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
@@ -1454,8 +1604,184 @@ static void DrawProfileEditorHeader(bool showManagement = false) {
         ImGui::TreePop();
     }
 
-    if (!status.empty()) ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.9f, 1.0f), "%s", status.c_str());
-    ImGui::Separator();
+    ImGui::TextDisabled("Activation changes are committed by Save & Apply.");
+
+}
+
+static bool DrawNavigationButton(const char* label, bool selected) {
+    if (selected) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.35f, 0.58f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14f, 0.44f, 0.70f, 1.0f));
+    }
+    const bool pressed = ImGui::Button(label, ImVec2(-1.0f, 0.0f));
+    if (selected) ImGui::PopStyleColor(2);
+    return pressed;
+}
+
+static void DrawPrimaryNavigation() {
+    if (!ImGui::BeginTable("PrimaryNavigation", 3, ImGuiTableFlags_SizingStretchSame)) return;
+    ImGui::TableNextColumn();
+    if (DrawNavigationButton("Bind Controls##Primary", WizardSession::GetPage() == WizardSession::Page::Bind))
+        WizardSession::SelectPage(WizardSession::Page::Bind);
+    ImGui::TableNextColumn();
+    if (DrawNavigationButton("Tune##Primary", WizardSession::GetPage() == WizardSession::Page::Tune))
+        WizardSession::SelectPage(WizardSession::Page::Tune);
+    ImGui::TableNextColumn();
+    if (DrawNavigationButton("Advanced##Primary", WizardSession::GetPage() == WizardSession::Page::Advanced))
+        WizardSession::SelectPage(WizardSession::Page::Advanced);
+    ImGui::EndTable();
+}
+
+static void DrawSecondaryNavigation() {
+    int columns = 2;
+    if (WizardSession::GetPage() != WizardSession::Page::Bind) columns = 3;
+    if (!ImGui::BeginTable("SecondaryNavigation", columns, ImGuiTableFlags_SizingStretchSame)) return;
+
+    if (WizardSession::GetPage() == WizardSession::Page::Bind) {
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Flight Axes##Secondary",
+                WizardSession::GetBindPage() == WizardSession::BindPage::FlightAxes))
+            WizardSession::SelectBindPage(WizardSession::BindPage::FlightAxes);
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Ship Buttons##Secondary",
+                WizardSession::GetBindPage() == WizardSession::BindPage::ShipButtons))
+            WizardSession::SelectBindPage(WizardSession::BindPage::ShipButtons);
+    } else if (WizardSession::GetPage() == WizardSession::Page::Tune) {
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Flight Axes##Secondary",
+                WizardSession::GetTunePage() == WizardSession::TunePage::FlightAxes))
+            WizardSession::SelectTunePage(WizardSession::TunePage::FlightAxes);
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Aiming & Combat##Secondary",
+                WizardSession::GetTunePage() == WizardSession::TunePage::Aiming))
+            WizardSession::SelectTunePage(WizardSession::TunePage::Aiming);
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Gamepad Throttle##Secondary",
+                WizardSession::GetTunePage() == WizardSession::TunePage::GamepadThrottle))
+            WizardSession::SelectTunePage(WizardSession::TunePage::GamepadThrottle);
+    } else {
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Macros##Secondary",
+                WizardSession::GetAdvancedPage() == WizardSession::AdvancedPage::Macros))
+            WizardSession::SelectAdvancedPage(WizardSession::AdvancedPage::Macros);
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Plugin Controls##Secondary",
+                WizardSession::GetAdvancedPage() == WizardSession::AdvancedPage::PluginControls))
+            WizardSession::SelectAdvancedPage(WizardSession::AdvancedPage::PluginControls);
+        ImGui::TableNextColumn();
+        if (DrawNavigationButton("Devices##Secondary",
+                WizardSession::GetAdvancedPage() == WizardSession::AdvancedPage::Devices))
+            WizardSession::SelectAdvancedPage(WizardSession::AdvancedPage::Devices);
+    }
+    ImGui::EndTable();
+}
+
+static void DrawActivePage(WizardState& s, bool dirty) {
+    if (WizardSession::GetPage() == WizardSession::Page::Advanced)
+        DrawProfileManagementPanel(dirty);
+
+    switch (WizardSession::GetRoute()) {
+        case WizardSession::Route::BindFlightAxes: DrawAxesTab(s, false); break;
+        case WizardSession::Route::BindShipButtons: DrawButtonsTab(s); break;
+        case WizardSession::Route::TuneFlightAxes: DrawAxesTab(s, true); break;
+        case WizardSession::Route::TuneAiming: DrawAimingTab(s); break;
+        case WizardSession::Route::TuneGamepadThrottle: DrawGamepadThrottleTab(s); break;
+        case WizardSession::Route::AdvancedMacros: DrawMacrosTab(s); break;
+        case WizardSession::Route::AdvancedPluginControls: DrawPluginControls(s); break;
+        case WizardSession::Route::AdvancedDevices: DrawDevicesTab(s); break;
+    }
+}
+
+static void DrawCaptureModal() {
+    static bool popupRequested = false;
+    if (WizardSession::IsCapturing() && !popupRequested) {
+        ImGui::OpenPopup("Capture input");
+        popupRequested = true;
+    }
+
+    if (!ImGui::BeginPopupModal("Capture input", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!WizardSession::IsCapturing()) popupRequested = false;
+        return;
+    }
+
+    if (!WizardSession::IsCapturing()) {
+        popupRequested = false;
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+
+    const auto& capture = WizardSession::Capture();
+    ImGui::Text("Binding: %s", capture.targetLabel.c_str());
+    ImGui::Spacing();
+    const bool axisCapture = CaptureSlot::IsAxis(capture.targetConfigSlot);
+    ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.25f, 1.0f),
+        axisCapture ? "Move the desired axis through a clear range."
+                    : "Press the desired button or hat direction.");
+    ImGui::TextDisabled("Capture is locked to this profile and page.");
+    ImGui::Spacing();
+    if (ImGui::Button("Cancel capture", ImVec2(140.0f, 0.0f))) {
+        WizardSession::CancelCapture();
+        popupRequested = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+static bool CanCloseWorkbench() {
+    return WizardSession::RequestClose();
+}
+
+static bool SaveAndCloseWorkbench() {
+    if (!WizardSession::SaveCurrentProfile()) return false;
+    WizardSession::CancelPendingClose();
+    UIHook::ToggleUI();
+    return true;
+}
+
+static bool CloseWorkbenchWithoutSaving() {
+    if (WizardSession::HasUnsavedChanges() && !WizardSession::DiscardChanges()) return false;
+    WizardSession::CancelPendingClose();
+    UIHook::ToggleUI();
+    return true;
+}
+
+static void DrawPendingCloseModal() {
+    static bool popupRequested = false;
+    if (WizardSession::HasPendingClose() && !popupRequested) {
+        ImGui::OpenPopup("Unsaved workbench changes");
+        popupRequested = true;
+    }
+    if (!ImGui::BeginPopupModal("Unsaved workbench changes", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!WizardSession::HasPendingClose()) popupRequested = false;
+        return;
+    }
+
+    ImGui::Text("%s has unsaved changes.",
+        VisibleProfileName(WizardConfig::GetEditProfile()).c_str());
+    ImGui::TextDisabled("Save or discard them before closing the workbench.");
+    ImGui::Spacing();
+    if (ImGui::Button("Save & Close", ImVec2(130.0f, 0.0f))) {
+        if (SaveAndCloseWorkbench()) {
+            popupRequested = false;
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close Without Saving", ImVec2(160.0f, 0.0f))) {
+        if (CloseWorkbenchWithoutSaving()) {
+            popupRequested = false;
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+        WizardSession::CancelPendingClose();
+        popupRequested = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 // --- Main Draw ---
@@ -1475,8 +1801,14 @@ void BindingWizard::Draw() {
     std::string profileToReload;
     if (configGen != s_lastConfigGen) {
         s_lastConfigGen = configGen;
-        profileToReload = WizardConfig::GetEditProfile();
-        WizardConfig::GetState() = WizardState{};
+        WizardSession::CancelTransientInteractions();
+        // Activation routing can reload the runtime while the editor has unrelated
+        // unsaved work. Preserve that working copy; a successful Save has already
+        // marked it clean and will take the normal refresh path below.
+        if (!WizardSession::HasUnsavedChanges()) {
+            profileToReload = WizardConfig::GetEditProfile();
+            WizardConfig::GetState() = WizardState{};
+        }
     }
 
     WizardConfig::LoadCurrentBindings();
@@ -1484,100 +1816,92 @@ void BindingWizard::Draw() {
         std::string err;
         WizardConfig::LoadProfileForEditing(profileToReload, err);
     }
-    WizardCapture::UpdateCapture(OnCaptureCommit);
+    WizardSession::UpdateCapture(OnCaptureCommit);
     auto& s = WizardConfig::GetState();
+    const bool dirty = WizardSession::HasUnsavedChanges();
 
-    ImGui::SetNextWindowSize(ImVec2(760, 680), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("AbsoluteHOTAS Binding Wizard", nullptr, ImGuiWindowFlags_NoCollapse)) {
+    ImGui::SetNextWindowSize(ImVec2(800, 680), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(620, 480), ImVec2(1600, 1200));
+    const ImGuiWindowFlags shellFlags = ImGuiWindowFlags_NoCollapse
+        | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    bool windowOpen = true;
+    const bool windowVisible = ImGui::Begin("AbsoluteHOTAS Binding Wizard", &windowOpen, shellFlags);
+    const bool titleBarCloseRequested = !windowOpen;
+    if (!windowVisible) {
         ImGui::End();
+        if (titleBarCloseRequested) UIHook::ToggleUI();
         return;
     }
 
-    float footerHeightToReserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + 20.0f;
-    ImGui::BeginChild("WizardTabsChild", ImVec2(0, -footerHeightToReserve), false);
-
-    if (ImGui::BeginTabBar("WizardTabs")) {
-        if (ImGui::BeginTabItem("Bind Controls")) {
-            DrawProfileEditorHeader(false);
-            ImGui::TextDisabled("Bind the controls you need, save, and get back to flying.");
-            if (ImGui::BeginTabBar("BindingSections")) {
-                if (ImGui::BeginTabItem("Flight Axes")) {
-                    DrawAxesTab(s, false);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Ship Buttons")) {
-                    DrawButtonsTab(s);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Tune")) {
-            DrawProfileEditorHeader(false);
-            if (ImGui::BeginTabBar("TuningSections")) {
-                if (ImGui::BeginTabItem("Flight Axes")) {
-                    DrawAxesTab(s, true);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Aiming & Combat")) {
-                    DrawAimingTab(s);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Gamepad Throttle")) {
-                    DrawGamepadThrottleTab(s);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Advanced")) {
-            DrawProfileEditorHeader(true);
-            ImGui::TextDisabled("Optional profiles, macros, special control modes, and device tools.");
-            if (ImGui::BeginTabBar("AdvancedSections")) {
-                if (ImGui::BeginTabItem("Macros")) {
-                    DrawMacrosTab(s);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Button Tools")) {
-                    DrawButtonsTab(s, true);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Devices")) {
-                    DrawDevicesTab(s);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
-            ImGui::EndTabItem();
-        }
-
-        ImGui::EndTabBar();
+    if (AreGameMenusClosed()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.72f, 0.20f, 1.0f));
+        ImGui::TextWrapped("Game not paused. Mouse unavailable. Open the wizard from Starfield's pause menu for full interaction, or use keyboard navigation.");
+        ImGui::PopStyleColor();
+        ImGui::Separator();
     }
+
+    DrawProfileContextBar(dirty);
+    DrawPrimaryNavigation();
+    DrawSecondaryNavigation();
+    ImGui::Separator();
+
+    constexpr float footerButtonHeight = 36.0f;
+    const float footerHeight = footerButtonHeight + ImGui::GetTextLineHeightWithSpacing()
+        + ImGui::GetStyle().ItemSpacing.y * 3.0f + 1.0f;
+    const float pageHeight = std::max(80.0f, ImGui::GetContentRegionAvail().y - footerHeight);
+    ImGui::BeginChild("WizardPageHost", ImVec2(0, pageHeight), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    static WizardSession::Route lastRenderedRoute = WizardSession::GetRoute();
+    if (lastRenderedRoute != WizardSession::GetRoute()) {
+        ImGui::SetScrollY(0.0f);
+        lastRenderedRoute = WizardSession::GetRoute();
+    }
+    DrawActivePage(s, dirty);
     ImGui::EndChild();
 
-    // Fixed Footer for Save Button
     ImGui::Separator();
     ImGui::Spacing();
     
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
-    if (ImGui::Button("Save & Apply", ImVec2(160, 36))) {
-        WizardConfig::SaveActiveProfile();
+    if (ImGui::BeginTable("FooterActions", 3, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextColumn();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
+        if (ImGui::Button("Save & Apply", ImVec2(-1.0f, footerButtonHeight))) SaveCurrentProfile();
+        ImGui::PopStyleColor(3);
+        ImGui::TableNextColumn();
+        if (ImGui::Button("Save & Close", ImVec2(-1.0f, footerButtonHeight)))
+            SaveAndCloseWorkbench();
+        ImGui::TableNextColumn();
+        if (ImGui::Button("Close Without Saving", ImVec2(-1.0f, footerButtonHeight)))
+            CloseWorkbenchWithoutSaving();
+        ImGui::EndTable();
     }
-    ImGui::PopStyleColor(3);
 
-    ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Saves the selected profile and reloads live.");
+    const auto& status = WizardSession::GetStatus();
+    const bool footerDirty = WizardSession::HasUnsavedChanges();
+    if (status.kind == WizardSession::StatusKind::Error && !status.message.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", status.message.c_str());
+    } else if (footerDirty) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Unsaved: %s", VisibleProfileName(WizardConfig::GetEditProfile()).c_str());
+    } else if (!status.message.empty()) {
+        const ImVec4 color = status.kind == WizardSession::StatusKind::Warning
+            ? ImVec4(1.0f, 0.72f, 0.20f, 1.0f)
+            : ImVec4(0.45f, 0.9f, 0.55f, 1.0f);
+        ImGui::TextColored(color, "%s", status.message.c_str());
+    } else {
+        ImGui::TextDisabled("Saves the editing profile and reloads live.");
+    }
 
+    DrawCaptureModal();
+    DrawPendingCloseModal();
     ImGui::End();
+    if (titleBarCloseRequested) UIHook::ToggleUI();
 }
 
 void BindingWizard::Initialize() {
+    WizardSession::Initialize();
     UIHook::SetDrawCallback(&BindingWizard::Draw);
+    UIHook::SetCloseGuardCallback(&CanCloseWorkbench);
     WizLog("BindingWizard registered with UIHook.");
 }

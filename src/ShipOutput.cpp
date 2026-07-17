@@ -19,10 +19,6 @@ static void ShipLog(const char* msg) {
     RuntimePaths::Log("[ShipOutput]", msg);
 }
 
-static bool IsButtonPressedImpl(const BindingRef& ref) {
-    return DeviceManager::IsButtonPressed(ref);
-}
-
 // ============================================================================
 // Output parsing
 // ============================================================================
@@ -52,41 +48,44 @@ static ShipOutput ParseShipOutput(std::string_view value, ShipOutput fallback) {
     if (normalized.rfind("mouse:", 0) == 0 && parseNumber(std::string_view(normalized).substr(6), code) && code >= 1 && code <= 4)
         return { ShipOutputKind::Mouse, code, false };
 
-    ShipLog(("Warning: invalid [ShipButtonOutputs] value '" + std::string(value) + "'; using vanilla default.").c_str());
+    ShipLog(("Warning: invalid [ShipButtonOutputs] value '" + std::string(value) + "'; using reconciled/default output.").c_str());
     return fallback;
 }
 
-static const ShipOutput& DefaultShipOutputForAction(std::string_view actionId) {
-    struct DefaultOutput { const char* actionId; ShipOutput output; };
-    static constexpr std::array<DefaultOutput, 23> defaults{ {
-        { "FireBoosters",             { ShipOutputKind::Keyboard, 0x2A, false } },
-        { "SwitchFlightModes",        SpaceOutput },
-        { "TogglePov",                { ShipOutputKind::Keyboard, 0x10, false } },
-        { "FireWeapon0",              { ShipOutputKind::Mouse,    1,    false } },
-        { "FireWeapon1",              { ShipOutputKind::Mouse,    2,    false } },
-        { "FireWeapon2",              { ShipOutputKind::Keyboard, 0x22, false } },
-        { "ShipAction1",              { ShipOutputKind::Keyboard, 0x13, false } },
-        { "SelectTarget",             { ShipOutputKind::Keyboard, 0x12, false } },
-        { "IncreaseSystemPower",      { ShipOutputKind::Keyboard, 0x48, true  } },
-        { "DecreaseSystemPower",      { ShipOutputKind::Keyboard, 0x50, true  } },
-        { "PreviousSystem",           { ShipOutputKind::Keyboard, 0x4B, true  } },
-        { "NextSystem",               { ShipOutputKind::Keyboard, 0x4D, true  } },
-        { "OpenScanner",              { ShipOutputKind::Keyboard, 0x21, false } },
-        { "Repair",                   { ShipOutputKind::Keyboard, 0x18, false } },
-        { "ShipAlternateControlHold", { ShipOutputKind::Keyboard, 0x38, false } },
-        { "Cruise",                   { ShipOutputKind::Keyboard, 0x14, false } },
-        { "Cancel",                   NoOutput },
-        { "UndockTakeOff",            SpaceOutput },
-        { "GetUp",                    { ShipOutputKind::Keyboard, 0x12, false } },
-        { "ExitShipFromCockpit",      { ShipOutputKind::Keyboard, 0x2D, false } },
-        { "ZoomCameraIn",             { ShipOutputKind::Mouse,    1,    false } },
-        { "ZoomCameraOut",            { ShipOutputKind::Mouse,    2,    false } },
-        { "AutopilotOnOff",           SpaceOutput },
-    } };
-    const auto found = std::find_if(defaults.begin(), defaults.end(),
-        [&](const DefaultOutput& d) { return actionId == d.actionId; });
-    return (found != defaults.end()) ? found->output : NoOutput;
-}
+struct BindingDef {
+    const char* actionId;
+    const char* sourceIniKey;
+    const char* outputIniKey;
+    ShipOutput  defaultOutput;
+    const char* context;
+    const char* controlMapAction;
+};
+
+static constexpr std::array<BindingDef, 23> kBindingDefs{ {
+    { "FireBoosters",             "iFireBoostersButton",             "sFireBoostersOutput",             { ShipOutputKind::Keyboard, 0x2A, false }, "ShipHUD",               "Boosters" },
+    { "SwitchFlightModes",        "iSwitchFlightModesButton",        "sSwitchFlightModesOutput",        SpaceOutput,                                  "ShipHUD",               "SwitchFlightModes" },
+    { "TogglePov",                "iTogglePovButton",                "sTogglePovOutput",                { ShipOutputKind::Keyboard, 0x10, false }, "ShipHUD",               "TogglePOV" },
+    { "FireWeapon0",              "iFireWeapon0Button",              "sFireWeapon0Output",              { ShipOutputKind::Mouse,    1,    false }, "ShipHUD",               "WeaponGroup1" },
+    { "FireWeapon1",              "iFireWeapon1Button",              "sFireWeapon1Output",              { ShipOutputKind::Mouse,    2,    false }, "ShipHUD",               "WeaponGroup2" },
+    { "FireWeapon2",              "iFireWeapon2Button",              "sFireWeapon2Output",              { ShipOutputKind::Keyboard, 0x22, false }, "ShipHUD",               "WeaponGroup3" },
+    { "ShipAction1",              "iShipAction1Button",              "sShipAction1Output",              { ShipOutputKind::Keyboard, 0x13, false }, "ShipHUD",               "XButton" },
+    { "SelectTarget",             "iSelectTargetButton",             "sSelectTargetOutput",             { ShipOutputKind::Keyboard, 0x12, false }, "ShipHUD",               "SelectTarget" },
+    { "IncreaseSystemPower",      "iIncreaseSystemPowerButton",      "sIncreaseSystemPowerOutput",      { ShipOutputKind::Keyboard, 0x48, true  }, "ShipHUD",               "Up" },
+    { "DecreaseSystemPower",      "iDecreaseSystemPowerButton",      "sDecreaseSystemPowerOutput",      { ShipOutputKind::Keyboard, 0x50, true  }, "ShipHUD",               "Down" },
+    { "PreviousSystem",           "iPreviousSystemButton",           "sPreviousSystemOutput",           { ShipOutputKind::Keyboard, 0x4B, true  }, "ShipHUD",               "Left" },
+    { "NextSystem",               "iNextSystemButton",               "sNextSystemOutput",               { ShipOutputKind::Keyboard, 0x4D, true  }, "ShipHUD",               "Right" },
+    { "OpenScanner",              "iOpenScannerButton",              "sOpenScannerOutput",              { ShipOutputKind::Keyboard, 0x21, false }, "ShipHUD",               "SHMonocle" },
+    { "Repair",                   "iRepairButton",                   "sRepairOutput",                   { ShipOutputKind::Keyboard, 0x18, false }, "ShipHUD",               "RepairShip" },
+    { "ShipAlternateControlHold", "iShipAlternateControlHoldButton", "sShipAlternateControlHoldOutput", { ShipOutputKind::Keyboard, 0x38, false }, "ShipHUD",               "AltHold" },
+    { "Cruise",                   "iCruiseButton",                   "sCruiseOutput",                   { ShipOutputKind::Keyboard, 0x14, false }, "ShipHUD",               "Cruise" },
+    { "Cancel",                   "iCancelButton",                   "sCancelOutput",                   NoOutput,                                     "ShipHUD_Cancel",        "Cancel" },
+    { "UndockTakeOff",            "iUndockTakeOffButton",            "sUndockTakeOffOutput",            SpaceOutput,                                  "Spaceship_Interaction", "TakeOff" },
+    { "GetUp",                    "iGetUpButton",                    "sGetUpOutput",                    { ShipOutputKind::Keyboard, 0x12, false }, "Spaceship_Interaction", "Cancel" },
+    { "ExitShipFromCockpit",      "iExitShipFromCockpitButton",      "sExitShipFromCockpitOutput",      { ShipOutputKind::Keyboard, 0x2D, false }, "Spaceship_Interaction", "ExitShip" },
+    { "ZoomCameraIn",             "iZoomCameraInButton",             "sZoomCameraInOutput",             { ShipOutputKind::Mouse,    1,    false }, "ShipFlightCam_FreeRot", "FOVZoomIn" },
+    { "ZoomCameraOut",            "iZoomCameraOutButton",            "sZoomCameraOutOutput",            { ShipOutputKind::Mouse,    2,    false }, "ShipFlightCam_FreeRot", "FOVZoomOut" },
+    { "AutopilotOnOff",           "iAutopilotOnOffButton",           "sAutopilotOnOffOutput",           SpaceOutput,                                  "ShipHUD_CruiseMode",    "LockCourse" },
+} };
 
 static int ParseExpansionButtonKey(std::string_view key) {
     const std::string normalized = TrimLower(key);
@@ -130,35 +129,6 @@ static uint32_t ShipOwnerIdForIndex(size_t index) {
 // follows in-game rebinds without manual [ShipButtonOutputs] edits. See
 // docs/reference/control-map-ship-functions.md.
 
-// actionId -> Starfield ControlMap (context, action). The pair disambiguates the
-// Cancel/GetUp collision, so resolution must key on both.
-struct ControlMapActionMap { const char* actionId; const char* context; const char* action; };
-static constexpr std::array<ControlMapActionMap, 23> kControlMapActions{ {
-    { "FireBoosters",             "ShipHUD",               "Boosters" },
-    { "SwitchFlightModes",        "ShipHUD",               "SwitchFlightModes" },
-    { "TogglePov",                "ShipHUD",               "TogglePOV" },
-    { "FireWeapon0",              "ShipHUD",               "WeaponGroup1" },
-    { "FireWeapon1",              "ShipHUD",               "WeaponGroup2" },
-    { "FireWeapon2",              "ShipHUD",               "WeaponGroup3" },
-    { "ShipAction1",              "ShipHUD",               "XButton" },
-    { "SelectTarget",             "ShipHUD",               "SelectTarget" },
-    { "IncreaseSystemPower",      "ShipHUD",               "Up" },
-    { "DecreaseSystemPower",      "ShipHUD",               "Down" },
-    { "PreviousSystem",           "ShipHUD",               "Left" },
-    { "NextSystem",               "ShipHUD",               "Right" },
-    { "OpenScanner",              "ShipHUD",               "SHMonocle" },
-    { "Repair",                   "ShipHUD",               "RepairShip" },
-    { "ShipAlternateControlHold", "ShipHUD",               "AltHold" },
-    { "Cruise",                   "ShipHUD",               "Cruise" },
-    { "Cancel",                   "ShipHUD_Cancel",        "Cancel" },
-    { "UndockTakeOff",            "Spaceship_Interaction", "TakeOff" },
-    { "GetUp",                    "Spaceship_Interaction", "Cancel" },
-    { "ExitShipFromCockpit",      "Spaceship_Interaction", "ExitShip" },
-    { "ZoomCameraIn",             "ShipFlightCam_FreeRot", "FOVZoomIn" },
-    { "ZoomCameraOut",            "ShipFlightCam_FreeRot", "FOVZoomOut" },
-    { "AutopilotOnOff",           "ShipHUD_CruiseMode",    "LockCourse" },
-} };
-
 static std::filesystem::path ControlMapCustomPath() {
     PWSTR docs = nullptr;
     std::filesystem::path result;
@@ -200,15 +170,10 @@ static ControlMap::ControlMapFile LoadControlMapOverrides() {
 
 // Resolve the effective default for one action: the player's in-game binding if
 // they remapped it, otherwise the vanilla default passed in.
-static ShipOutput ControlMapDefaultForAction(const ControlMap::ControlMapFile& file,
-                                             std::string_view actionId,
-                                             const ShipOutput& vanilla) {
-    const auto found = std::find_if(kControlMapActions.begin(), kControlMapActions.end(),
-        [&](const ControlMapActionMap& m) { return actionId == m.actionId; });
-    if (found == kControlMapActions.end()) return vanilla;
-
+static ShipOutput ControlMapDefaultForAction(const std::vector<ControlMap::Record>& records,
+                                             const BindingDef& def) {
     const ControlMap::Output resolved = ControlMap::ResolveBinding(
-        file.DeviceRecords(), found->context, found->action, ControlMapFromShipOutput(vanilla));
+        records, def.context, def.controlMapAction, ControlMapFromShipOutput(def.defaultOutput));
     return ShipOutputFromControlMap(resolved);
 }
 
@@ -241,11 +206,7 @@ static void SendMouseButton(uint16_t mouseButton, bool keyUp) {
     SendInput(1, &input, sizeof(INPUT));
 }
 
-static std::string DbgOwnerHex(uint32_t id) {
-    char b[16]; sprintf_s(b, "0x%X", id); return b;
-}
-
-static void EmitShipOutput(const ShipOutput& output, bool keyUp, const std::string& /*reason*/ = {}) {
+static void EmitShipOutput(const ShipOutput& output, bool keyUp) {
     switch (output.kind) {
         case ShipOutputKind::Keyboard: SendKeyboardScanCode(output.code, output.extended, keyUp); break;
         case ShipOutputKind::Mouse:    SendMouseButton(output.code, keyUp);                       break;
@@ -253,10 +214,10 @@ static void EmitShipOutput(const ShipOutput& output, bool keyUp, const std::stri
     }
 }
 
-static void PulseOutput(const ShipOutput& output, const std::string& reason = {}) {
+static void PulseOutput(const ShipOutput& output) {
     if (output.kind == ShipOutputKind::None) return;
-    EmitShipOutput(output, false, reason);
-    EmitShipOutput(output, true, reason);
+    EmitShipOutput(output, false);
+    EmitShipOutput(output, true);
 }
 
 // ============================================================================
@@ -274,7 +235,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
     if (held) {
         if (it == s_heldShipOutputs.end()) {
             s_heldShipOutputs.push_back({ output, { ownerId } });
-            EmitShipOutput(output, false, "SetHeld:firstDown owner=" + DbgOwnerHex(ownerId));
+            EmitShipOutput(output, false);
             return;
         }
         if (std::find(it->owners.begin(), it->owners.end(), ownerId) == it->owners.end())
@@ -285,7 +246,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
     if (it == s_heldShipOutputs.end()) return;
     std::erase(it->owners, ownerId);
     if (it->owners.empty()) {
-        EmitShipOutput(it->output, true, "SetHeld:lastRelease owner=" + DbgOwnerHex(ownerId));
+        EmitShipOutput(it->output, true);
         s_heldShipOutputs.erase(it);
     }
 }
@@ -294,7 +255,7 @@ void ReleaseOwnerOutputs(uint32_t ownerId) {
     for (auto it = s_heldShipOutputs.begin(); it != s_heldShipOutputs.end();) {
         std::erase(it->owners, ownerId);
         if (it->owners.empty()) {
-            EmitShipOutput(it->output, true, "ReleaseOwner owner=" + DbgOwnerHex(ownerId));
+            EmitShipOutput(it->output, true);
             it = s_heldShipOutputs.erase(it);
         } else {
             ++it;
@@ -303,7 +264,7 @@ void ReleaseOwnerOutputs(uint32_t ownerId) {
 }
 
 void ReleaseAllShipButtonOutputs() {
-    for (const auto& h : s_heldShipOutputs) EmitShipOutput(h.output, true, "ReleaseAll");
+    for (const auto& h : s_heldShipOutputs) EmitShipOutput(h.output, true);
     s_heldShipOutputs.clear();
     for (auto& b : s_shipButtonBindings) b.previousPressed = false;
 }
@@ -333,7 +294,7 @@ void SeedDownButtonsConsumed() {
     // in the newly-active profile. Mark every currently-down button as already
     // seen, so its output only triggers on the next genuine press edge.
     for (auto& b : s_shipButtonBindings)
-        b.previousPressed = IsButtonPressedImpl(b.buttonRef);
+        b.previousPressed = DeviceManager::IsButtonPressed(b.buttonRef);
 }
 
 bool IsBoostOutputHeld() {
@@ -368,52 +329,20 @@ ShipOutput ResolveOutputToken(std::string_view token) {
 }
 
 void LoadShipButtonBindings(CSimpleIniA& ini) {
-    struct BindingDef {
-        const char* actionId;
-        const char* sourceIniKey;
-        const char* outputIniKey;
-    };
-
-    static constexpr std::array<BindingDef, 23> defs{ {
-        { "FireBoosters",             "iFireBoostersButton",             "sFireBoostersOutput"             },
-        { "SwitchFlightModes",        "iSwitchFlightModesButton",        "sSwitchFlightModesOutput"        },
-        { "TogglePov",                "iTogglePovButton",                "sTogglePovOutput"                },
-        { "FireWeapon0",              "iFireWeapon0Button",              "sFireWeapon0Output"              },
-        { "FireWeapon1",              "iFireWeapon1Button",              "sFireWeapon1Output"              },
-        { "FireWeapon2",              "iFireWeapon2Button",              "sFireWeapon2Output"              },
-        { "ShipAction1",              "iShipAction1Button",              "sShipAction1Output"              },
-        { "SelectTarget",             "iSelectTargetButton",             "sSelectTargetOutput"             },
-        { "IncreaseSystemPower",      "iIncreaseSystemPowerButton",      "sIncreaseSystemPowerOutput"      },
-        { "DecreaseSystemPower",      "iDecreaseSystemPowerButton",      "sDecreaseSystemPowerOutput"      },
-        { "PreviousSystem",           "iPreviousSystemButton",           "sPreviousSystemOutput"           },
-        { "NextSystem",               "iNextSystemButton",               "sNextSystemOutput"               },
-        { "OpenScanner",              "iOpenScannerButton",              "sOpenScannerOutput"              },
-        { "Repair",                   "iRepairButton",                   "sRepairOutput"                   },
-        { "ShipAlternateControlHold", "iShipAlternateControlHoldButton", "sShipAlternateControlHoldOutput" },
-        { "Cruise",                   "iCruiseButton",                   "sCruiseOutput"                   },
-        { "Cancel",                   "iCancelButton",                   "sCancelOutput"                   },
-        { "UndockTakeOff",            "iUndockTakeOffButton",            "sUndockTakeOffOutput"            },
-        { "GetUp",                    "iGetUpButton",                    "sGetUpOutput"                    },
-        { "ExitShipFromCockpit",      "iExitShipFromCockpitButton",      "sExitShipFromCockpitOutput"      },
-        { "ZoomCameraIn",             "iZoomCameraInButton",             "sZoomCameraInOutput"             },
-        { "ZoomCameraOut",            "iZoomCameraOutButton",            "sZoomCameraOutOutput"            },
-        { "AutopilotOnOff",           "iAutopilotOnOffButton",           "sAutopilotOnOffOutput"           },
-    } };
-
     s_shipButtonBindings.clear();
-    s_shipButtonBindings.reserve(defs.size());
+    s_shipButtonBindings.reserve(kBindingDefs.size());
 
     // Auto-alignment layer. Precedence per action:
     //   vanilla default -> control-map-derived (in-game rebind) -> explicit [ShipButtonOutputs].
     const bool syncFromControlMap = ini.GetBoolValue("General", "bSyncShipOutputsFromControlMap", true);
     const ControlMap::ControlMapFile controlMap =
         syncFromControlMap ? LoadControlMapOverrides() : ControlMap::ControlMapFile{};
+    const auto controlMapRecords = controlMap.DeviceRecords();
 
-    for (const auto& def : defs) {
-        const ShipOutput vanilla = DefaultShipOutputForAction(def.actionId);
-        ShipOutput cmDefault = vanilla;
+    for (const auto& def : kBindingDefs) {
+        ShipOutput cmDefault = def.defaultOutput;
         if (syncFromControlMap)
-            cmDefault = ControlMapDefaultForAction(controlMap, def.actionId, vanilla);
+            cmDefault = ControlMapDefaultForAction(controlMapRecords, def);
 
         const char* outputValue = ini.GetValue("ShipButtonOutputs", def.outputIniKey, nullptr);
         const ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
@@ -446,7 +375,9 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
     for (const auto& key : keys) {
         if (!key.pItem) continue;
         const char* outputValue = ini.GetValue("ButtonExpansion", key.pItem, nullptr);
-        if (!outputValue || TrimLower(outputValue).empty() || TrimLower(outputValue) == "none") continue;
+        if (!outputValue) continue;
+        const std::string normalizedOutput = TrimLower(outputValue);
+        if (normalizedOutput.empty() || normalizedOutput == "none") continue;
 
         const ShipOutput output = ParseShipOutput(outputValue, NoOutput);
         if (output.kind == ShipOutputKind::None) continue;
@@ -496,14 +427,14 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
 void UpdateShipButtonBindings() {
     for (int i = 0; i < static_cast<int>(s_shipButtonBindings.size()); ++i) {
         auto& binding = s_shipButtonBindings[i];
-        bool pressed  = IsButtonPressedImpl(binding.buttonRef);
+        bool pressed  = DeviceManager::IsButtonPressed(binding.buttonRef);
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
         if (binding.mode == ShipBindingMode::Hold) {
             if (pressed != binding.previousPressed)
                 SetOutputHeld(binding.output, ownerId, pressed);
         } else if (pressed && !binding.previousPressed) {
-            PulseOutput(binding.output, std::string("Pulse btn=") + binding.actionId);
+            PulseOutput(binding.output);
         }
 
         if (!pressed && binding.previousPressed)

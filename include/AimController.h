@@ -1,6 +1,5 @@
 #pragma once
 #include "ThrottleController.h"
-#include <cstdint>
 
 // ============================================================================
 // AimController — Source-object reticle injection and HOSAM alignment assist.
@@ -15,15 +14,13 @@ namespace AimController {
 // pitch/yaw  — flight-stick values in [-1,+1] (used for mirror/aim-driven modes)
 // hasSeparateAimInput  — true if independent analog or digital aim axes are bound
 // hasSeparateAimAxes   — true if analog aim axes specifically are bound
-// suppressClusterForAim — true when cluster pitch/yaw gates should be released to game
+// hasDigitalAimButtons — true if any directional digital aim button is bound
 // dt         — actual frame delta time in seconds
-// iter       — monotonic loop iteration counter
 void Update(const ThrottleController::Config& cfg,
             float yaw, float pitch,
             bool hasSeparateAimInput,
             bool hasSeparateAimAxes,
-            bool suppressClusterForAim,
-            float dt,
-            uint64_t iter);
+            bool hasDigitalAimButtons,
+            float dt);
 
 } // namespace AimController

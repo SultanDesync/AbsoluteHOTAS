@@ -33,6 +33,7 @@ static void UILog(const std::string& msg) {
 // State
 // ============================================================================
 static std::atomic<bool>   g_isOpen{ false };
+static UIHook::CloseGuardCallback g_closeGuardCallback = nullptr;
 static std::atomic<bool>   g_initialized{ false };
 static std::atomic<bool>   g_logNextOverlaySubmit{ false };
 static std::mutex          g_initMutex;
@@ -664,6 +665,12 @@ static bool TryReleaseResources() {
 
 // Separated so the __try function (RenderOverlayFrame) has zero C++ objects
 // requiring unwinding, satisfying MSVC's C2712 constraint.
+static void RestoreGameCursorState() {
+    while (ShowCursor(FALSE) >= 0) {}
+    if (g_hadClipRect) ClipCursor(&g_savedClipRect);
+    g_hadClipRect = false;
+}
+
 static void HandleRenderException() {
     // CRITICAL: Do NOT call WaitForGpu, ImGui_ImplDX12_Shutdown, or any
     // D3D12/COM methods here. The resources are likely corrupted after a
@@ -681,12 +688,7 @@ static void HandleRenderException() {
     // bypasses ToggleUI entirely — leaving the system cursor visible and unclipped.
     // Win32 cursor calls are safe here: no D3D12/COM dependency, no throw risk.
     if (g_isOpen.load()) {
-        // Hide the system cursor (mirrors ToggleUI's closing path).
-        while (ShowCursor(FALSE) >= 0) {}
-        if (g_hadClipRect) {
-            ClipCursor(&g_savedClipRect);
-            g_hadClipRect = false;
-        }
+        RestoreGameCursorState();
     }
 
     g_isOpen.store(false);
@@ -910,7 +912,7 @@ static HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain,
     // Force-close the overlay and clear the captured queue unconditionally.
     // Frame Generation reconfigures the presentation pipeline on enable/disable,
     // invalidating both our D3D12 resources and the command queue pointer.
-    g_isOpen.store(false);
+    if (g_isOpen.exchange(false)) RestoreGameCursorState();
     // Keep the authoritative creation-time swap-chain/queue association. Clearing
     // it here used to make RTSS's next DIRECT submission win the fallback race.
 
@@ -1213,6 +1215,7 @@ bool UIHook::Install() {
 }
 
 void UIHook::Shutdown() {
+    if (g_isOpen.exchange(false)) RestoreGameCursorState();
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
@@ -1257,6 +1260,7 @@ void UIHook::ToggleUI() {
     }
 
     bool wasOpen = g_isOpen.load();
+    if (wasOpen && g_closeGuardCallback && !g_closeGuardCallback()) return;
     bool nowOpen = !wasOpen;
     g_isOpen.store(nowOpen);
 
@@ -1289,13 +1293,7 @@ void UIHook::ToggleUI() {
             io.MouseDrawCursor = false;
         }
 
-        // Hide the system cursor again
-        while (ShowCursor(FALSE) >= 0) {}
-
-        // Restore the game's cursor clip rect
-        if (g_hadClipRect) {
-            ClipCursor(&g_savedClipRect);
-        }
+        RestoreGameCursorState();
     }
 }
 
@@ -1305,4 +1303,8 @@ bool UIHook::IsUIOpen() {
 
 void UIHook::SetDrawCallback(DrawCallback cb) {
     g_drawCallback = cb;
+}
+
+void UIHook::SetCloseGuardCallback(CloseGuardCallback cb) {
+    g_closeGuardCallback = cb;
 }

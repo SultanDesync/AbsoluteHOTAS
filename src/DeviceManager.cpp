@@ -6,7 +6,6 @@
 static LPDIRECTINPUT8 g_pDI = nullptr;
 static std::vector<DeviceInfo> g_devices;
 static std::vector<LPDIRECTINPUTDEVICE8> g_openDevices;
-static int g_enumCounter = 0;
 
 static void DevLog(const std::string& msg) {
     RuntimePaths::Log("[DeviceManager]", msg);
@@ -40,8 +39,6 @@ static BOOL CALLBACK EnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance,
     sprintf_s(vidpidBuf, "%04X:%04X", info.vid, info.pid);
     info.vidpidString = vidpidBuf;
     
-    info.enumIndex = g_enumCounter++;
-    info.isOpen = false;
     info.axisCount = 0;
     info.buttonCount = 0;
 
@@ -89,7 +86,6 @@ void DeviceManager::Refresh() {
     }
     g_devices.clear();
     g_openDevices.clear();
-    g_enumCounter = 0;
     
     if (g_pDI) {
         g_pDI->EnumDevices(DI8DEVCLASS_GAMECTRL, EnumJoysticksCallback, NULL, DIEDFL_ATTACHEDONLY);
@@ -105,10 +101,6 @@ const DeviceInfo& DeviceManager::GetDevice(int index) {
         throw std::out_of_range("Device index out of range");
     }
     return g_devices[index];
-}
-
-const std::vector<DeviceInfo>& DeviceManager::GetAllDevices() {
-    return g_devices;
 }
 
 LPDIRECTINPUTDEVICE8 DeviceManager::OpenDevice(int index) {
@@ -130,8 +122,6 @@ LPDIRECTINPUTDEVICE8 DeviceManager::OpenDevice(int index) {
     
     device->Acquire();
     g_openDevices[index] = device;
-    g_devices[index].isOpen = true;
-    
     return device;
 }
 
@@ -142,9 +132,6 @@ void DeviceManager::CloseDevice(int index) {
         g_openDevices[index]->Unacquire();
         g_openDevices[index]->Release();
         g_openDevices[index] = nullptr;
-    }
-    if (index < static_cast<int>(g_devices.size())) {
-        g_devices[index].isOpen = false;
     }
 }
 
@@ -181,20 +168,6 @@ int DeviceManager::ResolveDevice(const std::string& vidpid, const std::string& n
     
     DevLog("Warning: Could not resolve device. Returning -1.");
     return -1;
-}
-
-bool DeviceManager::PollDevice(int index, DIJOYSTATE2& outState) {
-    if (index < 0 || index >= static_cast<int>(g_openDevices.size())) return false;
-    LPDIRECTINPUTDEVICE8 dev = g_openDevices[index];
-    if (!dev) return false;
-    
-    dev->Poll();
-    HRESULT hr = dev->GetDeviceState(sizeof(DIJOYSTATE2), &outState);
-    if (FAILED(hr)) {
-        dev->Acquire();
-        return false;
-    }
-    return true;
 }
 
 static std::vector<DIJOYSTATE2> g_cachedStates;
@@ -292,9 +265,5 @@ bool DeviceManager::IsButtonPressed(const BindingRef& ref) {
         return IsPovDirectionActive(st, povIndex, direction);
     }
     return false;
-}
-
-LPDIRECTINPUT8 DeviceManager::GetDirectInputContext() {
-    return g_pDI;
 }
 

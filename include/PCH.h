@@ -35,7 +35,6 @@
 #include <format>
 #include <fstream>
 #include <functional>
-#include <future>
 #include <initializer_list>
 #include <iostream>
 #include <istream>

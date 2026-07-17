@@ -13,8 +13,6 @@
 // +0x10: defaultValue   (8 bytes)
 // +0x18: const char* key (8 bytes) — pointer to name string in .rdata
 
-static bool s_beaconActive = false;
-
 static void BeaconLog(const std::string& msg) {
     RuntimePaths::Log("[SettingBeacon]", msg);
 }
@@ -129,7 +127,6 @@ bool SettingBeacon::PlantBeacon() {
             if (verify == 0.0314f) {
                 BeaconLog(std::format("Beacon planted: fThrottleAtEngineStart {:.4f} -> 0.0314", oldVal));
                 beaconOk = true;
-                s_beaconActive = true;
             } else {
                 BeaconLog("ERROR: Beacon verify failed.");
             }
@@ -154,8 +151,4 @@ bool SettingBeacon::PlantBeacon() {
     }
 
     return beaconOk;
-}
-
-bool SettingBeacon::IsActive() {
-    return s_beaconActive;
 }

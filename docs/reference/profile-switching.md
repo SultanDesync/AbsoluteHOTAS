@@ -1,9 +1,9 @@
 # Profile Switching (design)
 
-Status: **engine implemented** (3.1-beta), in-game-unverified; wizard edit-target
-foundation implemented, but slot activation UI is not yet built (slots are still
-hand-configured in `[Profiles]`). Supersedes the shift-layer design this
-file previously held. A profile slot binds a physical button to a whole
+Status: **engine and wizard workflow implemented** (3.1-beta), in-game-unverified.
+The wizard clearly identifies the profile being edited, protects dirty edits during
+target changes, and exposes slot activation controls. Supersedes the shift-layer design
+this file previously held. A profile slot binds a physical button to a whole
 configuration, swapped live: bindings, macros, axis assignments, curves, deadzones,
 aim mode — the lot.
 
@@ -18,10 +18,11 @@ aim mode — the lot.
 - **`pollRateHz` and `bAlwaysOn` don't change on swap.** The loop rate and the
   startup arm-state are read once; a slot changing them takes effect on the next
   hot-reload, not on the swap. Both are startup concerns, not per-mode tuning.
-- **Wizard UI is partial.** The collapsed profile selector, effective-load for editing
-  existing profiles, edit-target Save, sparse override writes, starter profiles,
-  add-overlay flow, trigger capture, activation modes, and import/export controls are
-  implemented. Override markers/revert and independent-copy creation remain to be built.
+- **Wizard UI is partial.** The profile selector, effective-load for editing existing
+  profiles, dirty-state protection, edit-target Save with visible results, sparse
+  override writes, starter profiles, add-overlay flow, trigger capture, activation
+  modes, and import/export controls are implemented. Override markers/revert and
+  independent-copy creation remain to be built.
 
 The Flight Axes tab exposes `Axis injection enabled`, backed by
 `[Injection] bEnableInjection`. It is editable in base and profiles; the FPS starter
@@ -45,8 +46,9 @@ and every binding site that consumes it. Profile switching adds one piece of sta
 
 - **Base profile** — what loads today: `AbsoluteHOTAS.ini` overlaid by
   `AbsoluteHOTAS_Custom.ini`. Always slot 0.
-- Up to **3 switch slots** (1–3), each naming a profile file and a trigger button.
-  Bounded so the wizard stays a 4-pill selector; nobody flies 5 configs.
+- Up to **16 switch slots**, each naming a profile file (or base), trigger, and
+  activation mode. The wizard exposes them through the profile dropdown rather than
+  dedicating fixed-width controls to every slot.
 - **One profile is active at a time.** Slots do not compose.
 
 ### Activation modes
@@ -321,12 +323,24 @@ rotary, which is always in *some* position and so needs an explicit base detent.
 engine models it as a slot whose snapshot equals base, so it flows through the swap
 state machine unchanged.
 
-**Keyboard triggers** use `key:<VK>` in `SlotNButton`, and accept a **modifier chord**
+**Legacy/custom keyboard triggers** use `key:<VK>` in `SlotNButton`, and accept a **modifier chord**
 as a `+`-joined VK list — `key:0x11+0x31` is Ctrl+1 (`0x11` Ctrl, `0x10` Shift, `0x12`
 Alt fold into modifiers; the remaining VK is the key). Chords matter because the
 game claims the plain keys: F5/F9 are quicksave/quickload and the F-row is otherwise
-spoken for. The starter FPS and Flight Aux overlays default to **Ctrl+1 / Ctrl+2**
-(`key:0x11+0x31`, `key:0x11+0x32`) for exactly this reason.
+spoken for.
+
+Starter keyboard shortcuts are independent toggle fallbacks stored in each
+profile's own header:
+
+```ini
+[Profile]
+sKeyboardShortcut = key:0x11+0x31
+```
+
+FPS and Flight Aux default to **Ctrl+1 / Ctrl+2**. The shortcut remains active
+alongside the optional `SlotNButton` controller/custom activation. Set
+`sKeyboardShortcut = -1` in the profile file to disable it, or replace it with
+another chord if another mod or utility has a collision.
 
 ```ini
 ; Profiles/parked.ini — on-foot: no flight injection, but keep menu/on-foot mappings
@@ -392,10 +406,11 @@ base: rebind an axis after buying a new stick, swap to the slot, and the stick i
 dead because the slot still names the old device. That is precisely the drift that
 sparse overlays exist to prevent, reintroduced through the front door.
 
-The starting point is already there, virtually. The slot editor renders the effective
-config — base values, greyed — so opening a slot *looks* like a copy. Editing a field
-is what creates the override. Three edits produce a three-line file, and rebinding the
-throttle in base still propagates, because the slot never claimed to own it.
+The starting point is already there, virtually. The profile editor renders the
+effective config, so opening an overlay *looks* like a copy. Editing a field is what
+creates the override. Three edits produce a three-line file, and rebinding the throttle
+in base still propagates because the overlay never claimed to own it. Per-field visual
+distinction between inherited and overridden values remains future UI work.
 
 What the UI needs instead is the inverse of Copy:
 
@@ -409,9 +424,9 @@ self-documenting. A copied full profile is a hundred lines whose intent cannot b
 recovered without diffing it against base — which matters as soon as someone posts
 one on Nexus.
 
-A real copy remains available as an explicit **"Detach from base"** action, for a
-config the user deliberately wants to stop tracking base. It writes `sKind = full`,
-and it is the same artifact Export produces.
+A future **"Detach from base"** action can materialize a real copy for a config the
+user deliberately wants to stop tracking. It would write `sKind = full`, the same
+artifact type that Export already produces.
 
 ## Wizard UI
 
@@ -437,51 +452,43 @@ Expanded, it shows:
 - **Activation controls** for the selected profile, right beside the dropdown: a
   Bind capture for the trigger and a mode combo — **toggle**, **per-button**
   (momentary), or **selector** — matching the engine's `SwapMode`.
-- A **live active-profile indicator**, the test surface for the swap behavior.
+- A dirty marker and guarded Save / Discard / Cancel workflow when changing edit targets.
 
 ### The edit target follows the dropdown
 
 Selecting a profile makes it the **Save target**: binding edits on any tab write to
-*that* profile. This is the one behavior the engine does not already provide —
-`SaveBindingsToINI` writes `_Custom.ini` today; it must instead write the selected
-profile's file.
+*that* profile. `SaveActiveProfile` routes base edits to `_Custom.ini` and profile
+edits to the selected managed profile file.
 
-- Dropdown entry 0 (the flight profile) **is** base → Save writes `_Custom.ini`,
+- Dropdown entry 0, **Main controls**, is base → Save writes `_Custom.ini`,
   as today.
 - Any other profile → Save writes a **sparse `Profiles/<name>.ini`**: only the keys
   that differ from base. **This is the hard requirement everything rests on.** A full
   dump turns an overlay into a frozen copy and the inherit model collapses (see "No
-  copy base into this slot"). Overridden rows are marked with a **Revert to base**;
-  the dropdown shows each profile's override count.
+  copy base into this slot"). Per-row override markers and **Revert to base** remain
+  future UI work; saving a value equal to base removes that override from the sparse file.
 
 ### Two seed profiles (teach by example)
 
-When the header is first expanded, offer two ready-made profiles — both **overlays**,
-so they track the flight profile until deliberately diverged:
+When the header is first expanded, the wizard ensures two ready-made **overlay**
+profiles exist, so they track Main controls until deliberately changed:
 
-- **Walking** — a parked profile: `{ bEnableInjection = false }`. Teaches the
-  injection-disable option; usable on foot immediately once a trigger is bound.
-- **Aux flight** — an empty overlay. Teaches config override: "a second flight
+- **FPS** — a parked profile: `{ bEnableInjection = false }`. Teaches the
+  injection-disable option and defaults to a Ctrl+1 toggle.
+- **Flight Aux** — an empty overlay. Teaches config override: "a second flight
   profile identical to your main one; change only what you want."
 
-Both ship **inert** — no trigger bound — so they never activate until the user binds
-one. The single-config user who never expands the header is unaffected.
+Flight Aux defaults to a Ctrl+2 toggle. Both triggers can be rebound or cleared from
+the profile context header.
 
 ### Creating a profile — overlay vs copy
 
-**Add Profile…** prompts for the kind, because the choice determines whether the new
-profile tracks base or freezes:
+**Add overlay** creates an empty sparse profile that inherits base and keeps tracking
+it (`sKind = overlay`). "Blank" and "inherit my settings" are the same thing here.
 
-> ( ) **Overlay** — starts as your main config and follows it *(recommended)*
-> ( ) **Independent copy of [ profile ▾ ]** — a separate config that won't follow changes
-
-- **Overlay** = an empty file that inherits base and keeps tracking it (`sKind =
-  overlay`). "Blank" and "inherit my settings" are the *same thing* here — an empty
-  overlay already looks like base and follows it.
-- **Independent copy** = a full snapshot of the chosen source (`sKind = full`), the
-  same artifact Export/Detach produces. Overlays can only inherit **base** (the engine
-  overlays each slot on the user config, not on other slots), so "start from another
-  profile" is necessarily a copy, and it detaches.
+**Export base setup** creates a full independent snapshot (`sKind = full`). A full
+profile can later be imported as base. Creating an independent copy from an arbitrary
+profile and detaching an overlay remain future UI work.
 
 ## Test checklist
 
@@ -510,5 +517,5 @@ profile tracks base or freezes:
   movement/sprint interference, while the parked profile's on-foot key mappings work.
 - Edit one field under a slot → the slot file gains exactly one key; everything else
   still follows base when base changes.
-- Revert to base on that field → the key is removed from the slot file, not zeroed.
+- Future Revert-to-base UI: reverting a field removes the key from the slot file rather than zeroing it.
 - Import refuses an `sKind = overlay` file; accepts a `full` one.

@@ -109,7 +109,7 @@ Design implication:
 
 - Use DirectInput polling for HOTAS/HOSAS hardware state whenever possible.
 - Use `SendInput` from the plugin only for discrete Starfield actions that need to pass through vanilla bindings, and mirror physical button hold/release instead of emitting instant pulses.
-- Prefer explicit Starfield binding alignment for those synthetic outputs, either by choosing vanilla outputs or by documenting/customizing matching `ControlMap_Custom.txt` bindings.
+- For named ship actions, reconcile synthetic outputs automatically from `ControlMap_Custom.txt`, with vanilla fallbacks and explicit `[ShipButtonOutputs]` as the final override. Raw custom outputs still require the user to choose a matching binding in Starfield's Controls menu.
 - Keep Steam Input out of the critical flight path unless the user has a specific reason to use it.
 
 ## Roll And Strafe Share A Lane

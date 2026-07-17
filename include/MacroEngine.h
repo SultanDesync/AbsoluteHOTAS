@@ -11,8 +11,6 @@
 // A macro plays an ordered list of steps when its physical button is pressed.
 // See docs/reference/macros.md for the model and the "Grav -> Shields" example.
 //
-// This file (increment 1) is the data model + [Macro:*] INI parsing. The
-// emission state machine and the wizard tab land in later increments.
 // ============================================================================
 
 enum class MacroAction { Tap, Hold };
@@ -40,8 +38,6 @@ namespace MacroEngine {
 // action-id targets resolve to their control-map-aware outputs.
 void LoadMacros(CSimpleIniA& ini);
 
-const std::vector<Macro>& GetMacros();
-
 // Mutable access to the loaded macros so the control loop can resolve each macro's
 // trigger button to a device index. LoadMacros runs before DeviceManager is
 // initialized, so button resolution must happen later, in ThrottleController's
@@ -57,6 +53,10 @@ void Update();
 // Release every macro-held output and reset all runtime state. Call on disarm,
 // overlay open, stop, or config reload so no macro key is left stuck down.
 void ReleaseAll();
+
+// Mark physically held triggers as already consumed after a suppression window,
+// so closing the wizard cannot start a macro from a stale held button.
+void SeedDownButtonsConsumed();
 
 // ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
 // A profile swap preloads each slot's resolved macro set and restores one on swap.

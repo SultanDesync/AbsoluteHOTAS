@@ -4,8 +4,6 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <chrono>
-#include <fstream>
 #include "BindingRef.h"
 
 // DirectInput polling, normalization, and memory injection.
@@ -95,7 +93,7 @@ public:
         float   fStrafeVertDeadzone = 0.05f;
 
         // [Injection]
-        int     pollRateHz = 60;          // Polling frequency (INI default: 120)
+        int     pollRateHz = 120;
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
         bool    rollEnabled = true;       // Roll shares the +0x58 writer with lateral strafe.
         bool    reverseAxisEnabled = true;
@@ -113,7 +111,6 @@ public:
         GateMode    pilotGateMode = GateMode::Off;
         PilotSignal pilotSignal = PilotSignal::Manual;   // Manual (toggle); Auto reserved (no auto signal yet)
         int         pilotGateManualToggleKey = 0;        // VK to toggle the manual signal (0 = disabled)
-        int         pilotGateDebounceMs = 150;           // Auto-signal debounce window (ms)
 
         // [Aim] - Source-object reticle injection
         bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle
@@ -186,14 +183,11 @@ public:
     // Thread-safe — can be called from any thread (e.g., ImGui render thread).
     static void ReloadConfig();
 
-    // Monotonic counter bumped once each time a reload has been fully applied to
-    // s_config. The wizard watches it to refresh its UI state after an import
-    // without racing the async reload: a changed value guarantees GetConfig() and
-    // GetCalibrationData() already reflect the new files. Thread-safe.
+    // Monotonic counter bumped after a reload or runtime profile swap has been fully
+    // applied to s_config. The wizard refreshes clean snapshots while preserving a
+    // dirty working copy. A changed value guarantees GetConfig() reflects the new
+    // runtime state. Thread-safe.
     static uint32_t ConfigGeneration();
-
-    // Returns the last normalized throttle value (-1.0 to 1.0)
-    static float GetCurrentThrottle();
 
     // Runtime turn assist state (computed from INI master switch + button mode).
     // Called by SignalHunter to decide whether to apply the turn assist decay.
@@ -215,7 +209,6 @@ private:
     static std::atomic<bool> s_running;
     static std::atomic<bool> s_configReloadRequested;
     static std::atomic<uint32_t> s_configGeneration;
-    static std::atomic<float> s_currentThrottle;
     static std::thread s_thread;
 
     // Load the layered config into the active globals. slotFile, when non-null,

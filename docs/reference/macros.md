@@ -134,10 +134,9 @@ the cost; the fuller binding→macro decouple is a separate future step.
 
 ## Wizard "Macros" tab — dedicated tab
 
-Macros get their **own tab**, not a section on the Buttons tab. A macro editor is a
-list-of-lists (per macro: button, turbo flag, N step rows) — a full-height editor,
-and the Buttons tab already carries four collapsing headers. It also gives a clean
-1:1 support story: *Macros tab ↔ `[Macro:*]` sections in
+Macros get their **own Advanced subtab**, not a collapsed section on Ship Buttons. A
+macro editor is a list-of-lists (per macro: button, turbo flag, N step rows) and needs
+a full-height editor. It also gives a clean 1:1 support story: *Macros tab ↔ `[Macro:*]` sections in
 `AbsoluteHOTAS_Custom.ini`* (see [config-layout.md](config-layout.md)).
 
 Renames that landed with it (the old name promised what it did not deliver):

@@ -4,7 +4,6 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <string>
-#include <vector>
 #include "BindingRef.h"
 
 struct DeviceInfo {
@@ -15,10 +14,8 @@ struct DeviceInfo {
     std::string instanceName;
     std::string productName;
     std::string vidpidString;     // "044F:B10A" format
-    int         enumIndex;
     int         axisCount;
     int         buttonCount;
-    bool        isOpen;
 };
 
 class DeviceManager {
@@ -30,7 +27,6 @@ public:
     // Query
     static int GetDeviceCount();
     static const DeviceInfo& GetDevice(int index);
-    static const std::vector<DeviceInfo>& GetAllDevices();
 
     // Open/close
     static LPDIRECTINPUTDEVICE8 OpenDevice(int index);
@@ -40,9 +36,6 @@ public:
     static int ResolveDevice(const std::string& vidpid,
                              const std::string& name,
                              int index);
-
-    // Polling
-    static bool PollDevice(int index, DIJOYSTATE2& outState);
 
     // Batch polling: poll all open devices once per tick, cache states
     static void PollAll();
@@ -72,7 +65,4 @@ public:
 
     // Check if a button (1-128 physical, 129-144 POV virtual) is pressed via BindingRef.
     static bool IsButtonPressed(const BindingRef& ref);
-    
-    // DirectInput Context
-    static LPDIRECTINPUT8 GetDirectInputContext();
 };

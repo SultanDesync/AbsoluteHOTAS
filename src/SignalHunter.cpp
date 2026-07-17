@@ -91,9 +91,6 @@ static bool      s_prevBoostHeld        = false;
 // ============================================================================
 namespace SignalHunter {
 
-bool IsLocked()          { return s_discoveryLocked; }
-uintptr_t GetActivePtr() { return s_activeThrottlePtr; }
-
 void Disarm() {
     s_discoveryArmed          = false;
     s_discoveryLocked         = false;
@@ -137,7 +134,7 @@ void SuspendInjection() {
     ThrottleHook::SetSilence6CEnabled(false);
 }
 
-void ArmForReacquire(const char* /*reason*/) {
+void ArmForReacquire() {
     s_discoveryArmed        = true;
     s_discoveryLocked       = false;
     s_activeCandidateIndex  = -1;
@@ -154,7 +151,7 @@ void ArmForReacquire(const char* /*reason*/) {
 
 
 
-void Tick(int candCount, float /*throttle*/, float /*dt*/, uint64_t iter) {
+void Tick(int candCount, uint64_t iter) {
     const auto& cfg = ThrottleController::GetConfig();
 
     // SIGNAL HUNTER: Magic Number Pulse detection
@@ -217,14 +214,14 @@ void Tick(int candCount, float /*throttle*/, float /*dt*/, uint64_t iter) {
     // Reacquire watchdog
     if (s_reacquireWatchdogEnabled) {
         if (s_discoveryLocked && !s_activeThrottlePtr)
-            ArmForReacquire("locked state had no active pointer");
+            ArmForReacquire();
         else if (!s_discoveryLocked && !s_discoveryArmed)
-            ArmForReacquire("inactive state after prior lock");
+            ArmForReacquire();
     }
 }
 
 void Inject(float throttle, float pitch, float yaw, float roll,
-            float strafeX, float strafeY, float dt, uint64_t /*iter*/,
+            float strafeX, float strafeY, float dt,
             bool reverseHeld, bool suppressPitchYaw,
             bool strafeLatActive, bool strafeVertActive,
             bool cruiseOverride, float cruiseTarget)
@@ -237,7 +234,7 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         s_plausibilityFailCount++;
         if (s_plausibilityFailCount > 60) {
             SHLog("Persistent signal loss. Pointer invalidated.");
-            ArmForReacquire("persistent signal loss");
+            ArmForReacquire();
             s_lastInjectedThrottle = -999.0f;
             ShipOutputSystem::ReleaseAllShipButtonOutputs();
         }

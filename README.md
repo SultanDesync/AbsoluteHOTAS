@@ -62,13 +62,13 @@ fThrottleAtEngineStart = 0.0314
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
-* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` (or bind a controller button) to open the ImGui overlay. Bind axes and buttons by moving/pressing them on your hardware in real-time.
+* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay, then use the first **Wizard access** section to bind a preferred controller button for one-touch access. Bind axes and buttons by moving/pressing them on your hardware in real-time.
 * **Frame Generation Support** — Fully compatible with Starfield's built-in Frame Generation (FSR3 Frame Gen). The overlay automatically handles swap chain resizing and reinitializes seamlessly when toggled in-game.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
 * **22 Ship Action Bindings** — Map physical buttons to flight functions (boost, weapons, power management, scanner, target selection, etc.).
 * **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
-* **Digital Axis Buttons** — Bind hat switches or buttons to emulate axis input for roll, strafe, and reverse.
+* **Button-based axes** — Use hat switches or buttons for roll, strafe, and reverse when analog axes are limited.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
 * **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
 * **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
@@ -150,7 +150,7 @@ The device-name prefix is matched as a **case-insensitive substring**, so a shor
 
 ## Ship Buttons
 
-Button IDs are 1-indexed DirectInput buttons (1–128). Prefix with device name to target a specific device:
+Button IDs are 1-indexed DirectInput values: physical buttons use 1–128 and POV/hat directions use virtual IDs 129–144. Prefix with a device name to target a specific device:
 
 ```ini
 [ShipButtons]
@@ -161,9 +161,9 @@ iSelectTargetButton = VKB Gunfighter@2
 iIncreaseSystemPowerButton = -1
 ```
 
-Set an action to `-1` to disable it. Each ship button emits a configurable keyboard or mouse output to Starfield. Default outputs match Starfield's vanilla bindings.
+Set an action to `-1` to disable it. Named ship actions automatically follow the player's current in-game Starfield keyboard/mouse bindings by reconciling `ControlMap_Custom.txt`; vanilla outputs are fallbacks when no override exists or the control map cannot be read.
 
-Override outputs in `[ShipButtonOutputs]`:
+Use `[ShipButtonOutputs]` only when you deliberately want to override the reconciled output:
 
 ```ini
 [ShipButtonOutputs]

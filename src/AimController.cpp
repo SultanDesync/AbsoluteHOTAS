@@ -23,7 +23,7 @@ static void SafeWriteFloat(uintptr_t addr, float value) {
 
 // Bipolar normalisation for an analog axis, with optional calibration override.
 static float NormBipolar(const ThrottleController::Config& cfg,
-                         const BindingRef& ref, float sens, bool invert, float saturation = 1.0f)
+                         const BindingRef& ref, float sens, bool invert)
 {
     if (!ref.IsValid() || ref.value <= 0) return 0.0f;
     const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
@@ -47,12 +47,7 @@ static float NormBipolar(const ThrottleController::Config& cfg,
     float val = (raw - center) / halfRange;
     val *= sens;
     val  = invert ? -val : val;
-    float sat = std::clamp(saturation, 0.05f, 1.0f);
-    return std::clamp(val / sat, -1.0f, 1.0f);
-}
-
-static bool IsButtonPressed(const BindingRef& ref) {
-    return DeviceManager::IsButtonPressed(ref);
+    return std::clamp(val, -1.0f, 1.0f);
 }
 
 // ============================================================================
@@ -64,9 +59,8 @@ void Update(const ThrottleController::Config& cfg,
             float yaw, float pitch,
             bool hasSeparateAimInput,
             bool hasSeparateAimAxes,
-            [[maybe_unused]] bool suppressClusterForAim,
-            float dt,
-            [[maybe_unused]] uint64_t iter)
+            bool hasDigitalAimButtons,
+            float dt)
 {
     // ---- HOSAM Alignment Assist ----
     // Observes the game's native mouse accumulator. When the mouse has been
@@ -151,23 +145,18 @@ void Update(const ThrottleController::Config& cfg,
         static float s_digitalAimYaw   = 0.0f;
         static float s_digitalAimPitch = 0.0f;
 
-        bool hasDigitalAimButtons = cfg.digitalAimLeftButton.IsValid()
-                                 || cfg.digitalAimRightButton.IsValid()
-                                 || cfg.digitalAimUpButton.IsValid()
-                                 || cfg.digitalAimDownButton.IsValid();
-
         if (!hasSeparateAimInput) {
             s_digitalAimYaw   = 0.0f;
             s_digitalAimPitch = 0.0f;
-        } else if (IsButtonPressed(cfg.digitalAimCenterButton)) {
+        } else if (DeviceManager::IsButtonPressed(cfg.digitalAimCenterButton)) {
             s_digitalAimYaw   = 0.0f;
             s_digitalAimPitch = 0.0f;
         } else {
             float dY = 0.0f, dP = 0.0f;
-            if (IsButtonPressed(cfg.digitalAimLeftButton))  dY -= 1.0f;
-            if (IsButtonPressed(cfg.digitalAimRightButton)) dY += 1.0f;
-            if (IsButtonPressed(cfg.digitalAimUpButton))    dP -= 1.0f;
-            if (IsButtonPressed(cfg.digitalAimDownButton))  dP += 1.0f;
+            if (DeviceManager::IsButtonPressed(cfg.digitalAimLeftButton))  dY -= 1.0f;
+            if (DeviceManager::IsButtonPressed(cfg.digitalAimRightButton)) dY += 1.0f;
+            if (DeviceManager::IsButtonPressed(cfg.digitalAimUpButton))    dP -= 1.0f;
+            if (DeviceManager::IsButtonPressed(cfg.digitalAimDownButton))  dP += 1.0f;
 
             float dMag = std::sqrt(dY * dY + dP * dP);
             if (dMag > 1.0f) { dY /= dMag; dP /= dMag; }

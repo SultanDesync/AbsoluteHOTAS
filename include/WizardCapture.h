@@ -63,6 +63,7 @@ struct DeviceCalibState {
 
 PendingBind& GetPendingBind();
 DeviceCalibState& GetCalibState();
+void CancelCapture();
 
 void StartAxisCapture(int slotIndex, const char* label);
 // settleWindowMs selects the capture window; pass kSelectorCaptureMs when binding a
@@ -76,8 +77,7 @@ void StartButtonCapture(int slotIndex, int categoryOffset, const char* label,
 using BindingCommitFn = void(*)(int captureSlot, const char* bindingString);
 bool UpdateCapture(BindingCommitFn commitFn);
 
-// POV helpers (shared with display formatting)
-bool IsPovDirectionActive(DWORD pov, int direction);
+// Display formatting helpers
 const char* PovDirectionName(int direction);
 const char* AxisName(int usageId);
 

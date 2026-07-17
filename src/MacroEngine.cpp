@@ -120,10 +120,6 @@ static bool ParseStep(std::string_view line, MacroStep& out) {
 
 namespace MacroEngine {
 
-const std::vector<Macro>& GetMacros() {
-    return s_macros;
-}
-
 std::vector<Macro>& GetMacrosMutable() {
     return s_macros;
 }
@@ -182,6 +178,11 @@ void ReleaseAll() {
         ShipOutputSystem::ReleaseOwnerOutputs(MacroOwner(i));
         s_runtime[i] = MacroRuntime{};
     }
+}
+
+void SeedDownButtonsConsumed() {
+    for (size_t i = 0; i < s_macros.size() && i < s_runtime.size(); ++i)
+        s_runtime[i].prevButtonDown = DeviceManager::IsButtonPressed(s_macros[i].button);
 }
 
 std::vector<Macro> SnapshotMacros() {

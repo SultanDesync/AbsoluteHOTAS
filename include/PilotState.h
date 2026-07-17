@@ -15,18 +15,12 @@
 
 namespace PilotState {
 
-// Current debounced piloting signal. Gate reads this each tick.
-bool IsPiloting();
-
-// Set the signal (manual test toggle today; native flag later). Logs on change.
-void SetPiloting(bool piloting);
-
 // Flip the current state (bound to the test toggle key).
 void Toggle();
 
 // Refresh and return the piloting signal. autoSource=false → manual toggle value;
 // autoSource=true → currently also the manual value (no working auto signal; see
-// PilotState.cpp). Call once per control-loop tick with frame dt.
-bool Update(bool autoSource, float dt, int debounceMs);
+// PilotState.cpp).
+bool Update(bool autoSource);
 
 }  // namespace PilotState

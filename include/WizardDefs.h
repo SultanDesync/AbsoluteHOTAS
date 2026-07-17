@@ -63,6 +63,7 @@ inline const ButtonSlot kButtonSlots[] = {
     {"Toggle Wizard",  "iToggleWizardButton"},
 };
 inline constexpr int kNumButtonSlots = sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
+inline constexpr int kToggleWizardButtonSlot = 2;
 
 inline const ButtonSlot kControlExtensionSlots[] = {
     {"Hold Current Throttle", "iCruiseHoldButton"},

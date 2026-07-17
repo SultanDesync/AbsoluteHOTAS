@@ -41,8 +41,8 @@ static volatile uint32_t g_sourceAimYawBits  = 0;
 static volatile uint32_t g_sourceAimPitchBits = 0;
 
 // Guard flag: when true, reverse override owns the vertical strafe gate (+0x5C).
-// SetRotationalOverride and SetManualLaneOverride must not touch g_vertStrafeOverrideEnabled
-// or g_vertStrafeBits while this flag is set.
+// SetRotationalOverride must not touch g_vertStrafeOverrideEnabled or
+// g_vertStrafeBits while this flag is set.
 static volatile uint8_t g_reverseOwnsVertStrafe = 0;
 
 
@@ -481,33 +481,8 @@ static bool InstallTrampoline5(uintptr_t targetAddr, const uint8_t* savedBytes, 
 }
 
 // ---- Public API ----
-uintptr_t ThrottleHook::GetBasePtr() {
-    return (uintptr_t)g_capturedRDI;
-}
-
 uintptr_t ThrottleHook::GetSourceBasePtr() {
     return (uintptr_t)g_capturedSourceR13;
-}
-
-uintptr_t ThrottleHook::GetWriterClusterBasePtr() {
-    return (uintptr_t)g_capturedWriterCluster;
-}
-
-bool ThrottleHook::IsActive() {
-    static int64_t s_lastCheckedCounter = 0;
-    static std::chrono::steady_clock::time_point s_lastAlive = std::chrono::steady_clock::now();
-    int64_t currentCounter = g_capturedTimestamp;
-    auto now = std::chrono::steady_clock::now();
-    if (currentCounter != s_lastCheckedCounter) {
-        s_lastCheckedCounter = currentCounter;
-        s_lastAlive = now;
-    }
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastAlive).count();
-    return (g_capturedRDI != 0) && (elapsed < 2000);
-}
-
-bool ThrottleHook::IsInstalled() {
-    return !g_hookRegistry.empty();
 }
 
 void ThrottleHook::Uninstall() {
@@ -546,26 +521,14 @@ void ThrottleHook::SetCaptureEnabled(bool enabled) {
     g_captureEnabled = enabled;
 }
 
-bool ThrottleHook::IsCaptureEnabled() {
-    return g_captureEnabled;
-}
-
 void ThrottleHook::SetSilenceEnabled(bool enabled) {
     if (g_silenceEnabled == enabled) return;
     g_silenceEnabled = enabled;
 }
 
-bool ThrottleHook::IsSilenceEnabled() {
-    return g_silenceEnabled;
-}
-
 void ThrottleHook::SetSilence6CEnabled(bool enabled) {
     if (g_silence6CEnabled == enabled) return;
     g_silence6CEnabled = enabled;
-}
-
-bool ThrottleHook::IsSilence6CEnabled() {
-    return g_silence6CEnabled;
 }
 
 void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled, bool yawEnabled, bool pitchEnabled) {
@@ -583,43 +546,6 @@ void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, 
         g_vertStrafeOverrideEnabled = (enabled && verticalEnabled) ? 1 : 0;
     }
 }
-
-void ThrottleHook::SetManualLaneOverride(uintptr_t offset, float value, bool enabled) {
-    uint32_t bits = FloatToBits(value);
-
-    g_rollOverrideEnabled = 0;
-    g_yawOverrideEnabled = 0;
-    g_pitchOverrideEnabled = 0;
-    // Only touch vertical strafe if reverse doesn't own it
-    if (!g_reverseOwnsVertStrafe) {
-        g_vertStrafeOverrideEnabled = 0;
-    }
-
-    if (!enabled) {
-        g_rotOverrideEnabled = 0;
-        return;
-    }
-
-    if (offset == 0x58) {
-        g_rollBits = bits;
-        g_rollOverrideEnabled = 1;
-    } else if (offset == 0x5C) {
-        g_vertStrafeBits = bits;
-        g_vertStrafeOverrideEnabled = 1;
-    } else if (offset == 0x60) {
-        g_yawBits = bits;
-        g_yawOverrideEnabled = 1;
-    } else if (offset == 0x64) {
-        g_pitchBits = bits;
-        g_pitchOverrideEnabled = 1;
-    } else {
-        g_rotOverrideEnabled = 0;
-        return;
-    }
-
-    g_rotOverrideEnabled = 1;
-}
-
 
 // ---- Source-object aim injection ----
 void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {

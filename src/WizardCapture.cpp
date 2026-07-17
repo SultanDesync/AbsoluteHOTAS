@@ -41,6 +41,10 @@ void DeviceCalibState::Reset() {
 PendingBind& GetPendingBind() { return s_pendingBind; }
 DeviceCalibState& GetCalibState() { return s_devCalib; }
 
+void CancelCapture() {
+    s_pendingBind = PendingBind{};
+}
+
 const char* AxisName(int usageId) {
     switch (usageId) {
         case 0x30: return "X";
@@ -55,7 +59,7 @@ const char* AxisName(int usageId) {
     }
 }
 
-bool IsPovDirectionActive(DWORD pov, int direction) {
+static bool IsPovDirectionActive(DWORD pov, int direction) {
     if (LOWORD(pov) == 0xFFFF) return false;
     static constexpr DWORD kDirAngles[4] = { 0, 9000, 18000, 27000 };
     DWORD target = kDirAngles[direction];

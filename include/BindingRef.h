@@ -11,7 +11,7 @@
 // The '@' delimiter separates an optional device name (or #N index) from the axis/button value.
 struct BindingRef {
     std::string deviceName;   // Empty = use legacy default device from [InputDevices]
-    int         value;        // Axis usage ID (0x30-0x37) or button ID (1-128), or -1
+    int         value;        // Axis usage ID (0x30-0x37), button/POV ID (1-144), or -1
     int         deviceIndex;  // Resolved DeviceManager index, -1 = unresolved/default
 
     bool HasDevice() const { return !deviceName.empty(); }

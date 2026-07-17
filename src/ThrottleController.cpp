@@ -22,7 +22,6 @@ ThrottleController::Config    ThrottleController::s_config;
 std::atomic<bool>  ThrottleController::s_running{ false };
 std::atomic<bool>  ThrottleController::s_configReloadRequested{ false };
 std::atomic<uint32_t> ThrottleController::s_configGeneration{ 0 };
-std::atomic<float> ThrottleController::s_currentThrottle{ 0.0f };
 std::thread        ThrottleController::s_thread;
 
 static bool s_turnAssistRuntimeActive = false;
@@ -49,13 +48,26 @@ struct ProfileSlot {
     BindingRef  trigger;
     int         triggerKey = 0;
     int         triggerMods = 0;     // keyboard modifier chord (bit0 Ctrl, bit1 Shift, bit2 Alt)
+    int         shortcutKey = 0;     // independent profile-file keyboard shortcut
+    int         shortcutMods = 0;
     SwapMode    mode       = SwapMode::Momentary;
     bool        prevDown   = false;  // momentary/toggle edge-detect state
+    bool        prevShortcutDown = false;
     int         restoreSlot = 0;     // momentary: slot that was active when this was pressed
 };
 static std::vector<ProfileSlot> s_profiles;   // [0] = base
 static int s_activeSlot = 0;
 static int s_lastSelectorPos = -2;            // last selector position acted on (-2 = re-eval)
+static ShipOutput s_boostOutput = NoOutput;
+static ShipOutput s_flightModeOutput = NoOutput;
+
+static void ApplyProfile(const ProfileSlot& slot, ThrottleController::Config& config) {
+    config = slot.config;
+    ShipOutputSystem::RestoreBindings(slot.shipBindings);
+    MacroEngine::RestoreMacros(slot.macros);
+    s_boostOutput = ShipOutputSystem::GetShipButtonOutput("FireBoosters");
+    s_flightModeOutput = ShipOutputSystem::GetShipButtonOutput("SwitchFlightModes");
+}
 
 enum class CruiseAssistMode { Off, HoldCurrent, Stop, Half, Max };
 static CruiseAssistMode s_cruiseAssistMode = CruiseAssistMode::Off;
@@ -64,10 +76,9 @@ static bool s_resetCruiseEdges = true;
 
 // ---- Logging ----
 // All controller lines are gated by bEnableLog inside RuntimePaths::Log.
-static void CtrlLog(const char* msg) {
+static void CtrlLog(const std::string& msg) {
     RuntimePaths::Log("[Controller]", msg);
 }
-static void CtrlLog(const std::string& msg) { CtrlLog(msg.c_str()); }
 
 // ---- Axis Normalization ----
 float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMax) {
@@ -241,7 +252,6 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
         else                                     s_config.pilotGateMode = ThrottleController::GateMode::Off;
     }
     s_config.pilotGateManualToggleKey = (int)ini.GetLongValue("Gate", "iManualToggleKey", 0);
-    s_config.pilotGateDebounceMs      = (int)ini.GetLongValue("Gate", "iDebounceMs", 150);
     {
         const char* ps = ini.GetValue("Gate", "PilotSignal", "Manual");
         s_config.pilotSignal = (_stricmp(ps, "Auto") == 0)
@@ -400,10 +410,11 @@ void ThrottleController::ResolveActiveDevices() {
 // button ref contains spaces and could not be split from the value cleanly.
 struct ProfileSlotDef {
     std::string file;              // resolved absolute path under Profiles/ (empty if base)
-    bool        targetsBase = false;  // File = (base): this slot selects the base config
     BindingRef  trigger;
     int         triggerKey  = 0;   // keyboard VK, 0 = none
     int         triggerMods = 0;   // keyboard modifier chord: bit0 Ctrl, bit1 Shift, bit2 Alt
+    int         shortcutKey = 0;   // independent [Profile] sKeyboardShortcut
+    int         shortcutMods = 0;
     SwapMode    mode = SwapMode::Momentary;
 };
 
@@ -448,7 +459,6 @@ static std::vector<ProfileSlotDef> ParseProfileSlots() {
         // "(base)" selects the base config itself — a first-class swap position (e.g.
         // a rotary detent for base flight), not a profile file.
         if (_stricmp(file, "(base)") == 0 || _stricmp(file, "base") == 0) {
-            def.targetsBase = true;
         } else {
             def.file = (RuntimePaths::ProfilesDir() / file).string();
             CSimpleIniA profileMeta;
@@ -461,6 +471,9 @@ static std::vector<ProfileSlotDef> ParseProfileSlots() {
                 CtrlLog("Ignored invalid or unsupported profile: " + def.file);
                 continue;
             }
+            const char* shortcut = profileMeta.GetValue("Profile", "sKeyboardShortcut", "");
+            if (_strnicmp(shortcut, "key:", 4) == 0)
+                ParseKeyTrigger(shortcut, def.shortcutKey, def.shortcutMods);
         }
         const char* trigger = ini.GetValue("Profiles", (base + "Button").c_str(), "");
         if (_strnicmp(trigger, "key:", 4) == 0)
@@ -481,6 +494,7 @@ void ThrottleController::PreloadProfiles() {
     const std::vector<ProfileSlotDef> defs = ParseProfileSlots();
 
     s_profiles.clear();
+    s_profiles.reserve(defs.size() + 1);
 
     // Slot 0 = base: no slot file.
     {
@@ -496,7 +510,7 @@ void ThrottleController::PreloadProfiles() {
     // Slots 1..N = switch profiles, each a fourth overlay on the base stack.
     for (const ProfileSlotDef& def : defs) {
         ProfileSlot slot;
-        if (def.targetsBase) {
+        if (def.file.empty()) {
             // A base-target slot IS base: copy slot 0's snapshot. Activating it restores
             // the base config, so the swap state machine treats it like any other slot —
             // no special-casing needed there. This is the rotary "base flight" detent.
@@ -513,6 +527,8 @@ void ThrottleController::PreloadProfiles() {
         slot.trigger      = def.trigger;
         slot.triggerKey   = def.triggerKey;
         slot.triggerMods  = def.triggerMods;
+        slot.shortcutKey  = def.shortcutKey;
+        slot.shortcutMods = def.shortcutMods;
         slot.mode         = def.mode;
         // Resolve the trigger's device too — it is not part of the active config, so
         // ResolveActiveDevices above never touched it. Without this a name-based
@@ -525,11 +541,10 @@ void ThrottleController::PreloadProfiles() {
 
     // Make base active without a release storm (nothing is held yet at preload).
     s_activeSlot = 0;
+    s_lastSelectorPos = -2;
     s_cruiseAssistMode = CruiseAssistMode::Off;
     s_resetCruiseEdges = true;
-    s_config       = s_profiles[0].config;
-    ShipOutputSystem::RestoreBindings(s_profiles[0].shipBindings);
-    MacroEngine::RestoreMacros(s_profiles[0].macros);
+    ApplyProfile(s_profiles[0], s_config);
 }
 
 // Swap the live configuration to a preloaded slot.
@@ -543,15 +558,13 @@ void ThrottleController::ActivateProfile(int slot) {
     s_cruiseAssistMode = CruiseAssistMode::Off;
     s_resetCruiseEdges = true;
 
-    s_config = s_profiles[slot].config;
-    ShipOutputSystem::RestoreBindings(s_profiles[slot].shipBindings);
-    MacroEngine::RestoreMacros(s_profiles[slot].macros);
+    ApplyProfile(s_profiles[slot], s_config);
 
     // A button still physically down must not re-fire as its new-profile meaning.
     ShipOutputSystem::SeedDownButtonsConsumed();
 
     s_activeSlot = slot;
-    s_configGeneration.fetch_add(1, std::memory_order_release);  // wizard UI refresh
+    s_configGeneration.fetch_add(1, std::memory_order_release);  // refresh a clean wizard snapshot
     CtrlLog("Profile swap -> slot " + std::to_string(slot));
 }
 
@@ -615,16 +628,9 @@ void ThrottleController::ControlLoop() {
     bool active = s_config.alwaysOn;
     bool wasActive = false;
     bool injectionWasAllowed = true;  // pilot gate (InjectionOnly): tracks memory-injection arm state
+    bool overlayWasOpen = false;
+    bool resetOverlayEdges = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
-
-    // Inline axis reading helper — delegates to DeviceManager
-    auto GetRawAxis = [](const BindingRef& ref) -> long {
-        return DeviceManager::GetRawAxis(ref);
-    };
-
-    auto IsButtonPressed = [](const BindingRef& ref) -> bool {
-        return DeviceManager::IsButtonPressed(ref);
-    };
 
     while (s_running) {
         iter++;
@@ -653,9 +659,9 @@ void ThrottleController::ControlLoop() {
 
         // ---- Control buttons (always processed, even while deactivated, so the
         //      activate binding and wizard overlay can always be reached) ----
-        bool curActivate    = IsButtonPressed(s_config.activateButton);
-        bool curStop        = IsButtonPressed(s_config.stopButton);
-        bool curToggleWizard = IsButtonPressed(s_config.toggleWizardButton);
+        bool curActivate    = DeviceManager::IsButtonPressed(s_config.activateButton);
+        bool curStop        = DeviceManager::IsButtonPressed(s_config.stopButton);
+        bool curToggleWizard = DeviceManager::IsButtonPressed(s_config.toggleWizardButton);
         static bool prevActivate = false, prevStop = false, prevToggleWizard = false;
 
         // Keyboard master on/off toggle (single configurable key; default ScrollLock).
@@ -670,7 +676,7 @@ void ThrottleController::ControlLoop() {
         if ((curActivate && !prevActivate) || (toggleEdge && !active)) {
             CtrlLog("[Master] ACTIVATE: enabling injection and outputs.");
             active = true;
-            SignalHunter::ArmForReacquire("manual activate");
+            SignalHunter::ArmForReacquire();
             lastInjectedHardwareValue = -999.0f;
         }
         // Deactivate: full shutdown — release every held SendInput output AND stop
@@ -692,6 +698,7 @@ void ThrottleController::ControlLoop() {
         prevActivate     = curActivate;
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
+        const bool overlayOpen = UIHook::IsUIOpen();
 
         // ---- Profile switch triggers ----
         // Three activation modes coexist (a rig may use any mix): momentary and
@@ -701,21 +708,25 @@ void ThrottleController::ControlLoop() {
         // without acting, so a release under suppression can't strand the user and
         // resuming can't fire a spurious swap; the selector re-syncs on resume.
         {
-            const bool swapEnabled = active && !UIHook::IsUIOpen();
+            const bool swapEnabled = active && !overlayOpen;
+            auto IsKeyTriggerDown = [](int key, int mods) {
+                if (key <= 0 || !(GetAsyncKeyState(key) & 0x8000)) return false;
+                if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
+                if ((mods & 2) && !(GetAsyncKeyState(VK_SHIFT) & 0x8000)) return false;
+                if ((mods & 4) && !(GetAsyncKeyState(VK_MENU) & 0x8000)) return false;
+                return true;
+            };
             auto IsProfileTriggerDown = [&](const ProfileSlot& slot) {
-                if (slot.triggerKey > 0) {
-                    if (!(GetAsyncKeyState(slot.triggerKey) & 0x8000)) return false;
-                    if ((slot.triggerMods & 1) && !(GetAsyncKeyState(0x11) & 0x8000)) return false;  // Ctrl
-                    if ((slot.triggerMods & 2) && !(GetAsyncKeyState(0x10) & 0x8000)) return false;  // Shift
-                    if ((slot.triggerMods & 4) && !(GetAsyncKeyState(0x12) & 0x8000)) return false;  // Alt
-                    return true;
-                }
-                return slot.trigger.IsValid() && IsButtonPressed(slot.trigger);
+                if (slot.triggerKey > 0) return IsKeyTriggerDown(slot.triggerKey, slot.triggerMods);
+                return slot.trigger.IsValid() && DeviceManager::IsButtonPressed(slot.trigger);
             };
             if (!swapEnabled) {
                 if (s_activeSlot != 0) ActivateProfile(0);
-                for (size_t i = 1; i < s_profiles.size(); ++i)
+                for (size_t i = 1; i < s_profiles.size(); ++i) {
                     s_profiles[i].prevDown = IsProfileTriggerDown(s_profiles[i]);
+                    s_profiles[i].prevShortcutDown = IsKeyTriggerDown(
+                        s_profiles[i].shortcutKey, s_profiles[i].shortcutMods);
+                }
                 s_lastSelectorPos = -2;  // force selector re-sync to the physical position on resume
             } else {
                 // The live "base selection": the selector's current position, else
@@ -769,6 +780,17 @@ void ThrottleController::ControlLoop() {
                         }
                     }
                 }
+
+                // Profile-file keyboard shortcuts are toggle fallbacks and remain
+                // active alongside the optional controller/custom trigger above.
+                for (size_t i = 1; i < s_profiles.size(); ++i) {
+                    ProfileSlot& sl = s_profiles[i];
+                    const bool down = IsKeyTriggerDown(sl.shortcutKey, sl.shortcutMods);
+                    const bool pressEdge = down && !sl.prevShortcutDown;
+                    sl.prevShortcutDown = down;
+                    if (pressEdge)
+                        ActivateProfile(s_activeSlot == (int)i ? CurrentBaseSelection() : (int)i);
+                }
             }
         }
 
@@ -784,7 +806,7 @@ void ThrottleController::ControlLoop() {
         }
         const bool gateOn   = s_config.pilotGateMode != ThrottleController::GateMode::Off;
         const bool piloting = !gateOn ||
-            PilotState::Update(s_config.pilotSignal == ThrottleController::PilotSignal::Auto, dt, s_config.pilotGateDebounceMs);
+            PilotState::Update(s_config.pilotSignal == ThrottleController::PilotSignal::Auto);
         const bool fullClosed = (s_config.pilotGateMode == ThrottleController::GateMode::Full) && !piloting;
 
         // ---- Master active gate ----
@@ -811,32 +833,51 @@ void ThrottleController::ControlLoop() {
         if (!wasActive) {
             if (s_config.alwaysOn) {
                 CtrlLog("[Master] Active; discovery armed automatically.");
-                SignalHunter::ArmForReacquire(nullptr);
+                SignalHunter::ArmForReacquire();
             }
             lastInjectedHardwareValue = -999.0f;
             wasActive = true;
         }
 
-        // Ship action buttons: gated by bShipButtonsEnabled and suppressed while
-        // the wizard overlay is open. Releases only ship-button-owned outputs so
-        // the axis-driven strafe/boost modifiers below are left untouched.
-        if (s_config.shipButtonsEnabled && !UIHook::IsUIOpen())
+        // The workbench is a capture/editing context, not a second flight-input
+        // surface. Park every plugin-owned output before rendering it and keep
+        // polling DirectInput only so capture and the close binding remain live.
+        if (overlayOpen) {
+            if (!overlayWasOpen) {
+                CtrlLog("[Wizard] Parking gameplay injection and synthetic outputs.");
+                ShipOutputSystem::ReleaseAllShipButtonOutputs();
+                MacroEngine::ReleaseAll();
+                SignalHunter::SuspendInjection();
+                injectionWasAllowed = false;
+                s_resetCruiseEdges = true;
+            }
+            overlayWasOpen = true;
+            std::this_thread::sleep_for(sleepDuration);
+            continue;
+        }
+        if (overlayWasOpen) {
+            overlayWasOpen = false;
+            resetOverlayEdges = true;
+            s_resetCruiseEdges = true;
+            ShipOutputSystem::SeedDownButtonsConsumed();
+            MacroEngine::SeedDownButtonsConsumed();
+            lastInjectedHardwareValue = -999.0f;
+            CtrlLog("[Wizard] Gameplay input resumed; held edge controls reseeded.");
+        }
+
+        // Ship action buttons are live only outside the wizard workbench.
+        if (s_config.shipButtonsEnabled)
             ShipOutputSystem::UpdateShipButtonBindings();
         else
             ShipOutputSystem::ReleaseShipButtonBindingOutputs();
 
-        // Macros: live while armed and the overlay is closed; suppressed (held
-        // keys released) while the wizard is open.
-        if (!UIHook::IsUIOpen())
-            MacroEngine::Update();
-        else
-            MacroEngine::ReleaseAll();
+        MacroEngine::Update();
 
         // ---- Reverse input ----
         const bool digitalReverseBound = s_config.digitalReverseButton.IsValid()
             && s_config.digitalReverseButton.value > 0
             && s_config.digitalReverseButton.value <= 128;
-        const bool digitalReverseHeld  = digitalReverseBound && IsButtonPressed(s_config.digitalReverseButton);
+        const bool digitalReverseHeld  = digitalReverseBound && DeviceManager::IsButtonPressed(s_config.digitalReverseButton);
 
         auto ApplyUnipolarDeadzone = [](float value, float deadzone) {
             const float dz = std::clamp(deadzone, 0.0f, 0.95f);
@@ -847,7 +888,7 @@ void ThrottleController::ControlLoop() {
         float reverseAxis = 0.0f;
         if (s_config.reverseAxisEnabled && !digitalReverseBound
             && s_config.reverseAxis.IsValid() && s_config.reverseAxis.value > 0) {
-            reverseAxis = (float)GetRawAxis(s_config.reverseAxis) / 65535.0f;
+            reverseAxis = (float)DeviceManager::GetRawAxis(s_config.reverseAxis) / 65535.0f;
             reverseAxis = s_config.bInvertReverse ? (1.0f - reverseAxis) : reverseAxis;
             reverseAxis = std::clamp(reverseAxis * s_config.fReverseSensitivity, 0.0f, 1.0f);
             reverseAxis = ApplyUnipolarDeadzone(reverseAxis, s_config.reverseDeadzone);
@@ -860,7 +901,7 @@ void ThrottleController::ControlLoop() {
         // Unipolar reverse zone from main throttle axis
         if (s_config.bUnipolarReverse && s_config.unipolarMode
             && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-            long rawThrottle = GetRawAxis(s_config.throttleAxis);
+            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             if (rawThrottle < s_config.reverseZoneCenter - s_config.reverseZoneDeadzone)
                 reverseHeld = true;
@@ -876,13 +917,11 @@ void ThrottleController::ControlLoop() {
         if (s_config.bEnableInjection && s_config.bBoostZone && s_config.bUnipolarReverse
             && s_config.unipolarMode
             && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-            long rawThrottle = GetRawAxis(s_config.throttleAxis);
+            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             inBoostZone = rawThrottle > s_config.boostZoneCenter + s_config.boostZoneDeadzone;
         }
-        if (ShipOutputSystem::GetShipButtonCount() > 0)
-            ShipOutputSystem::SetOutputHeld(
-                ShipOutputSystem::GetShipButtonOutput("FireBoosters"), OwnerBoostZone, inBoostZone);
+        ShipOutputSystem::SetOutputHeld(s_boostOutput, OwnerBoostZone, inBoostZone);
 
         // ---- Throttle ----
         float throttle = 0.0f;
@@ -904,11 +943,11 @@ void ThrottleController::ControlLoop() {
 
         if (s_config.bAccumulatorThrottle) {
             if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-                throttle = NormBipolarRate(GetRawAxis(s_config.throttleAxis));
+                throttle = NormBipolarRate(DeviceManager::GetRawAxis(s_config.throttleAxis));
                 throttle = std::clamp(throttle * s_config.fThrottleSensitivity, -1.0f, 1.0f);
             }
         } else if (!reverseHeld && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-            throttle = NormalizeAxis(GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
+            throttle = NormalizeAxis(DeviceManager::GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
             throttle = std::clamp(throttle * s_config.fThrottleSensitivity, 0.0f, 1.0f);
         }
 
@@ -921,11 +960,11 @@ void ThrottleController::ControlLoop() {
             &s_config.cruiseHalfButton, &s_config.cruiseMaxButton
         };
         bool cruiseDown[4]{};
-        for (int i = 0; i < 4; ++i) cruiseDown[i] = IsButtonPressed(*cruiseButtons[i]);
+        for (int i = 0; i < 4; ++i) cruiseDown[i] = DeviceManager::IsButtonPressed(*cruiseButtons[i]);
         if (s_resetCruiseEdges) {
             for (int i = 0; i < 4; ++i) prevCruise[i] = cruiseDown[i];
             s_resetCruiseEdges = false;
-        } else if (!UIHook::IsUIOpen()) {
+        } else if (!overlayOpen) {
             const CruiseAssistMode modes[] = {
                 CruiseAssistMode::HoldCurrent, CruiseAssistMode::Stop,
                 CruiseAssistMode::Half, CruiseAssistMode::Max
@@ -950,9 +989,7 @@ void ThrottleController::ControlLoop() {
         if (cruiseOverride) {
             throttle = s_cruiseAssistTarget;
             reverseHeld = false;
-            if (ShipOutputSystem::GetShipButtonCount() > 0)
-                ShipOutputSystem::SetOutputHeld(
-                    ShipOutputSystem::GetShipButtonOutput("FireBoosters"), OwnerBoostZone, false);
+            ShipOutputSystem::SetOutputHeld(s_boostOutput, OwnerBoostZone, false);
         }
 
         // ---- Rotation axes ----
@@ -1000,8 +1037,8 @@ void ThrottleController::ControlLoop() {
         float pitch  = ShapeAxis(NormRaw(s_config.pitchAxis, s_config.bInvertPitch), s_config.fPitchSensitivity, s_config.fPitchSaturation, s_config.fPitchDeadzone);
         float yaw    = ShapeAxis(NormRaw(s_config.yawAxis,   s_config.bInvertYaw),   s_config.fYawSensitivity,   s_config.fYawSaturation,   s_config.fYawDeadzone);
         float roll   = ShapeAxis(NormRaw(s_config.rollAxis,  s_config.bInvertRoll),  s_config.fRollSensitivity,  s_config.fRollSaturation,  s_config.fRollDeadzone);
-        if (IsButtonPressed(s_config.digitalRollLeftButton))  roll -= s_config.digitalRollValue;
-        if (IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
+        if (DeviceManager::IsButtonPressed(s_config.digitalRollLeftButton))  roll -= s_config.digitalRollValue;
+        if (DeviceManager::IsButtonPressed(s_config.digitalRollRightButton)) roll += s_config.digitalRollValue;
         roll = std::clamp(roll, -1.0f, 1.0f);
 
         // Raw normalized magnitudes drive the strafe ACTIVATION gate; ShapeAxis
@@ -1012,10 +1049,10 @@ void ThrottleController::ControlLoop() {
         float strafeX = ShapeAxis(strafeLatNorm,  s_config.fStrafeSensitivity, s_config.fStrafeSaturation,     s_config.fStrafeDeadzone);
         float strafeY = ShapeAxis(strafeVertNorm, s_config.fStrafeSensitivity, s_config.fStrafeVertSaturation, s_config.fStrafeVertDeadzone);
 
-        const bool digStrafeLeft  = IsButtonPressed(s_config.digitalStrafeLeftButton);
-        const bool digStrafeRight = IsButtonPressed(s_config.digitalStrafeRightButton);
-        const bool digStrafeUp    = IsButtonPressed(s_config.digitalStrafeUpButton);
-        const bool digStrafeDown  = IsButtonPressed(s_config.digitalStrafeDownButton);
+        const bool digStrafeLeft  = DeviceManager::IsButtonPressed(s_config.digitalStrafeLeftButton);
+        const bool digStrafeRight = DeviceManager::IsButtonPressed(s_config.digitalStrafeRightButton);
+        const bool digStrafeUp    = DeviceManager::IsButtonPressed(s_config.digitalStrafeUpButton);
+        const bool digStrafeDown  = DeviceManager::IsButtonPressed(s_config.digitalStrafeDownButton);
         if (digStrafeLeft)  strafeX -= s_config.digitalStrafeValue;
         if (digStrafeRight) strafeX += s_config.digitalStrafeValue;
         if (digStrafeUp)    strafeY += s_config.digitalStrafeValue;
@@ -1031,15 +1068,15 @@ void ThrottleController::ControlLoop() {
         const float strafeActThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
         const bool strafeLatActive  = std::abs(strafeLatNorm)  > strafeActThreshX || digStrafeLeft || digStrafeRight;
         const bool strafeVertActive = std::abs(strafeVertNorm) > strafeActThreshY || digStrafeUp   || digStrafeDown;
-        ShipOutputSystem::SetOutputHeld(ShipOutputSystem::GetShipButtonOutput("SwitchFlightModes"), OwnerStrafeModifier, strafeLatActive || strafeVertActive);
-
-        s_currentThrottle.store(throttle);
+        ShipOutputSystem::SetOutputHeld(s_flightModeOutput, OwnerStrafeModifier,
+            strafeLatActive || strafeVertActive);
 
         // ---- Aim mode toggle ----
         {
             static bool s_aimModeOverride = false;
             static bool s_toggleAimModePrev = false;
-            bool curToggleAimMode = IsButtonPressed(s_config.toggleAimModeButton);
+            bool curToggleAimMode = DeviceManager::IsButtonPressed(s_config.toggleAimModeButton);
+            if (resetOverlayEdges) s_toggleAimModePrev = curToggleAimMode;
             if (curToggleAimMode && !s_toggleAimModePrev) {
                 s_aimModeOverride = !s_aimModeOverride;
                 RuntimePaths::Log("[Controller]",
@@ -1071,7 +1108,8 @@ void ThrottleController::ControlLoop() {
                 bool btnBound = s_config.turnAssistButton.IsValid()
                     && s_config.turnAssistButton.value > 0
                     && s_config.turnAssistButton.value <= 128;
-                bool btnHeld = btnBound && IsButtonPressed(s_config.turnAssistButton);
+                bool btnHeld = btnBound && DeviceManager::IsButtonPressed(s_config.turnAssistButton);
+                if (resetOverlayEdges) s_prevTurnAssistBtn = btnHeld;
                 if (s_config.iTurnAssistMode == 1) {
                     s_turnAssistRuntimeActive = btnHeld;
                 } else {
@@ -1083,6 +1121,7 @@ void ThrottleController::ControlLoop() {
                 // Mode 0 (Always): active whenever master switch is on
                 s_turnAssistRuntimeActive = assistMasterEnabled;
             }
+            resetOverlayEdges = false;
 
             // ---- SignalHunter / AimController (pilot-gated injection) ----
             // InjectionOnly: while not piloting, park the memory injection but leave
@@ -1093,17 +1132,16 @@ void ThrottleController::ControlLoop() {
             // aim) while its buttons/macros keep working. It rides the config swap, so
             // landing on such a profile parks injection via the same transition path as
             // the pilot gate — no separate release logic. See profile-switching.md.
-            const bool injectionAllowed = s_config.bEnableInjection
+            const bool injectionAllowed = !overlayOpen && s_config.bEnableInjection
                 && ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
             if (injectionAllowed) {
                 injectionWasAllowed = true;
                 int candCount = ThrottleHook::GetCandidateCount();
-                SignalHunter::Tick(candCount, throttle, dt, iter);
-                SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, iter, reverseHeld, suppressClusterForAim,
+                SignalHunter::Tick(candCount, iter);
+                SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, reverseHeld, suppressClusterForAim,
                                      strafeLatActive, strafeVertActive, cruiseOverride, s_cruiseAssistTarget);
                 AimController::Update(s_config, yaw, pitch,
-                    hasSeparateAimInput, hasSeparateAimAxes,
-                    suppressClusterForAim, dt, iter);
+                    hasSeparateAimInput, hasSeparateAimAxes, hasDigitalAimButtons, dt);
             } else if (injectionWasAllowed) {
                 // Transition to parked: stop memory injection, keep SendInput live.
                 SignalHunter::SuspendInjection();
@@ -1150,7 +1188,6 @@ void ThrottleController::Stop() {
 }
 
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }
-float ThrottleController::GetCurrentThrottle() { return s_currentThrottle.load(std::memory_order_relaxed); }
 bool ThrottleController::IsTurnAssistActive() { return s_turnAssistRuntimeActive; }
 
 std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActionBindings() {

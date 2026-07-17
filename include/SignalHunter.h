@@ -15,17 +15,15 @@ namespace SignalHunter {
 
 // Called once per frame while the loop is running.
 // candCount  — number of hook candidates available this frame
-// throttle   — normalised throttle [0,1] (absolute mode) or rate [-1,1] (accum mode)
-// dt         — actual frame delta time in seconds
 // iter       — monotonic loop iteration counter
-void Tick(int candCount, float throttle, float dt, uint64_t iter);
+void Tick(int candCount, uint64_t iter);
 
 // Main injection call — writes throttle and rotation to game memory.
 // All six DOF values are in [-1, +1] normalised range.
 // suppressPitchYaw — when true (HOSAM mode), releases the yaw/pitch cluster
 //                    gates so the game's native mouse pipeline owns steering.
 void Inject(float throttle, float pitch, float yaw, float roll,
-            float strafeX, float strafeY, float dt, uint64_t iter,
+            float strafeX, float strafeY, float dt,
             bool reverseHeld, bool suppressPitchYaw = false,
             bool strafeLatActive = false, bool strafeVertActive = false,
             bool cruiseOverride = false, float cruiseTarget = 0.0f);
@@ -40,10 +38,6 @@ void Disarm();
 void SuspendInjection();
 
 // Re-arm for reacquire (called on activate button or persistent signal loss).
-void ArmForReacquire(const char* reason);
-
-// Query current state
-bool     IsLocked();
-uintptr_t GetActivePtr();
+void ArmForReacquire();
 
 } // namespace SignalHunter

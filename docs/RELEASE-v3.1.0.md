@@ -42,7 +42,7 @@ Two headline features plus the version roll:
 - [x] Wire `ResolveBinding` into `LoadShipButtonBindings` as the middle precedence layer: vanilla default → control-map-derived → explicit `[ShipButtonOutputs]`. Added `[General] bSyncShipOutputsFromControlMap` (default true), the actionId→(context,action) table, path resolution via `FOLDERID_Documents`, and per-action realignment logging. Builds clean via `xmake`.
 - [x] Unpin default `[ShipButtonOutputs]` (commented out) so the control-map layer actually engages — explicit values otherwise win and the feature was inert. Verified the wizard does **not** re-write `[ShipButtonOutputs]` on Save, so the trigger can't re-pin it.
 - [x] Reload trigger decided: **startup + wizard Save** (Save already calls `ReloadConfig` → re-reads the map). No file-watch — bindings are static state; startup is the primary read. Dedicated hotkey is an optional future add.
-- [ ] **In-game verification**: with an INI that has no explicit `sXxxOutput`, rebind a ship primary in Starfield, confirm output follows it + the `[ShipOutput] ControlMap sync:` log lines. (Existing INIs keep explicit outputs — delete the deployed INI to re-seed, or clear the lines.)
+- [x] **In-game verification**: named ship actions follow the player's current Starfield primary bindings when no explicit `sXxxOutput` override is present; reconciliation and fallback behavior are functioning in the current build.
 - [ ] Tests for the precedence layering (fold into the `control_map_reader_test` xmake target).
 - [ ] Release-notes caveat: existing installs keep their explicit `[ShipButtonOutputs]`; document "clear them to enable auto-follow."
 
@@ -59,7 +59,7 @@ Adopted stance: match established best practice (Special K / ReShade / RTSS), do
 ## Phase 4 — Build & verify
 
 - [x] Full plugin build under MSVC `/W4` (via `xmake`, no vcpkg / CommonLibSF toolchain) — `ControlMapReader.cpp` compiles + links into `AbsoluteHOTAS.dll` clean (`xmake -y`). _Re-run after Phases 2–3 land more code._
-- [ ] In-game smoke test: macros (chord + turbo) and ControlMap auto-alignment with a real rebind.
+- [ ] In-game smoke test: macros (chord + turbo). ControlMap auto-alignment is verified separately above.
 - [ ] Fix fallout.
 
 ## Phase 5 — Release mechanics

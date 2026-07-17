@@ -1,7 +1,6 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
-#include <chrono>
 
 // Phase 1: AOB Signature Scan + Mid-Function Trampoline Hook
 // Captures candidate ThrottleInterface base pointers (RDI register) from the engine's
@@ -10,12 +9,8 @@
 class ThrottleHook {
 public:
     static bool Install();
-    static bool IsInstalled();
     static void Uninstall();
-    static uintptr_t GetBasePtr();
     static uintptr_t GetSourceBasePtr();
-    static uintptr_t GetWriterClusterBasePtr();
-    static bool IsActive();
 
     // Get all captured candidate pointers
     static constexpr int MAX_CANDIDATES = 2048;
@@ -25,20 +20,16 @@ public:
 
     // Toggle the discovery hooks (Passive Stability)
     static void SetCaptureEnabled(bool enabled);
-    static bool IsCaptureEnabled();
 
     // Toggle persistent "Surgical Silence" (NOPing game writes)
     static void SetSilenceEnabled(bool enabled);
-    static bool IsSilenceEnabled();
 
     // Per-offset silence for +0x6C (effective throttle).
     // When false, the game's native rotation throttle assist writes through.
     static void SetSilence6CEnabled(bool enabled);
-    static bool IsSilence6CEnabled();
 
     // Engine-timed rotational gates for the validated +58/+60/+64 writer block.
     static void SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled = true, float vertical = 0.0f, bool verticalEnabled = false, bool yawEnabled = true, bool pitchEnabled = true);
-    static void SetManualLaneOverride(uintptr_t offset, float value, bool enabled);
 
     // Drive the aiming reticle via source-object mouse accumulator writes.
     // yaw/pitch are pre-scaled values in [-200.0, +200.0] (mouse accumulator range).

@@ -5,7 +5,7 @@
 // ============================================================================
 // PilotState — the gate's "is the player piloting" signal.
 //
-// WORKING signal: the manual toggle (SetPiloting / Toggle, bound to a config key).
+// WORKING signal: the manual toggle bound to a config key.
 // This is the only validated pilot signal today.
 //
 // DEAD ENDS — automatic pilot detection. Every native signal investigated was
@@ -35,19 +35,11 @@ namespace PilotState {
 // Default TRUE so the gate is transparent until something says otherwise.
 static std::atomic<bool> s_piloting{ true };
 
-bool IsPiloting() {
-    return s_piloting.load(std::memory_order_relaxed);
-}
-
-void SetPiloting(bool piloting) {
-    s_piloting.store(piloting, std::memory_order_relaxed);
-}
-
 void Toggle() {
-    SetPiloting(!s_piloting.load(std::memory_order_relaxed));
+    s_piloting.store(!s_piloting.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }
 
-bool Update(bool autoSource, float /*dt*/, int /*debounceMs*/) {
+bool Update(bool autoSource) {
     // Auto mode is a DEAD END for now (see header): no validated automatic pilot
     // signal exists, so fall back to the manual value — the gate stays safe and
     // transparent. Log once so an Auto config setting has visible, defined behavior.

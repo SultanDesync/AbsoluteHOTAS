@@ -48,11 +48,14 @@ static WizardState s_baseState;
 
 // Save target: empty = base (_Custom.ini); otherwise a managed profile overlay.
 static std::string s_editProfile;
+static std::string s_savedStateSignature;
+
+static std::string StateSignature(const WizardState& state);
+static void MarkStateSaved() { s_savedStateSignature = StateSignature(s_state); }
 
 WizardState& GetState() { return s_state; }
 
 const std::string& GetEditProfile() { return s_editProfile; }
-void SetEditProfile(const std::string& name) { s_editProfile = name; }
 
 namespace {
     struct ProfileRecord {
@@ -232,7 +235,7 @@ namespace {
             s.macros.push_back(std::move(row));
         }
 
-        std::sort(s.macros.begin(), s.macros.end(),
+        std::stable_sort(s.macros.begin(), s.macros.end(),
                   [](const MacroRow& a, const MacroRow& b) { return a.name < b.name; });
     }
 }
@@ -356,39 +359,35 @@ void LoadCurrentBindings() {
     s.toggleAimModeBinding = FormatBindingRef(cfg.toggleAimModeButton, false);
 
     // Calibration data
-    if (s.calibData.empty()) {
-        s.calibData = ThrottleController::GetCalibrationData();
-    }
+    s.calibData = ThrottleController::GetCalibrationData();
 
     // Custom bindings from [ButtonExpansion]
-    if (s.customBindings.empty()) {
-        int count = ShipOutputSystem::GetShipButtonCount();
-        for (int i = 0; i < count; i++) {
-            const auto& b = ShipOutputSystem::GetShipButtonBindings()[i];
-            if (strcmp(b.actionId, "ButtonExpansion") != 0) continue;
-            if (b.buttonRef.value < 1) continue;
+    int count = ShipOutputSystem::GetShipButtonCount();
+    for (int i = 0; i < count; i++) {
+        const auto& b = ShipOutputSystem::GetShipButtonBindings()[i];
+        if (strcmp(b.actionId, "ButtonExpansion") != 0) continue;
+        if (b.buttonRef.value < 1) continue;
 
-            std::string binding;
-            if (!b.buttonRef.deviceName.empty()) {
-                binding = b.buttonRef.deviceName + "@" + std::to_string(b.buttonRef.value);
-            } else if (b.buttonRef.deviceIndex >= 0) {
-                binding = "#" + std::to_string(b.buttonRef.deviceIndex) + "@" + std::to_string(b.buttonRef.value);
-            } else {
-                binding = std::to_string(b.buttonRef.value);
-            }
-
-            std::string output;
-            switch (b.output.kind) {
-                case ShipOutputKind::Keyboard:
-                    { char buf[32]; std::snprintf(buf, sizeof(buf), "key:0x%02X", b.output.code); output = buf; }
-                    break;
-                case ShipOutputKind::Mouse:
-                    { char buf[32]; std::snprintf(buf, sizeof(buf), "mouse:%d", b.output.code); output = buf; }
-                    break;
-                default: output = "none"; break;
-            }
-            s.customBindings.push_back({ binding, output });
+        std::string binding;
+        if (!b.buttonRef.deviceName.empty()) {
+            binding = b.buttonRef.deviceName + "@" + std::to_string(b.buttonRef.value);
+        } else if (b.buttonRef.deviceIndex >= 0) {
+            binding = "#" + std::to_string(b.buttonRef.deviceIndex) + "@" + std::to_string(b.buttonRef.value);
+        } else {
+            binding = std::to_string(b.buttonRef.value);
         }
+
+        std::string output;
+        switch (b.output.kind) {
+            case ShipOutputKind::Keyboard:
+                { char buf[32]; std::snprintf(buf, sizeof(buf), "key:0x%02X", b.output.code); output = buf; }
+                break;
+            case ShipOutputKind::Mouse:
+                { char buf[32]; std::snprintf(buf, sizeof(buf), "mouse:%d", b.output.code); output = buf; }
+                break;
+            default: output = "none"; break;
+        }
+        s.customBindings.push_back({ binding, output });
     }
 
     // Macros come straight from their INI, not from MacroEngine — see WizardDefs.h.
@@ -399,6 +398,7 @@ void LoadCurrentBindings() {
     s_baseState = s;
 
     s.loaded = true;
+    MarkStateSaved();
 }
 
 static std::string IniBinding(const CSimpleIniA& ini, const char* section,
@@ -526,6 +526,7 @@ bool LoadProfileForEditing(const std::string& name, std::string& err) {
     if (name.empty()) {
         s_state = s_baseState;
         s_editProfile.clear();
+        MarkStateSaved();
         return true;
     }
 
@@ -552,6 +553,7 @@ bool LoadProfileForEditing(const std::string& name, std::string& err) {
     effective.loaded = true;
     s_state = std::move(effective);
     s_editProfile = name;
+    MarkStateSaved();
     return true;
 }
 
@@ -690,16 +692,15 @@ static void DeleteMacroSections(CSimpleIniA& ini) {
     for (const auto& section : remove) ini.Delete(section.c_str(), nullptr);
 }
 
-static int SerializeMacros(const WizardState& state, CSimpleIniA& ini) {
+static void SerializeMacros(const WizardState& state, CSimpleIniA& ini) {
     DeleteMacroSections(ini);
-    int runnable = 0;
-    std::vector<std::string> used;
+    std::vector<std::string> usedKeys;
     for (const auto& m : state.macros) {
         const std::string name = SanitizeMacroName(m.name);
-        if (name.empty() || std::find(used.begin(), used.end(), name) != used.end()) continue;
-        used.push_back(name);
-        const std::string section = "Macro:" + name;
+        if (name.empty()) continue;
+        const std::string section = "Macro:" + MakeUniqueMacroKey(name, usedKeys);
         const bool bound = m.buttonBinding != "(unbound)";
+        ini.SetValue(section.c_str(), "sName", name.c_str());
         ini.SetValue(section.c_str(), "iButton", bound ? m.buttonBinding.c_str() : "-1");
         ini.SetBoolValue(section.c_str(), "bTurbo", m.turbo);
         int written = 0;
@@ -716,9 +717,40 @@ static int SerializeMacros(const WizardState& state, CSimpleIniA& ini) {
             value += std::to_string(std::max(0, step.gapMs));
             ini.SetValue(section.c_str(), ("Step" + std::to_string(written++)).c_str(), value.c_str());
         }
-        if (bound && written > 0) ++runnable;
     }
-    return runnable;
+}
+
+static std::string StateSignature(const WizardState& state) {
+    CSimpleIniA ini;
+    ini.SetUnicode(false);
+    SerializeUserOwnedState(state, ini);
+    SerializeMacros(state, ini);
+    std::string signature;
+    ini.Save(signature);
+    // Include editor drafts that intentionally do not yet serialize to runnable
+    // config. This keeps an incomplete row visibly dirty until completed/removed.
+    signature += "\n[EditorDrafts]\n";
+    signature += "symmetrical=" + std::to_string(state.symmetricalThrottleDz) + "\n";
+    for (const auto& row : state.customBindings) {
+        signature += "custom=" + std::to_string(row.buttonBinding.size()) + ":" + row.buttonBinding
+            + ":" + std::to_string(row.output.size()) + ":" + row.output + "\n";
+    }
+    for (const auto& macro : state.macros) {
+        signature += "macro=" + std::to_string(macro.name.size()) + ":" + macro.name
+            + ":" + macro.buttonBinding + ":" + std::to_string(macro.turbo) + "\n";
+        for (const auto& step : macro.steps) {
+            signature += "step=" + std::to_string(step.hold) + ":" + std::to_string(step.amount)
+                + ":" + std::to_string(step.gapMs);
+            for (const auto& target : step.targets)
+                signature += ":" + std::to_string(target.size()) + ":" + target;
+            signature += "\n";
+        }
+    }
+    return signature;
+}
+
+bool HasUnsavedChanges() {
+    return s_state.loaded && StateSignature(s_state) != s_savedStateSignature;
 }
 
 static bool SaveIniAtomically(CSimpleIniA& ini, const std::filesystem::path& path) {
@@ -731,7 +763,7 @@ static bool SaveIniAtomically(CSimpleIniA& ini, const std::filesystem::path& pat
     return true;
 }
 
-void SaveBindingsToINI() {
+static bool SaveBindingsToINI(std::string& err) {
     // Write ONLY the custom file. The main ini is mod-owned and overwrite-safe; a
     // single user key written there reintroduces the update-clobber bug the split
     // exists to prevent. See docs/reference/config-layout.md.
@@ -744,8 +776,9 @@ void SaveBindingsToINI() {
     if (existed) {
         const long version = ini.GetLongValue("Meta", "iConfigVersion", -1);
         if (version < 1 || version > kConfigVersion) {
+            err = "The custom configuration is invalid or from a newer version.";
             WizLog("Refused to overwrite invalid or unsupported custom config: " + iniPath.string());
-            return;
+            return false;
         }
     }
 
@@ -756,14 +789,17 @@ void SaveBindingsToINI() {
     ini.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
 
     if (!SaveIniAtomically(ini, iniPath)) {
+        err = "Could not write the custom configuration.";
         WizLog("Could not write custom config atomically: " + iniPath.string());
-        return;
+        return false;
     }
 
     WizLog("INI saved. Reloading config...");
 
     ThrottleController::ReloadConfig();
     WizLog("Config reload requested.");
+    MarkStateSaved();
+    return true;
 }
 
 // Write a switch profile as a SPARSE overlay: only the keys whose effective value
@@ -778,7 +814,7 @@ void SaveBindingsToINI() {
 // therefore requires loading its overrides into s_state first (effective-load, lands
 // with override rendering). Creating a fresh empty overlay is safe today: s_state is
 // base + this session's edits, and the file starts empty.
-void SaveProfileOverlay(const std::string& name) {
+static bool SaveProfileOverlay(const std::string& name, std::string& err) {
     CSimpleIniA effIni, baseIni;
     effIni.SetUnicode(false);
     baseIni.SetUnicode(false);
@@ -798,8 +834,9 @@ void SaveProfileOverlay(const std::string& name) {
         path = record.path;
     }
     if (path.empty()) {
+        err = "The maximum of 16 profiles has been reached.";
         WizLog("Could not allocate a profile record (maximum 16). ");
-        return;
+        return false;
     }
     CSimpleIniA prof;
     prof.SetUnicode(false);
@@ -816,12 +853,14 @@ void SaveProfileOverlay(const std::string& name) {
         prof.SetLongValue("Profile", "iSequence", sequence);
         prof.SetLongValue("Profile", "iConfigVersion", kConfigVersion);
         if (!SaveIniAtomically(prof, path)) {
+            err = "Could not write the independent profile.";
             WizLog("Could not write full profile: " + path.string());
-            return;
+            return false;
         }
         WizLog("Saved independent profile '" + name + "' -> " + path.string());
         ThrottleController::ReloadConfig();
-        return;
+        MarkStateSaved();
+        return true;
     }
 
     const int overrides = ProfileOverlay::ComputeDiff(effIni, baseIni, prof);
@@ -833,83 +872,33 @@ void SaveProfileOverlay(const std::string& name) {
     prof.SetLongValue("Profile", "iConfigVersion", kConfigVersion);
 
     if (!SaveIniAtomically(prof, path)) {
+        err = "Could not write the profile overlay.";
         WizLog("Could not write profile overlay: " + path.string());
-        return;
+        return false;
     }
     WizLog("Saved overlay '" + name + "' (" + std::to_string(overrides) + " override(s)) -> " + path.string());
     ThrottleController::ReloadConfig();
+    MarkStateSaved();
+    return true;
 }
 
 // Route Save to whichever profile is the current edit target.
-void SaveActiveProfile() {
-    if (s_editProfile.empty()) SaveBindingsToINI();     // base -> _Custom.ini
-    else                       SaveProfileOverlay(s_editProfile);
-}
-
-void SaveMacrosToINI() {
-    const auto path = RuntimePaths::CustomIniPath();
-
-    // Full rewrite from the editor rows. The file holds nothing but [Macro:*], so
-    // there is no foreign state to preserve — deliberately do NOT LoadFile first,
-    // or deleted macros would linger.
-    CSimpleIniA ini;
-    ini.SetUnicode(false);
-    const bool existed = ini.LoadFile(path.string().c_str()) == SI_OK;
-    if (existed) {
-        const long version = ini.GetLongValue("Meta", "iConfigVersion", -1);
-        if (version < 1 || version > kConfigVersion) {
-            WizLog("Refused to overwrite invalid or unsupported custom config: " + path.string());
-            return;
+bool SaveActiveProfile(std::string& err) {
+    err.clear();
+    for (const auto& row : s_state.customBindings) {
+        if (row.buttonBinding == "(unbound)" || row.output == "none" || row.output.empty()) {
+            err = "Complete or remove every custom key-binding row before saving.";
+            return false;
         }
     }
-    DeleteMacroSections(ini);
-
-    // A half-built macro (no trigger button yet, no steps yet) is still the user's
-    // work, and MacroEngine already ignores such macros at load with a warning. So
-    // persist them rather than dropping them — otherwise the wizard, which reloads
-    // from this file after every Save, would make them vanish as the user typed.
-    int saved = 0;
-    std::vector<std::string> usedKeys;
-    for (const auto& m : s_state.macros) {
-        const std::string sName = SanitizeMacroName(m.name);
-        if (sName.empty()) continue;  // no display name = nothing to show; wizard flags it
-
-        // The section key is generated (slug + collision index), NOT the display name,
-        // so two macros sharing a friendly name get distinct sections instead of
-        // merging. The friendly name rides along as sName.
-        const std::string section = "Macro:" + MakeUniqueMacroKey(sName, usedKeys);
-        ini.SetValue(section.c_str(), "sName", sName.c_str());
-        const bool bound = (m.buttonBinding != "(unbound)");
-        ini.SetValue(section.c_str(), "iButton", bound ? m.buttonBinding.c_str() : "-1");
-        ini.SetBoolValue(section.c_str(), "bTurbo", m.turbo);
-
-        // Step keys must be contiguous Step0..StepN — the engine stops at the first
-        // gap — so index by what we actually write, not by the row's position.
-        int written = 0;
-        for (const auto& step : m.steps) {
-            if (step.targets.empty()) continue;
-
-            std::string value;
-            for (size_t t = 0; t < step.targets.size(); ++t) {
-                if (t) value += '+';
-                value += step.targets[t];
-            }
-            value += step.hold ? " hold " : " tap ";
-            value += std::to_string(std::max(0, step.amount));
-            value += ' ';
-            value += std::to_string(std::max(0, step.gapMs));
-
-            ini.SetValue(section.c_str(), ("Step" + std::to_string(written)).c_str(), value.c_str());
-            ++written;
+    for (const auto& macro : s_state.macros) {
+        if (SanitizeMacroName(macro.name).empty()) {
+            err = "Name or remove every macro before saving.";
+            return false;
         }
-        if (bound && written > 0) ++saved;  // count only the ones that will actually run
     }
-
-    ini.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
-    if (!SaveIniAtomically(ini, path))
-        WizLog("Could not write macros into custom config: " + path.string());
-    else
-        WizLog("Saved macros (" + std::to_string(saved) + " runnable) -> " + path.string());
+    if (s_editProfile.empty()) return SaveBindingsToINI(err);     // base -> _Custom.ini
+    return SaveProfileOverlay(s_editProfile, err);
 }
 
 // --- Profiles ---
@@ -947,12 +936,6 @@ namespace {
     }
 }
 
-std::vector<std::string> ListProfiles() {
-    std::vector<std::string> out;
-    for (const auto& record : ReadProfileRecords()) out.push_back(record.name);
-    return out;
-}
-
 std::vector<ProfileSummary> ListProfileSummaries() {
     std::vector<ProfileSummary> out;
     CSimpleIniA custom;
@@ -968,6 +951,10 @@ std::vector<ProfileSummary> ListProfileSummaries() {
         profile.SetUnicode(false);
         profile.LoadFile(record.path.string().c_str());
         summary.kind = profile.GetValue("Profile", "sKind", "overlay");
+        const char* keyboardShortcut = profile.GetValue("Profile", "sKeyboardShortcut", "-1");
+        summary.keyboardShortcut = (!keyboardShortcut || !*keyboardShortcut
+            || std::strcmp(keyboardShortcut, "-1") == 0)
+            ? "(unbound)" : keyboardShortcut;
 
         for (int slot = 1; slot <= 16; ++slot) {
             const std::string prefix = "Slot" + std::to_string(slot);
@@ -1015,12 +1002,38 @@ bool EnsureStarterProfiles(std::string& err) {
         if (!SaveIniAtomically(fps, path)) { err = "Could not initialize FPS profile."; return false; }
     }
     if (FindProfilePath("Flight Aux").empty() && !CreateOverlayProfile("Flight Aux", err)) return false;
+
+    auto EnsureKeyboardShortcut = [&](const char* name, const char* shortcut) {
+        const auto path = FindProfilePath(name);
+        CSimpleIniA profile;
+        profile.SetUnicode(false);
+        if (path.empty() || profile.LoadFile(path.string().c_str()) != SI_OK) {
+            err = std::string("Could not open the ") + name + " starter profile.";
+            return false;
+        }
+        if (profile.GetValue("Profile", "sKeyboardShortcut", nullptr)) return true;
+        profile.SetValue("Profile", "sKeyboardShortcut", shortcut);
+        if (!SaveIniAtomically(profile, path)) {
+            err = std::string("Could not initialize the ") + name + " keyboard shortcut.";
+            return false;
+        }
+        return true;
+    };
+    if (!EnsureKeyboardShortcut("FPS", "key:0x11+0x31")) return false;
+    if (!EnsureKeyboardShortcut("Flight Aux", "key:0x11+0x32")) return false;
+
     for (const auto& profile : ListProfileSummaries()) {
-        if (profile.slot != 0) continue;
-        // Ctrl+1 / Ctrl+2, not F-keys: F5/F9 are quicksave/quickload and the F-row is
-        // otherwise game-claimed. A Ctrl+digit chord is collision-safe out of the box.
-        if (profile.name == "FPS" && !SetProfileActivation("FPS", "key:0x11+0x31", "toggle", err)) return false;
-        if (profile.name == "Flight Aux" && !SetProfileActivation("Flight Aux", "key:0x11+0x32", "toggle", err)) return false;
+        const char* oldDefault = profile.name == "FPS" ? "key:0x11+0x31"
+            : profile.name == "Flight Aux" ? "key:0x11+0x32" : nullptr;
+        if (!oldDefault) continue;
+        // The keyboard shortcut lives in the profile file and remains active
+        // independently of the optional controller/custom activation below. Move
+        // legacy starter installs out of SlotNButton without disturbing a binding
+        // the user has already replaced.
+        if (profile.slot == 0 || _stricmp(profile.trigger.c_str(), oldDefault) == 0) {
+            const std::string mode = profile.slot == 0 ? "toggle" : profile.mode;
+            if (!SetProfileActivation(profile.name, "(unbound)", mode, err)) return false;
+        }
     }
     return true;
 }
@@ -1252,11 +1265,44 @@ bool ImportProfile(const std::string& name, std::string& err) {
 std::string FormatBindingDisplay(const std::string& binding) {
     if (binding == "(unbound)") return binding;
     if (binding.rfind("key:", 0) == 0) {
-        const int vk = (int)std::strtol(binding.c_str() + 4, nullptr, 0);
-        char keyName[64]{};
-        const UINT scan = MapVirtualKeyA((UINT)vk, MAPVK_VK_TO_VSC);
-        if (scan && GetKeyNameTextA((LONG)(scan << 16), keyName, (int)std::size(keyName)) > 0)
-            return keyName;
+        bool ctrl = false, shift = false, alt = false;
+        std::vector<std::string> keys;
+        const char* cursor = binding.c_str() + 4;
+        while (*cursor) {
+            char* end = nullptr;
+            const int vk = (int)std::strtol(cursor, &end, 0);
+            if (end == cursor) break;
+            if (vk == VK_CONTROL) ctrl = true;
+            else if (vk == VK_SHIFT) shift = true;
+            else if (vk == VK_MENU) alt = true;
+            else {
+                char keyName[64]{};
+                const UINT scan = MapVirtualKeyA((UINT)vk, MAPVK_VK_TO_VSC);
+                if (scan && GetKeyNameTextA((LONG)(scan << 16), keyName,
+                                            (int)std::size(keyName)) > 0)
+                    keys.emplace_back(keyName);
+                else {
+                    char fallback[16]{};
+                    std::snprintf(fallback, sizeof(fallback), "0x%02X", vk);
+                    keys.emplace_back(fallback);
+                }
+            }
+            cursor = end;
+            while (*cursor == '+' || *cursor == ' ') ++cursor;
+        }
+        std::vector<std::string> parts;
+        if (ctrl) parts.emplace_back("Ctrl");
+        if (shift) parts.emplace_back("Shift");
+        if (alt) parts.emplace_back("Alt");
+        parts.insert(parts.end(), keys.begin(), keys.end());
+        if (!parts.empty()) {
+            std::string display;
+            for (const auto& part : parts) {
+                if (!display.empty()) display += "+";
+                display += part;
+            }
+            return display;
+        }
     }
     auto atPos = binding.rfind('@');
     std::string numPart = (atPos != std::string::npos) ? binding.substr(atPos + 1) : binding;

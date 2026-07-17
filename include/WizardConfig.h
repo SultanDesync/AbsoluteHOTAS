@@ -96,6 +96,7 @@ struct ProfileSummary {
     std::string kind;
     std::string filename;
     std::string trigger = "(unbound)";
+    std::string keyboardShortcut = "(unbound)";
     std::string mode = "momentary";
     int sequence = 0;
     int slot = 0;
@@ -107,29 +108,19 @@ WizardState& GetState();
 void LoadCurrentBindings();
 bool LoadProfileForEditing(const std::string& name, std::string& err);
 
-// Save all wizard state and macros to AbsoluteHOTAS_Custom.ini and reload.
-void SaveBindingsToINI();
-
 // --- Profile edit target ---
 // Which config the wizard's Save writes to: "" = base (_Custom.ini, full save);
 // otherwise a Profiles/<name> sparse overlay. The dropdown in the profiles header
 // sets this; the Save button routes through SaveActiveProfile.
 const std::string& GetEditProfile();
-void SetEditProfile(const std::string& name);
 
 // Save to the current edit target: base -> full _Custom.ini; a profile -> a sparse
 // overlay of only the keys that differ from base. See docs/reference/profile-switching.md.
-void SaveActiveProfile();
-void SaveProfileOverlay(const std::string& name);
+bool SaveActiveProfile(std::string& err);
 
-// Replace the [Macro:*] sections in AbsoluteHOTAS_Custom.ini while preserving all
-// other custom settings.
-//
-// Half-built macros (no trigger button, no steps) ARE written: MacroEngine ignores
-// them at load, and dropping them would delete work-in-progress out from under the
-// editor, which reloads from this file after each Save. Only unnamed macros and
-// duplicate names are skipped, since neither can be an INI section.
-void SaveMacrosToINI();
+// Compare the editable working copy with the last successfully loaded or saved
+// snapshot. Runtime-only calibration gestures are excluded by serialization.
+bool HasUnsavedChanges();
 
 // Format a binding string for display, annotating POV virtual buttons.
 std::string FormatBindingDisplay(const std::string& binding);
@@ -137,9 +128,7 @@ std::string FormatBindingDisplay(const std::string& binding);
 // --- Profiles (Export/Import) ---
 // A profile is one INI payload plus a [Profile] header.
 
-// Names of exportable profiles in ProfilesDir() (stems, no extension). Hides the
-// underscore-prefixed auto-backups so the import list stays the user's own saves.
-std::vector<std::string> ListProfiles();
+// Managed profiles in display order, including activation metadata.
 std::vector<ProfileSummary> ListProfileSummaries();
 
 // Create the two optional starter overlays. Flight is the base and has no file;

@@ -19,4 +19,9 @@ namespace UIHook {
     // Users register a draw callback via SetDrawCallback.
     using DrawCallback = void(*)();
     void SetDrawCallback(DrawCallback cb);
+
+    // Called before an ordinary toggle request closes the overlay. Returning
+    // false keeps it open so the client can present a save/discard decision.
+    using CloseGuardCallback = bool(*)();
+    void SetCloseGuardCallback(CloseGuardCallback cb);
 }
