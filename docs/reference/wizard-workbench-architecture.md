@@ -130,6 +130,41 @@ Presentation
 Pages render the session and request actions. They do not write files, reload
 configuration, or manage global navigation independently.
 
+## Presentation module map
+
+The implementation mirrors those presentation layers:
+
+- `BindingWizard.cpp` owns the window shell, navigation, page host, footer,
+  capture/close modals, and top-level route dispatch;
+- `WizardUICommon.cpp` owns shared binding-row presentation and workbench UI
+  logging;
+- `WizardFlightAxesPage.cpp`, `WizardTunePages.cpp`,
+  `WizardBindingsPage.cpp`, and `WizardAdvancedPages.cpp` own cohesive page
+  families;
+- `WizardProfileUI.cpp` owns profile context, profile-management presentation,
+  and the legacy capture-slot commit adapter; and
+- `WizardUI.h` is the internal presentation boundary consumed by the shell.
+
+Page-local helpers remain private to their translation unit. Cross-page
+workflow state belongs in `WizardSession`, not in presentation modules.
+
+## Configuration module map
+
+The wizard configuration implementation keeps its existing public
+`WizardConfig` API while separating storage and repository concerns:
+
+- `WizardConfig.cpp` owns the editable/base drafts, saved snapshot, runtime
+  loading, profile-load orchestration, dirty detection, and save routing;
+- `WizardConfigCodec.cpp` owns INI decoding/encoding, macro rows, collections,
+  and deterministic state signatures;
+- `WizardProfiles.cpp` owns atomic persistence, sparse overlays, activation
+  slots, starter profiles, import/export, backup, and reset operations;
+- `WizardBindingDisplay.cpp` owns user-facing binding labels; and
+- `WizardConfigInternal.h` is the private collaboration boundary between those
+  implementation modules.
+
+Only `WizardConfig.h` is consumed outside this configuration subsystem.
+
 ## Hierarchy of complexity
 
 The persistent shell shows the editing profile, dirty state, game-context
@@ -148,6 +183,7 @@ Color reinforces meaning but is never its only carrier.
 ## Acceptance criteria
 
 - Exactly one main vertical scrollbar exists.
+- Primary task tabs are visually distinct from their labeled subordinate routes.
 - Context and footer remain visible at 720p and supported DPI scales.
 - Every workflow is completable without a mouse.
 - Opening the workbench parks every plugin-owned gameplay output.
