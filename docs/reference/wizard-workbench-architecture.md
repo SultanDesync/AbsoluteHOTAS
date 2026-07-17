@@ -165,6 +165,24 @@ The wizard configuration implementation keeps its existing public
 
 Only `WizardConfig.h` is consumed outside this configuration subsystem.
 
+## Overlay host module map
+
+The platform overlay keeps its existing public `UIHook` API while separating
+the renderer-sensitive implementation:
+
+- `UIHook.cpp` owns private state definitions and the public install, shutdown,
+  toggle, visibility, and callback lifecycle;
+- `UIHookSwapChain.cpp` owns vtable discovery, prior-hook diagnostics,
+  per-instance hooks, command-queue association, and DXGI/D3D12 interception;
+- `UIHookRenderer.cpp` owns ImGui/D3D12 initialization, render targets, frame
+  submission, resize handling, teardown, and exception recovery;
+- `UIHookInput.cpp` owns the window procedure, hotkey message, input capture,
+  and cursor restoration; and
+- `UIHookInternal.h` is the private state and calling-convention contract shared
+  by those implementation modules.
+
+Only `UIHook.h` is consumed outside the overlay-host subsystem.
+
 ## Hierarchy of complexity
 
 The persistent shell shows the editing profile, dirty state, game-context
