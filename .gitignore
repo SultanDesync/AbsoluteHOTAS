@@ -2,6 +2,7 @@ build/
 *ReSharper*
 .vs
 .idea
+.claude/
 contrib/Plugin*
 .xmake/
 CMakeCache.txt

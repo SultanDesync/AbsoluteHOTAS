@@ -370,7 +370,7 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
         const char* val = (s.turnAssistBinding != "(unbound)") ? s.turnAssistBinding.c_str() : "-1";
         ini.SetValue("DualStick", "iTurnAssistButton", val);
     }
-    // Relocated from [Injection] in 3.1 (see LoadConfig alias read).
+    // Relocated from [Injection] in 4.0 (see LoadConfig alias read).
     ini.SetBoolValue("DualStick", "bHoldForBoost", s.holdForBoost);
 
     // HOSAM

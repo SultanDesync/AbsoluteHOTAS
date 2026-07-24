@@ -1,6 +1,7 @@
 # Profile Switching (design)
 
-Status: **engine and wizard workflow implemented** (3.1-beta), in-game-unverified.
+Status: **engine and wizard workflow implemented** (4.0.0-beta), in-game-verified in
+representative workflows and open to broader public beta validation.
 The wizard clearly identifies the profile being edited, protects dirty edits during
 target changes, and exposes slot activation controls. Supersedes the shift-layer design
 this file previously held. A profile slot binds a physical button to a whole

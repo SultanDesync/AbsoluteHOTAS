@@ -1,12 +1,32 @@
-# AbsoluteHOTAS v3.1.0-beta
+# AbsoluteHOTAS v4.0.0-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
+## Release Status
+
+**4.0.0-beta is the opt-in feature track.** It has passed representative testing
+for core flight controls, configuration saving, profiles, macros, parking, and safe
+output release, but the full range of hardware and mod combinations cannot be
+exhaustively tested by one maintainer.
+
+Version **3.0.2-beta remains available as the established fallback** while 4.0 gains
+broader real-world use. Choose 4.0 for the new configuration workbench, runtime
+profiles, macros, and update-safe settings. Stay on 3.0.2 if you prefer the smaller
+established feature set and do not need those additions.
+
+Beta reports are welcome, with priority given to crashes, configuration loss,
+stuck inputs, and regressions in core flight controls. See
+[Reporting a 4.0 beta issue](#reporting-a-40-beta-issue) for the information that
+makes a report actionable.
+
 ## Changelog
-### v3.1.0-beta (in development)
-- **Update-Safe Config:** Your bindings, calibration, tuning, macros, and profile routing live in `AbsoluteHOTAS_Custom.ini`, separate from the shipped `AbsoluteHOTAS.ini`. Updates replace only the DLL and default INI. Version 3.1 is a fresh configuration baseline; pre-3.1 settings are not imported automatically.
-- **Profiles:** Export your whole setup to a named profile and import it back from the binding wizard. Profiles are plain INI files under `Profiles/`, so they can be backed up or shared. Importing auto-backs up your current setup first.
-- **Macros:** A macro engine that plays an ordered key sequence — chords, taps, holds, and turbo repeat — from a single button press. Configured via `[Macro:*]` sections in `AbsoluteHOTAS_Custom.ini`; a wizard tab is in development.
+
+### v4.0.0-beta
+
+- **New Configuration Baseline:** Your bindings, calibration, tuning, macros, and profile routing live in `AbsoluteHOTAS_Custom.ini`, separate from the shipped `AbsoluteHOTAS.ini`. Updates replace only the DLL and default INI. Version 4.0 does not import pre-4.0 settings automatically; rebuild them through the wizard, then use profiles for future portability.
+- **Hot-Swappable Profiles:** Build sparse input layers that inherit from Main Controls, assign them to runtime slots, and switch control schemes without restarting. Full setups can also be exported, backed up, shared, and safely imported through the wizard.
+- **Macro Builder:** Build ordered key sequences—including chords, taps, holds, and turbo repeat—and bind them to controller buttons from the wizard.
+- **Rebuilt Configuration Workbench:** Common setup stays prominent while calibration, response tuning, and advanced controls remain available through progressively disclosed specialist pages.
 - **Opt-In Logging:** Diagnostics are off by default (`bEnableLog`). A normal run writes no log file at all.
 
 ### v3.0.2-beta
@@ -47,7 +67,9 @@ At load time, the plugin scans the engine's Setting system by name to plant a di
 
 If a Starfield update breaks detection before a plugin update is available, enable Signal Hunter fallback mode:
 
-1. In `AbsoluteHOTAS.ini`, set `bSignalHunterFallback = true` under `[Injection]`.
+1. Set `bSignalHunterFallback = true` under `[Injection]` in
+   `AbsoluteHOTAS_Custom.ini`, or in the shipped `AbsoluteHOTAS.ini` before the
+   first wizard save.
 2. Add the following to `Documents\My Games\Starfield\StarfieldCustom.ini`:
 
 ```ini
@@ -60,23 +82,25 @@ fThrottleAtEngineStart = 0.0314
 ## Key Features
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
+* **Hot-Swappable Profiles** — Switch complete input layers during play, including bindings, axes, tuning, aim modes, and macros. Profiles support toggle, momentary, and selector-style activation.
+* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named ship actions follow your current Starfield keybinds.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
 * **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay, then use the first **Wizard access** section to bind a preferred controller button for one-touch access. Bind axes and buttons by moving/pressing them on your hardware in real-time.
-* **Frame Generation Support** — Fully compatible with Starfield's built-in Frame Generation (FSR3 Frame Gen). The overlay automatically handles swap chain resizing and reinitializes seamlessly when toggled in-game.
+* **Frame Generation Support** — Supports Starfield's built-in FSR3 Frame Generation and reinitializes the overlay when the swap chain changes. Compatibility with third-party overlays, capture tools, and graphics injectors is best effort.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
 * **22 Ship Action Bindings** — Map physical buttons to flight functions (boost, weapons, power management, scanner, target selection, etc.).
 * **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
 * **Button-based axes** — Use hat switches or buttons for roll, strafe, and reverse when analog axes are limited.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
-* **Mouse Cursor Support** — The overlay captures input and renders a cursor; the game pauses input processing while the wizard is open.
+* **Safe Workbench Session** — Plugin-owned flight injection, synthetic outputs, macros, and profile switching are parked while the wizard is open. Open it from the main or pause menu for mouse interaction; keyboard navigation remains available during gameplay.
 * **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
 * **Silent by default** — No log file is written at all unless you opt in with `bEnableLog = true` in the INI. When enabled it logs device enumeration, hook installation, and errors/crashes — no runtime spam.
 
 ## Requirements
 
-- Starfield 1.16.242 or later
+- Starfield 1.16.242 or 1.16.244
 - SFSE 0.2.20 or later
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
@@ -87,38 +111,161 @@ Data\SFSE\Plugins\
 
 Or install via your mod manager using the provided archive.
 
+## Upgrading from 3.x
+
+Version 4.0 is a fresh configuration baseline. Do **not** copy a 3.x
+`AbsoluteHOTAS.ini` into this release or attempt to import it as a 4.0 profile.
+Back it up for reference, install both new files, and rebuild the setup through the
+wizard. After the first save, user-owned settings live in
+`AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
+INI. Use full profile exports for backup, sharing, and migration going forward.
+
 ## Quick Start
 
 1. Install the plugin files.
 2. Launch the game via SFSE.
-3. Press `Ctrl+Alt+B` to open the binding wizard (it is recommended to do this from the main menu or pause menu rather than while active in the pilot seat).
-4. Go to the **Axes & Settings** tab, click **Bind** next to each axis, and move the physical control.
-5. Go to the **Ship Actions** tab and bind buttons to ship functions (boost, weapons, power, etc.).
-6. Click **Save & Apply**. Bindings take effect immediately.
+3. Open the Starfield main or pause menu, then press `Ctrl+Alt+B`.
+4. Under **Bind Controls → Flight Axes**, bind each axis by moving the desired physical control. The first **Wizard access** section also lets you replace the default three-key shortcut with a controller button.
+5. Under **Bind Controls → Ship Buttons**, bind the ship actions you want on your hardware.
+6. Click **Save & Close**. Bindings take effect without restarting.
 
 `Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
 
 ## In-Game Binding Wizard
 
-Press `Ctrl+Alt+B` to toggle the overlay (it is recommended to access the wizard from the main menu or pause menu to avoid active control conflicts, though it can also be toggled from a HOTAS button bound via the **Toggle Wizard** slot in Control Buttons). The wizard has seven tabs:
+Press `Ctrl+Alt+B` to toggle the workbench. Use the Starfield main or pause menu for full mouse interaction. If opened during active gameplay, Starfield keeps the mouse locked for camera control; the wizard displays a warning and remains usable with `Tab`, arrow keys, `Enter`, and other standard keyboard-navigation keys.
 
-| Tab | Purpose |
-|-----|---------|
-| **Devices** | Live readout of all connected DirectInput devices, axes, and buttons. Per-axis calibration. |
-| **Axes & Settings** | Bind flight axes (throttle, pitch, yaw, roll, strafe, reverse) with inversion and sensitivity controls. |
-| **Control Buttons** | Bind activate/stop/toggle-wizard buttons for the plugin's signal hunter. |
-| **Ship Actions** | Bind physical buttons to 22 ship functions (boost, weapons, power management, scanner, etc.). |
-| **Digital Axes** | Bind buttons to emulate axis input for roll, strafe, and reverse. |
-| **Aiming** | Bind separate aim axes or digital buttons to drive the ship reticle independently from steering. |
-| **Custom Bindings** | Free-form button → keyboard/mouse output mapping. Menu Cluster preset for WASD/Tab/E/Esc. |
+The workbench uses three top-level task groups with visibly subordinate pages:
+
+| Group | Pages | Purpose |
+|-----|---------|---------|
+| **Bind Controls** | Flight Axes, Ship Buttons | The normal setup path: wizard access, flight axes, reverse strategy, digital axes, named ship actions, and custom keyboard/mouse outputs. |
+| **Tune** | Flight Axes, Aiming & Combat, Gamepad Throttle | Optional response curves, deadzones, saturation, throttle zones, HOSAM/HOSAS behavior, independent aiming, and pilot assists. |
+| **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation controls, device inspection, calibration, reassignment, and profile management. |
+
+The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
+
+## Profiles and Runtime Input Layers
+
+Profiles are alternate control setups that can be activated without restarting the
+game. They are useful when a change involves more than giving one button a second
+meaning: a profile can change bindings, axes, sensitivity, throttle behavior, aim
+mode, custom outputs, macros, and whether flight-axis injection is active.
+
+Examples include:
+
+- a precision profile with softer pitch and yaw response;
+- a combat profile with different trigger mappings and macros;
+- a cruise profile with fixed-speed controls instead of a physical throttle;
+- an on-foot profile that parks flight axes but retains useful buttons and macros;
+- separate profiles for different connected hardware.
+
+### Main Controls, inheritance, and overrides
+
+**Main Controls** is the base setup. A normal profile is a sparse overlay: it
+inherits every setting from Main Controls and stores only the values that differ.
+Changing an inherited binding later in Main Controls therefore updates the profile
+too. A profile becomes independent only where it has an explicit override.
+
+Only one profile is active at a time. Runtime profiles do not stack or merge with
+one another, although temporary activation returns to the selector position or base
+setup that was active beforehand.
+
+### Creating and editing a profile
+
+1. Open **Advanced** and expand **Profile activation and management**.
+2. Create an overlay, or initialize the optional **FPS** and **Flight Aux** starters.
+3. Select the profile from **Editing profile** in the fixed workbench header.
+4. Change any controls or tuning that should differ from Main Controls.
+5. Click **Save & Apply** to keep working or **Save & Close** to finish.
+
+The selected profile is the destination of every workbench edit. Unsaved-change
+guards prevent silently switching the editing target and losing the current draft.
+
+### Activating profiles during play
+
+Each profile can use a keyboard shortcut and may also be assigned a controller
+trigger. Choose the activation behavior that matches the physical control:
+
+| Mode | Intended control | Behavior |
+|---|---|---|
+| **Momentary** | Push button or shift paddle | Active while held; releasing returns to the previously active selection. |
+| **Toggle** | Push button | First press activates the profile; the next returns to the base selection. |
+| **Selector** | Maintained rotary/detent position | Active while that position's button is held. It synchronizes at startup and after closing the workbench. |
+
+A break-before-make selector keeps the last valid position while moving between
+detents instead of briefly falling back to Main Controls. Up to 16 runtime slots are
+available, and swaps are preloaded so activation does not read from disk during play.
+
+### Parking flight controls versus stopping the plugin
+
+Turning off **Axis injection enabled** under **Bind Controls → Flight Axes** creates
+a parked profile. Pitch, yaw, roll, throttle, strafe, and aim injection stop, while
+that profile's button outputs and macros remain available. This is intended for an
+on-foot or menu position on a hardware selector.
+
+The master stop control is different: it releases flight injection, synthetic
+buttons, and macros together. Use it as the global panic or troubleshooting control.
+
+| State | Flight axes | Buttons and macros |
+|---|---:|---:|
+| Normal profile | Active | Active |
+| Parked profile | Off | Active |
+| Master stop | Off | Off |
+
+### Export, import, and backup
+
+**Export base setup** creates an independent full profile suitable for backup or
+sharing. Importing a full profile replaces Main Controls and automatically backs up
+the current base first. Sparse runtime overlays are not imported as a new base
+because they depend on the Main Controls from which they inherit.
+
+## Macro Builder
+
+Open **Advanced → Macros** and choose **Add Macro**, or start with the
+**Grav → Shields** example. A macro maps one controller button to an ordered list of
+steps:
+
+- **Tap** presses and releases an output for the configured duration.
+- **Hold** keeps an output down for the configured duration.
+- **Repeat** runs the step multiple times.
+- **Chord** places multiple targets in one step so they are pressed together.
+- **Gap** controls the delay before the next step.
+- **Turbo** repeats the complete macro while its trigger remains held.
+
+Targets may be named Starfield ship actions such as `NextSystem`, or explicit
+keyboard and mouse outputs. Named actions follow the current Starfield ControlMap,
+so an in-game rebind also changes what the macro emits.
+
+Macros are fire-and-forget after their trigger press unless turbo is enabled. They
+are cancelled and all held outputs are released when the plugin is stopped, the
+workbench opens, configuration reloads, or the active profile changes. Macros belong
+to the profile being edited; save that profile to apply them.
+
+Begin with short, visible sequences. Starfield must observe a release between
+repeated inputs, so reducing tap or gap timing too aggressively can cause the game
+to miss actions even though the macro executed.
 
 ## Frame Generation Support
 
-Frame Generation (FSR3 Frame Gen) is fully supported. Enabling or disabling Frame Generation in-game causes the overlay to reinitialize automatically. The overlay will be available again within one or two frames of the next `Ctrl+Alt+B` press. FSR3 upscaling (without frame gen) is unaffected and has always worked normally.
+Starfield's built-in FSR3 Frame Generation is supported. Enabling or disabling it
+in-game causes the overlay to discard its old swap-chain state and initialize again
+the next time it is opened. FSR3 upscaling without frame generation is unaffected.
+
+Third-party overlays, recording tools, frame-generation mods, and graphics injectors
+may hook the same DirectX entry points. AbsoluteHOTAS detects several common hook
+conflicts and records them when logging is enabled, but compatibility with every
+injector combination is best effort. If the cursor appears without the workbench—or
+the workbench does not appear at all—test once without other graphics injectors
+before filing a report.
 
 ## Manual Configuration
 
-You can also edit `AbsoluteHOTAS.ini` directly. Axes use HID Usage ID syntax with optional device name prefix:
+The wizard is the supported editor. Save once to create the user-owned
+`AbsoluteHOTAS_Custom.ini`, then edit that file if manual configuration is needed.
+Do not place personal bindings or tuning in the shipped `AbsoluteHOTAS.ini`; it is
+the mod-owned defaults file and is replaced during updates. Axes use HID Usage ID
+syntax with an optional device-name prefix:
 
 ```ini
 [Hardware]
@@ -141,7 +288,7 @@ Device names are matched case-insensitively against DirectInput instance or prod
 
 ### Finding Device Names and IDs
 
-The wizard's **Devices** tab is the easy way to read these off. If you can't use the overlay (it won't open on your system, or you prefer hand-editing), discover them two other ways:
+The wizard's **Advanced → Devices** page is the easy way to read these off. If you can't use the overlay (it won't open on your system, or you prefer hand-editing), discover them two other ways:
 
 - **Windows joystick panel** — press `Win+R`, run `joy.cpl`, select your device, and click **Properties**. Move an axis to see which one responds (X/Y/Z/…) and press a button to see which number lights up. Hat/POV directions usually appear as **high button numbers** (often around 129–132).
 - **The plugin log** — `AbsoluteHOTAS.log` (next to the plugin DLL) prints an `[DeviceManager] === Attached HID Devices ===` block at startup, listing every device's exact name and its axis/button counts.
@@ -187,7 +334,7 @@ Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
 
 ### Manual INI Configuration
 
-While the Binding Wizard is highly recommended for visual tuning, you can also manually configure the zones in `AbsoluteHOTAS.ini`:
+While the Binding Wizard is highly recommended for visual tuning, you can also manually configure the zones in `AbsoluteHOTAS_Custom.ini` after the wizard has created it:
 
 ```ini
 [Normalization]
@@ -222,15 +369,14 @@ To handle reverse thrust smoothly in Starfield's flight model, the accumulator u
 
 #### Option A: In-Game Binding Wizard (Recommended)
 1. Press `Ctrl+Alt+B` to open the wizard.
-2. Go to the **Axes & Settings** tab.
-3. Under **Flight Axes**, find **Throttle** and click **Bind**. Move your self-centering joystick axis (e.g., Left Stick Y-axis).
-4. Scroll down to the **Dual-Stick / Accumulator Mode** collapsible panel under throttle calibration and click to expand it.
-5. Check **Enable Accumulator Mode**.
-6. Set the parameters to your preference:
+2. Under **Bind Controls → Flight Axes**, find **Throttle** and click **Bind**. Move your self-centering joystick axis (for example, the left stick Y-axis).
+3. Open **Tune → Gamepad Throttle**.
+4. Enable **Use gamepad-style throttle**.
+5. Set the parameters to your preference:
    * **Ramp Rate**: How fast the throttle ramps up when the stick is fully deflected forward (in throttle units per second).
    * **Decay Rate**: How fast the throttle decays back to zero when you release the stick. Set to `0.0` to disable decay and lock your current throttle setting when the stick centers.
    * **Reverse Gate Velocity**: The HUD speed threshold below which backward stick deflection engages reverse thrusters.
-7. Click **Save & Apply**.
+6. Click **Save & Apply** or **Save & Close**.
 
 ### Pilot Turn Assist
 
@@ -246,7 +392,7 @@ Three activation modes are available:
 | **Hold** | Assist is only active while a bound button is held. |
 | **Toggle** | A button press toggles assist on/off. |
 
-Configure via the wizard under **Dual-Stick / Accumulator Mode → Pilot Turn Assist**, or via INI:
+Configure via the wizard under **Tune → Gamepad Throttle → Pilot Turn Assist**, or via INI:
 
 ```ini
 [DualStick]
@@ -258,7 +404,7 @@ iTurnAssistButton = -1           ; Button binding for Hold/Toggle (DeviceName@N)
 > **How it works:** The plugin silences the game's writes to the throttle input target (+0x68) so the accumulator always owns your speed. When turn assist is active, it selectively un-silences the effective throttle lane (+0x6C), letting the game's native rotation assist write there while your input target is preserved. When the assist deactivates, a burst write pushes your original value back to both offsets.
 
 #### Option B: Manual INI Configuration
-Edit `AbsoluteHOTAS.ini` and configure the following sections:
+Edit the wizard-created `AbsoluteHOTAS_Custom.ini` and configure the following sections:
 
 ```ini
 [Hardware]
@@ -290,7 +436,7 @@ fAimSensitivity = 1.0         ; Global aim sensitivity multiplier
 fAimSmoothing = 0.0           ; EMA smoothing for low-res sensors (0=off, 0.98=max)
 ```
 
-Digital aim buttons (5-way directional) can also be bound via the wizard Aiming tab to move the reticle like a virtual cursor. A toggle button can switch between independent aim and aim-driven steering at runtime.
+Digital aim buttons (5-way directional) can also be bound under **Tune → Aiming & Combat** to move the reticle like a virtual cursor. A toggle button can switch between independent aim and aim-driven steering at runtime.
 
 ## HOSAM Mode (Stick + Mouse)
 
@@ -302,16 +448,14 @@ Mice don't self-center like joysticks, so an optional **Alignment Assist** featu
 
 #### Option A: In-Game Binding Wizard (Recommended)
 1. Press `Ctrl+Alt+B` to open the wizard.
-2. Go to the **Axes & Settings** tab.
-3. Bind your **Throttle** (and optionally **Strafe** / **Roll**) axes to your joystick.
-4. Leave **Pitch** and **Yaw** unbound (or they will be ignored in HOSAM mode).
-5. Scroll down to the **HOSAM Mode (Stick + Mouse)** collapsible panel and expand it.
-6. Check **Enable HOSAM Mode**.
-7. Optionally check **Alignment Assist** and tune:
+2. Under **Bind Controls → Flight Axes**, bind your **Throttle** and optionally **Strafe** / **Roll** axes to your joystick.
+3. Leave **Pitch** and **Yaw** unbound; they are ignored in HOSAM mode.
+4. Open **Tune → Flight Axes** and enable **Mouse steering (HOSAM)**.
+5. Optionally check **Alignment Assist** and tune:
     * **Radius**: How close to center the mouse must be before the assist activates (default: 130 of 200 units).
     * **Idle Time**: How long the mouse must be idle before decay starts (default: 50ms).
     * **Decay Speed**: How fast steering decays to center (default: 8.0; higher = faster).
-8. Click **Save & Apply**.
+6. Click **Save & Apply** or **Save & Close**.
 
 #### Option B: Manual INI Configuration
 ```ini
@@ -350,15 +494,42 @@ If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual Fil
 ## Troubleshooting
 
 ### Wizard Crash / Overlay Doesn't Open
-If the overlay crashes or refuses to open on `Ctrl+Alt+B`, this is most likely caused by a leftover/orphaned SFSE plugin DLL from a previously uninstalled mod.
-1. Check `Data\SFSE\Plugins\` for any `.dll` files that do not belong to your currently enabled/active mods and remove them.
-2. If the issue persists: temporarily disable all mods except **AbsoluteHOTAS** and **SFSE**. Launch, open the wizard, save your bindings (which saves to the INI), and then re-enable your mods and relaunch. The plugin loads bindings automatically from the INI, so you do not need to access the wizard again in order to fly.
+If the overlay crashes or refuses to open on `Ctrl+Alt+B`:
+
+1. Check `Data\SFSE\Plugins\` for DLLs left behind by disabled or uninstalled mods.
+2. Temporarily disable third-party overlays, capture hooks, frame-generation mods,
+   ReShade/Special K-style injectors, and similar graphics layers.
+3. Test with only **AbsoluteHOTAS** and **SFSE** enabled.
+4. Enable logging and check for prior-hook or renderer initialization messages.
+
+Bindings load without opening the workbench, so a working
+`AbsoluteHOTAS_Custom.ini` can still be used while diagnosing an overlay-only issue.
 
 ### Logging & Diagnostic Data
 If you encounter hardware axis mapping or detection issues:
-1. Set `bEnableLog = true` in `AbsoluteHOTAS.ini` under `[Injection]`.
+1. Set `bEnableLog = true` under `[Injection]` in the wizard-created `AbsoluteHOTAS_Custom.ini` (or temporarily in the shipped defaults INI before first save).
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
+
+### Reporting a 4.0 beta issue
+
+Open an issue in the
+[GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and
+include:
+
+- the exact AbsoluteHOTAS version;
+- Starfield and SFSE versions;
+- controller, throttle, pedal, or button-box names;
+- whether the issue occurs on Main Controls or a named profile;
+- the smallest repeatable sequence that triggers the problem;
+- `AbsoluteHOTAS.log` with `bEnableLog = true`;
+- the relevant `AbsoluteHOTAS_Custom.ini` and profile file, with any personal paths
+  or unrelated bindings removed.
+
+For stuck inputs or configuration loss, say so in the title and describe how you
+recovered. For overlay problems, list other overlays, capture tools, graphics
+injectors, and frame-generation mods. Hardware-specific or cosmetic issues remain
+useful, but safety and core-flight regressions take priority during the beta.
 
 ## Notes
 

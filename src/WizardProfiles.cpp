@@ -89,7 +89,7 @@ bool SaveBindingsToINI(std::string& err) {
 
     SerializeUserOwnedState(State(), ini);
 
-    // Stamp the 3.1 baseline schema for future ordered migrations.
+    // Stamp the 4.0 baseline schema for future ordered migrations.
     SerializeMacros(State(), ini);
     ini.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
 
@@ -227,9 +227,7 @@ namespace {
     }
 
     std::string ModVersionString() {
-        return std::to_string(PLUGIN_VERSION_MAJOR) + "." +
-               std::to_string(PLUGIN_VERSION_MINOR) + "." +
-               std::to_string(PLUGIN_VERSION_PATCH);
+        return std::string(Plugin::VersionString);
     }
 }
 

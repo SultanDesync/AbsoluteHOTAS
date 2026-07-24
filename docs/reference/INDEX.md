@@ -17,5 +17,5 @@
 | `control-map-ship-functions.md` | `ControlMap_Custom.txt` binary format, full vanilla MAIN/ALT ship-function map, and the `ControlMapReader` lookup/resolution strategy. |
 | `overlay-hook-compatibility.md` | How the ImGui overlay coexists with other D3D12/DXGI render-chain hooks (frame-gen, upscalers, capture); adopted best practice and known incompatibilities. |
 | `macros.md` | Macro builder design: step model (chord/tap/hold/turbo), logical-action targeting, emission engine, and the "Grav → Shields" worked example. |
-| `config-layout.md` | 3.1 data contract: two-file release, generated custom/profile data, layered loading, atomic saves, and the fresh-start compatibility boundary. |
+| `config-layout.md` | 4.0 data contract: two-file release, generated custom/profile data, layered loading, atomic saves, and the fresh-start compatibility boundary. |
 | `profile-switching.md` | Live profile swapping: slots + momentary/toggle activation, sparse profiles as fallthrough, Import vs Swap, and the HOSAS cruise-mode recipe. Supersedes the shift-layer design. |

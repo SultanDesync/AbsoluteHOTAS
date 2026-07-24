@@ -239,7 +239,7 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.throttleBurstMs   = (int)ini.GetLongValue("Injection", "iThrottleBurstMs", 250);
     s_config.rollEnabled       = ini.GetBoolValue("Injection", "bRollEnabled",     true);
     s_config.bEnableInjection  = ini.GetBoolValue("Injection", "bEnableInjection", true);
-    // bHoldForBoost relocated [Injection] -> [DualStick] in 3.1. Read the new home,
+    // bHoldForBoost relocated [Injection] -> [DualStick] in 4.0. Read the new home,
     // falling back to the old location as a migration alias for un-migrated files.
     s_config.bHoldForBoost     = ini.GetBoolValue("DualStick", "bHoldForBoost",
                                      ini.GetBoolValue("Injection", "bHoldForBoost", true));

@@ -653,7 +653,7 @@ static bool HasCompanion6C(uintptr_t addr, uintptr_t textStart, size_t textSize)
 }
 
 bool ThrottleHook::Install() {
-    HookLog("=== AbsoluteHOTAS hook installation ===");
+    HookLog(std::format("=== {} {} hook installation ===", Plugin::Name, Plugin::VersionString));
 
     uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
     int hookCount = 0;

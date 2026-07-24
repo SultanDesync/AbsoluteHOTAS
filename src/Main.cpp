@@ -80,6 +80,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
     // Read bEnableLog from the INI once and cache it. With logging off the plugin
     // writes nothing, so there is no crash handler to install either.
     RuntimePaths::InitLogging();
+    MainLog(std::format("=== {} {} startup ===", Plugin::Name, Plugin::VersionString));
     if (RuntimePaths::IsLoggingEnabled()) {
         InstallCrashLogger();
     }

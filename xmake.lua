@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("3.1.0")
+set_version("4.0.0")
 set_languages("c++23")
 set_warnings("all")
 
@@ -17,7 +17,7 @@ add_requires("simpleini")
 add_ldflags("/MAP")
 
 -- Live-test deploy target. Set once (persists in the gitignored .xmake/ config):
---   xmake f --deploydir="D:\Modlists\Starfield Testing Baseline\mods\AbsoluteHOTAS\SFSE\Plugins"
+--   xmake f --deploydir="C:\Path\To\Mod\Data\SFSE\Plugins"
 -- Left empty by default so fresh clones and CI build without touching any machine-
 -- specific path. The ABSOLUTEHOTAS_DEPLOY_DIR env var is honored as a fallback.
 option("deploydir")
@@ -40,7 +40,12 @@ target("AbsoluteHOTAS")
 
     set_pcxxheader("include/PCH.h")
 
-    add_defines("PLUGIN_VERSION_MAJOR=3", "PLUGIN_VERSION_MINOR=1", "PLUGIN_VERSION_PATCH=0")
+    add_defines(
+        "PLUGIN_VERSION_MAJOR=4",
+        "PLUGIN_VERSION_MINOR=0",
+        "PLUGIN_VERSION_PATCH=0",
+        "PLUGIN_VERSION_PRERELEASE=beta"
+    )
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).
     -- These were previously pulled in transitively by CommonLibSF.
@@ -72,7 +77,7 @@ target("AbsoluteHOTAS")
         --    since the config split it is mod-owned and holds no user data: bindings,
         --    calibration, macros, and profile routing live in
         --    AbsoluteHOTAS_Custom.ini, which nothing here writes. Overwriting the main
-        --    INI is therefore what a real 3.2+ update does, and testing that path on
+        --    INI is therefore what a real 4.0+ update does, and testing that path on
         --    every build is the point.
         --
         --    Under MO2 the custom/profile files are written to `overwrite/`, not

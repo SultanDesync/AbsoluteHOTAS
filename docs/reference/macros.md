@@ -1,6 +1,6 @@
 # Macro Builder (design)
 
-Status: **implemented** (3.1-beta) — engine, `[Macro:*]` parsing, and the wizard
+Status: **implemented** (4.0.0-beta) — engine, `[Macro:*]` parsing, and the wizard
 Macros tab. Deferred: the per-macro Test button (see the tab section). A macro lets
 one physical button play an ordered sequence of key actions — chords (multi-key),
 holds, taps, and turbo (repeat-while-held) — so fiddly multi-press routines become

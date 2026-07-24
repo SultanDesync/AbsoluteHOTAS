@@ -1,6 +1,6 @@
 # AbsoluteHOTAS Ship Button Bindings
 
-AbsoluteHOTAS 3.1 can map DirectInput buttons to named Starfield spaceship actions and emit keyboard or mouse outputs through `SendInput`.
+AbsoluteHOTAS 4.0 can map DirectInput buttons to named Starfield spaceship actions and emit keyboard or mouse outputs through `SendInput`.
 
 The physical button side is configured in `[ShipButtons]`. IDs `1..128` are physical DirectInput buttons and `129..144` are virtual POV/hat directions; use `-1` to leave an action unbound.
 

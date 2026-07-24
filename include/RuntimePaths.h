@@ -6,7 +6,7 @@
 namespace RuntimePaths {
     std::filesystem::path PluginDirectory();
 
-    // Mod-owned defaults + tunables. Shipped in the archive and (from 3.2 on)
+    // Mod-owned defaults + tunables. Shipped in the archive and (from 4.0 on)
     // overwritten freely on update, because no user data lives here. InitLogging()
     // and mod-owned sections ([General], [Injection], [Gate]) read from this file.
     std::filesystem::path IniPath();

@@ -1,6 +1,6 @@
 # Configuration Data Contract
 
-Status: **3.1 release baseline**
+Status: **4.0 release baseline**
 
 ## Release package
 
@@ -52,7 +52,7 @@ write any file.
 - Profile Save writes the selected profile atomically.
 - Reset base creates a timestamped backup, clears the custom control payload and
   macros, preserves `[Profiles]` routing, and reloads shipped defaults.
-- User-owned files carry `iConfigVersion` for migrations after the 3.1 baseline.
+- User-owned files carry `iConfigVersion` for migrations after the 4.0 baseline.
 - Unsupported future schema versions must fail visibly rather than being rewritten.
 
 ## Profiles
@@ -95,14 +95,14 @@ Full export excludes `[Profiles]` routing because slot assignments belong to the
 local installation. Import backs up the current custom file, rejects overlays,
 replaces the control payload, and preserves local slot routing.
 
-## 3.1 compatibility boundary
+## 4.0 compatibility boundary
 
-3.1 is a fresh configuration baseline. The plugin does not automatically import or
-transform pre-3.1 `AbsoluteHOTAS.ini` files or experimental 3.1 profile files.
+4.0 is a fresh configuration baseline. The plugin does not automatically import or
+transform pre-4.0 `AbsoluteHOTAS.ini` files or pre-baseline experimental profile files.
 Release notes must tell existing users to back up the old INI for reference before
 their mod manager overwrites it, then rebuild through the binding wizard.
 
-After 3.1, preserving this data contract and providing ordered schema migrations is
+After 4.0, preserving this data contract and providing ordered schema migrations is
 a release requirement.
 
 ## Safety checklist
