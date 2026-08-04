@@ -1,0 +1,27 @@
+[center][size=6][color=#00ccff][b]AbsoluteHOTAS 4.0.2[/b][/color][/size]
+[size=4][b][color=#ffaa00]Stable RTSS compatibility hotfix[/color][/b][/size][/center]
+
+[line]
+
+4.0.2 supersedes 4.0.1 as the recommended main file. It fixes a workbench
+regression with RivaTuner Statistics Server and similar software that maintains
+ownership of the DXGI/D3D12 render-hook chain after startup.
+
+[list]
+[*][b]RTSS compatibility restored:[/b] AbsoluteHOTAS now chains behind a detected existing render detour instead of competing for the public DXGI function prologue.[/*]
+[*][b]No shadow vtable:[/b] The fix does not copy, replace, or assume the size of a swapchain vtable.[/*]
+[*][b]Reliable workbench inputs:[/b] Both the configured HOTAS workbench button and [b]Ctrl+Alt+B[/b] are polled independently of render callbacks.[/*]
+[*][b]Locally validated:[/b] RTSS 7.3.5.28314 was loaded first with its global D3D12/DXGI hook enabled; the workbench initialized, rendered, closed, and reopened cleanly through both inputs.[/*]
+[/list]
+
+[b]Updating from 4.0.1:[/b] install the 4.0.2 archive normally. Keep
+[b]AbsoluteHOTAS_Custom.ini[/b] and the [b]Profiles[/b] directory; they contain
+user-owned settings and are not included in the archive.
+
+RTSS and comparable Windows overlay/capture hooks are a compatibility priority
+for this hotfix. Linux/Proton and third-party frame generation remain best effort.
+If a graphics combination still conflicts with the workbench, set
+[b][UI] bEnableWorkbench = false[/b]; flight controls and manual configuration
+continue without renderer hooks.
+
+[center][url=https://github.com/SultanDesync/AbsoluteHOTAS#readme][color=#00ff88][b]Complete Guide and Changelog[/b][/color][/url][/center]

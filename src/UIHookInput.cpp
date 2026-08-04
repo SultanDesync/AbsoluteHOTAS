@@ -25,16 +25,6 @@ LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 0;
     }
 
-    // Toggle on Ctrl+Alt+B
-    if (msg == WM_KEYDOWN && wParam == 'B') {
-        bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-        bool alt  = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        if (ctrl && alt) {
-            UIHook::ToggleUI();
-            return 0;
-        }
-    }
-
     if (g_isOpen.load(std::memory_order_relaxed)) {
         // Let ImGui process the message first
         ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);

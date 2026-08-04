@@ -1,15 +1,15 @@
-# AbsoluteHOTAS v4.0.1
+# AbsoluteHOTAS v4.0.2
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release Status
 
-**4.0.1 is the stable core release.** DirectInput polling, analog flight injection,
+**4.0.2 is the stable core release.** DirectInput polling, analog flight injection,
 safe output release, configuration saving, and the configuration workbench are the
 recommended release track. Profiles and macros remain experimental while they gain
 broader real-world hardware and workflow validation.
 
-Version **3.0.2 remains available as the legacy 3.x option**, but 4.0.1 is the main
+Version **3.0.2 remains available as the legacy 3.x option**, but 4.0.2 is the main
 download for current features, update-safe settings, and ongoing support. Renderer
 compatibility with third-party overlays, frame-generation layers, and Proton graphics
 stacks is best effort; an explicit hook bypass keeps manual configuration and flight
@@ -21,6 +21,13 @@ inputs, and regressions in core flight controls. See
 report actionable.
 
 ## Changelog
+
+### v4.0.2
+
+- **RTSS Compatibility Hotfix:** Fixed a 4.0.1 regression where RivaTuner Statistics Server could reclaim DXGI's canonical `Present` entry after startup, leaving the workbench open request permanently deferred. AbsoluteHOTAS now chains behind a detected existing render detour instead of competing for its public prologue.
+- **No Shadow Vtable:** Compatibility is restored without copying, replacing, or assuming the size of a swapchain vtable. Unclaimed render methods continue to use the canonical MinHook path.
+- **Independent Workbench Toggle:** The HOTAS binding and `Ctrl+Alt+B` chord are polled by the controller thread, so an open request is recorded even when a graphics layer temporarily bypasses presentation callbacks.
+- **Validated RTSS Path:** RTSS 7.3.5.28314 was loaded first with its global D3D12/DXGI hook active; the workbench initialized, rendered, closed, and reopened cleanly through both the hardware binding and keyboard chord.
 
 ### v4.0.1
 

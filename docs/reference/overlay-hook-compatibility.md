@@ -72,9 +72,13 @@ Studied rather than reinvented:
    heuristic, but is strictly better than permanently latching the first DIRECT
    queue observed.
 
-3. **Canonical entry-point chaining.** Hook the SDK-defined DXGI/D3D12 entry
-   points with MinHook and always forward through its trampoline. Do not replace
-   an individual COM object's vtable: proxy swapchains may expose implementation
+3. **Cooperative entry-point chaining.** Use the SDK-defined DXGI/D3D12 entry
+   points as the discovery boundary. If an entry is unclaimed, hook it normally
+   with MinHook. If it already begins with a recognized detour, hook that existing
+   detour's executable destination and forward through its trampoline. This keeps
+   the established graphics layer outermost and avoids racing software such as
+   RTSS when it maintains ownership of the public prologue. Do not replace an
+   individual COM object's vtable: proxy swapchains may expose implementation
    details that make copied table sizes and lifetime assumptions unsafe.
 
 4. **Fence every frame context.** Record the fence value after each overlay
@@ -106,7 +110,7 @@ Studied rather than reinvented:
 | Queue capture (primary / fallback) | `HookedCreateSwapChainForHwnd`, `HookedExecuteCommandLists` |
 | Prior-hook detection | `[UIHook]` instrumentation at hook install |
 | Proxy/FG swapchain rebind | `RebindRenderTargetsIfNeeded`, per-frame monitor in `HandlePresent` |
-| Canonical hook forwarding | `OriginalPresentFor`, `OriginalPresent1For`, `OriginalResizeBuffersFor` |
+| Cooperative hook forwarding | `SelectCooperativeHookTarget`, `CreateCooperativeHook`, `OriginalPresentFor`, `OriginalPresent1For`, `OriginalResizeBuffersFor` |
 | Per-frame allocator fences | `WaitForFrameAllocator`, `MarkFrameSubmitted` |
 | Fail-open / manual bypass | `g_faulted`, `HandleRenderException`, `[UI] bEnableWorkbench` |
 | Submit to present queue | `RenderOverlayFrame` → `pQueue->ExecuteCommandLists` |
@@ -115,7 +119,7 @@ Studied rather than reinvented:
 
 | Layer | Result |
 | --- | --- |
-| RTSS 7.3.5, D3D12, RTSS loaded first | Verified: wizard renders with canonical hook chaining |
+| RTSS 7.3.5.28314, global D3D12/DXGI hook, RTSS loaded first | Verified on 4.0.2: workbench initializes, renders, closes, and reopens through both the HOTAS binding and `Ctrl+Alt+B` |
 
 ## Reported combinations awaiting confirmation
 
@@ -171,6 +175,10 @@ first because the 4.0 renderer includes compatibility work absent from 3.0.2.
 - Failure mode and the queue/back-buffer split: confirmed by code review against
   a real diagnostic-build log (cursor worked, overlay did not; primary queue
   capture bypassed, fallback heuristic used).
+- 4.0.1 RTSS regression and 4.0.2 recovery: reproduced locally with RTSS
+  7.3.5.28314 loaded first. In 4.0.1 the canonical `Present` detour was observed
+  once during startup and then bypassed; 4.0.2 chained behind RTSS's existing
+  detour destination and completed repeated render/open/close cycles.
 - Specific culprit on that log: **not** definitively identified — the module
   list leans toward NVIDIA Streamline, but recording/driver-level layers are not
   excluded. Identity does not change the approach above.

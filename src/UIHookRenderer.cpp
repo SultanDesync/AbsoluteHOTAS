@@ -537,19 +537,6 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
 static void HandlePresent(IDXGISwapChain* pSwapChain) {
     if (g_faulted.load(std::memory_order_acquire)) return;
 
-    // Before ImGui owns the game WndProc, poll only the workbench hotkey edge.
-    // Once initialized, HookedWndProc handles it and this poll merely tracks the
-    // key state, preventing a double toggle on the initialization frame.
-    static bool previousBootstrapHotkey = false;
-    const bool bootstrapHotkey = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
-        && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
-        && (GetAsyncKeyState('B') & 0x8000) != 0;
-    const bool bootstrapHotkeyPressed = bootstrapHotkey && !previousBootstrapHotkey;
-    previousBootstrapHotkey = bootstrapHotkey;
-    if (!g_initialized.load(std::memory_order_relaxed) && bootstrapHotkeyPressed) {
-        UIHook::ToggleUI();
-    }
-
     ID3D12CommandQueue* selectedQueue = SelectPresentQueue(pSwapChain);
     ID3D12CommandQueue* activeQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
     if (selectedQueue && selectedQueue != activeQueue) {

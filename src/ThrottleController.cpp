@@ -664,6 +664,16 @@ void ThrottleController::ControlLoop() {
         bool curToggleWizard = DeviceManager::IsButtonPressed(s_config.toggleWizardButton);
         static bool prevActivate = false, prevStop = false, prevToggleWizard = false;
 
+        // Own the recovery chord on the controller thread rather than inside a
+        // render callback. If another overlay temporarily bypasses our Present
+        // hook, the open request is still recorded and can initialize as soon as
+        // presentation returns. HookedWndProc receives only our posted message,
+        // preventing the keyboard event from toggling twice after initialization.
+        const bool curWizardChord = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
+            && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
+            && (GetAsyncKeyState('B') & 0x8000) != 0;
+        static bool prevWizardChord = false;
+
         // Keyboard master on/off toggle (single configurable key; default ScrollLock).
         bool curToggleKey = s_config.toggleActiveKey != 0 &&
                             (GetAsyncKeyState(s_config.toggleActiveKey) & 0x8000) != 0;
@@ -693,11 +703,15 @@ void ThrottleController::ControlLoop() {
             s_resetCruiseEdges = true;
             ActivateProfile(0);  // always return home; no-op if already on base
         }
-        if (curToggleWizard && !prevToggleWizard) UIHook::ToggleUI();
+        if ((curToggleWizard && !prevToggleWizard) ||
+            (curWizardChord && !prevWizardChord)) {
+            UIHook::ToggleUI();
+        }
 
         prevActivate     = curActivate;
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
+        prevWizardChord  = curWizardChord;
         const bool overlayOpen = UIHook::IsUIOpen();
 
         // ---- Profile switch triggers ----

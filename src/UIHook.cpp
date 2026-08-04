@@ -75,6 +75,67 @@ namespace UIHook {
 
 using namespace Detail;
 
+static bool IsExecutableAddress(void* address) {
+    if (!address) return false;
+    MEMORY_BASIC_INFORMATION memory{};
+    if (!VirtualQuery(address, &memory, sizeof(memory)) || memory.State != MEM_COMMIT) {
+        return false;
+    }
+    const DWORD protection = memory.Protect & 0xFF;
+    return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ
+        || protection == PAGE_EXECUTE_READWRITE || protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+static void* SelectCooperativeHookTarget(const char* label, void* canonicalTarget) {
+    std::string firstBytes;
+    if (!LooksHooked(canonicalTarget, firstBytes)) return canonicalTarget;
+
+    void* downstreamTarget = ResolveInitialJump(canonicalTarget);
+    if (!downstreamTarget || downstreamTarget == canonicalTarget
+        || !IsExecutableAddress(downstreamTarget)) {
+        UILog(std::format(
+            "WARNING: {} has an existing detour, but its destination is not a usable hook target; using the canonical entry.",
+            label));
+        return canonicalTarget;
+    }
+
+    UILog(std::format(
+        "Compatibility chain for {} will hook the existing detour destination 0x{:X} ({}) instead of competing for canonical entry 0x{:X}.",
+        label, reinterpret_cast<uintptr_t>(downstreamTarget),
+        ModuleForAddress(downstreamTarget), reinterpret_cast<uintptr_t>(canonicalTarget)));
+    return downstreamTarget;
+}
+
+static bool CreateCooperativeHook(
+    const char* label,
+    void* canonicalTarget,
+    void* preferredTarget,
+    void* detour,
+    void** original,
+    void** actualTarget)
+{
+    void* selectedTarget = preferredTarget;
+    MH_STATUS status = MH_CreateHook(selectedTarget, detour, original);
+    if (status != MH_OK && selectedTarget != canonicalTarget) {
+        UILog(std::format(
+            "WARNING: Could not hook the existing {} detour destination (MinHook status {}); falling back to the canonical entry.",
+            label, static_cast<int>(status)));
+        selectedTarget = canonicalTarget;
+        status = MH_CreateHook(selectedTarget, detour, original);
+    }
+    if (status != MH_OK) {
+        UILog(std::format("ERROR: Failed to create {} hook (MinHook status {}).",
+            label, static_cast<int>(status)));
+        return false;
+    }
+
+    if (actualTarget) *actualTarget = selectedTarget;
+    UILog(std::format("Prepared {} hook at 0x{:X}{}.", label,
+        reinterpret_cast<uintptr_t>(selectedTarget),
+        selectedTarget == canonicalTarget ? " (canonical entry)" : " (existing-hook destination)"));
+    return true;
+}
+
 
 bool Install() {
     g_available.store(false, std::memory_order_relaxed);
@@ -91,10 +152,6 @@ bool Install() {
         UILog("ERROR: Vtable discovery failed. UI overlay disabled.");
         return false;
     }
-    g_presentTarget = pPresent;
-    g_present1Target = pPresent1;
-    g_resizeBuffersTarget = pResizeBuffers;
-
     // Diagnose prior render-chain hooks BEFORE we patch anything ourselves.
     // Another layer hooking these entry points first is the common cause of
     // "cursor works but the overlay never renders." We still install normally;
@@ -121,13 +178,25 @@ bool Install() {
         }
         if (priorHooks > 0) {
             UILog("Note: " + std::to_string(priorHooks) + " D3D12/DXGI render entry point(s) are already hooked "
-                  "by another layer. This is usually harmless — Steam/Discord/RTSS overlays and frame-gen layers "
-                  "commonly coexist with the overlay. It only matters if Ctrl+Alt+B shows a cursor but no UI; in "
-                  "that case disable frame generation (NVIDIA Smooth Motion / DLSS-G, AMD AFMF / FSR Frame "
-                  "Generation), capture/overlay tools, or driver filters. "
+                  "by another layer. AbsoluteHOTAS will attempt to chain behind the existing detours; Steam, "
+                  "Discord, RTSS, capture tools, and frame-generation layers commonly share these methods. If "
+                  "the workbench still does not render, disable frame generation (NVIDIA Smooth Motion / DLSS-G, "
+                  "AMD AFMF / FSR Frame Generation), capture/overlay tools, or driver filters. "
                   "See docs/reference/overlay-hook-compatibility.md.");
         }
     }
+
+    // If another overlay owns the public DXGI/D3D12 prologue, chaining behind its
+    // existing detour is more durable than replacing that prologue and racing its
+    // self-repair logic. Canonical entry hooking remains the default for an
+    // unclaimed method and the fallback if a downstream stub cannot be detoured.
+    void* presentHookTarget = SelectCooperativeHookTarget("Present", pPresent);
+    void* present1HookTarget = SelectCooperativeHookTarget("Present1", pPresent1);
+    void* resizeBuffersHookTarget = SelectCooperativeHookTarget("ResizeBuffers", pResizeBuffers);
+    void* executeCommandListsHookTarget = SelectCooperativeHookTarget(
+        "ExecuteCommandLists", pExecuteCommandLists);
+    void* createSwapChainHookTarget = SelectCooperativeHookTarget(
+        "CreateSwapChainForHwnd", pCreateSwapChainForHwnd);
 
     if (MH_Initialize() != MH_OK) {
         UILog("ERROR: MH_Initialize failed.");
@@ -136,36 +205,43 @@ bool Install() {
 
     // Primary queue capture — fires at swap chain creation, before other injectors
     // can create private helper queues that would fool ExecuteCommandLists.
-    if (MH_CreateHook(pCreateSwapChainForHwnd, &HookedCreateSwapChainForHwnd,
-        reinterpret_cast<void**>(&g_origCreateSwapChainForHwnd)) != MH_OK) {
-        UILog("ERROR: Failed to create CreateSwapChainForHwnd hook.");
+    if (!CreateCooperativeHook(
+        "CreateSwapChainForHwnd", pCreateSwapChainForHwnd, createSwapChainHookTarget,
+        reinterpret_cast<void*>(&HookedCreateSwapChainForHwnd),
+        reinterpret_cast<void**>(&g_origCreateSwapChainForHwnd), nullptr)) {
         MH_Uninitialize();
         return false;
     }
 
-    if (MH_CreateHook(pPresent, &HookedPresent, reinterpret_cast<void**>(&g_origPresent)) != MH_OK) {
-        UILog("ERROR: Failed to create Present hook.");
+    if (!CreateCooperativeHook(
+        "Present", pPresent, presentHookTarget, reinterpret_cast<void*>(&HookedPresent),
+        reinterpret_cast<void**>(&g_origPresent), &g_presentTarget)) {
         MH_Uninitialize();
         return false;
     }
 
-    // Present1 shares its vtable slot across all IDXGISwapChain1 instances, so this
-    // one hook covers any swapchain that presents via Present1. Non-fatal if it
+    // Present1 uses the same implementation chain for the active DXGI layer, so
+    // this hook covers swapchains presenting through that layer. Non-fatal if it
     // fails — Present-only hooking still works for the common case.
-    if (MH_CreateHook(pPresent1, &HookedPresent1, reinterpret_cast<void**>(&g_origPresent1)) != MH_OK) {
+    if (!CreateCooperativeHook(
+        "Present1", pPresent1, present1HookTarget, reinterpret_cast<void*>(&HookedPresent1),
+        reinterpret_cast<void**>(&g_origPresent1), &g_present1Target)) {
         UILog("WARNING: Failed to create Present1 hook (Present-only overlay still active).");
     }
 
-    if (MH_CreateHook(pResizeBuffers, &HookedResizeBuffers, reinterpret_cast<void**>(&g_origResizeBuffers)) != MH_OK) {
-        UILog("ERROR: Failed to create ResizeBuffers hook.");
+    if (!CreateCooperativeHook(
+        "ResizeBuffers", pResizeBuffers, resizeBuffersHookTarget,
+        reinterpret_cast<void*>(&HookedResizeBuffers),
+        reinterpret_cast<void**>(&g_origResizeBuffers), &g_resizeBuffersTarget)) {
         MH_Uninitialize();
         return false;
     }
 
     // Fallback queue capture + re-entrancy guard (see HookedExecuteCommandLists).
-    if (MH_CreateHook(pExecuteCommandLists, &HookedExecuteCommandLists,
-        reinterpret_cast<void**>(&g_origExecuteCommandLists)) != MH_OK) {
-        UILog("ERROR: Failed to create ExecuteCommandLists hook.");
+    if (!CreateCooperativeHook(
+        "ExecuteCommandLists", pExecuteCommandLists, executeCommandListsHookTarget,
+        reinterpret_cast<void*>(&HookedExecuteCommandLists),
+        reinterpret_cast<void**>(&g_origExecuteCommandLists), nullptr)) {
         MH_Uninitialize();
         return false;
     }
