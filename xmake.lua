@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("4.0.0")
+set_version("4.0.1")
 set_languages("c++23")
 set_warnings("all")
 
@@ -43,8 +43,8 @@ target("AbsoluteHOTAS")
     add_defines(
         "PLUGIN_VERSION_MAJOR=4",
         "PLUGIN_VERSION_MINOR=0",
-        "PLUGIN_VERSION_PATCH=0",
-        "PLUGIN_VERSION_PRERELEASE=beta"
+        "PLUGIN_VERSION_PATCH=1",
+        "PLUGIN_VERSION_STABLE=1"
     )
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).
@@ -94,14 +94,18 @@ target("AbsoluteHOTAS")
         end
     end)
 
--- Standalone unit test for ControlMapReader. Not built by default; opt in with:
---   xmake build control_map_reader_test
---   xmake run   control_map_reader_test tests/fixtures
+-- Standalone unit tests are not built by default. Run all of them with:
+--   xmake test
+-- Or run the ControlMapReader test alone with:
+--   xmake test control_map_reader_test/*
 -- ControlMapReader.cpp is compiled directly here (no PCH) so the test stays
 -- independent of the plugin target and its precompiled header.
 target("control_map_reader_test")
     set_kind("binary")
     set_default(false)
+    set_rundir(os.projectdir())
+    set_runargs("tests/fixtures")
+    add_tests("fixtures")
 
     add_includedirs("include")
 
@@ -112,16 +116,26 @@ target("control_map_reader_test")
     add_syslinks("user32")
 
 -- Standalone unit test for ProfileOverlay::ComputeDiff (the sparse profile-overlay
--- diff). Not built by default; opt in with:
---   xmake build config_overlay_test
---   xmake run   config_overlay_test
+-- diff). Run it alone with:
+--   xmake test config_overlay_test/*
 -- Compiles ProfileOverlay.cpp (SimpleIni-only) with no PCH.
 target("config_overlay_test")
     set_kind("binary")
     set_default(false)
+    add_tests("sparse_overlay")
 
     add_packages("simpleini")
     add_includedirs("include")
 
     add_files("tests/config_overlay_test.cpp")
     add_files("src/ProfileOverlay.cpp")
+
+-- Header-only BindingRef parser regression tests. These protect the configuration
+-- boundary without pulling the DirectInput runtime into the test process.
+target("binding_ref_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("parser")
+
+    add_includedirs("include")
+    add_files("tests/binding_ref_test.cpp")

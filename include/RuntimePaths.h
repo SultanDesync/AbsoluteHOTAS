@@ -26,6 +26,11 @@ namespace RuntimePaths {
     // never leaves a file on disk.
     bool IsLoggingEnabled();
 
+    // Startup-only safety switch for the optional D3D12 workbench. When false,
+    // no renderer hooks are installed; controller polling and manual INI config
+    // remain fully active.
+    bool IsWorkbenchEnabled();
+
     // Read bEnableLog from the INI once at startup and cache the result.
     void InitLogging();
 

@@ -55,10 +55,12 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
         }
         delete[] g_cmdAllocators;
     }
+    delete[] g_frameFenceValues;
 
     g_backBuffers = new ID3D12Resource*[g_numBackBuffers]();
     g_rtvHandles = new D3D12_CPU_DESCRIPTOR_HANDLE[g_numBackBuffers]();
     g_cmdAllocators = new ID3D12CommandAllocator*[g_numBackBuffers]();
+    g_frameFenceValues = new UINT64[g_numBackBuffers]();
 
     // Create RTV heap
     if (g_rtvDescHeap) { g_rtvDescHeap->Release(); g_rtvDescHeap = nullptr; }
@@ -80,10 +82,12 @@ static bool CreateRenderTargets(IDXGISwapChain* pSwapChain) {
         g_rtvHandles[i].ptr = rtvBase.ptr + i * rtvIncrementSize;
 
         ID3D12Resource* pBackBuffer = nullptr;
-        if (SUCCEEDED(pSwapChain->GetBuffer(i, IID_PPV_ARGS(&pBackBuffer)))) {
-            g_d3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, g_rtvHandles[i]);
-            g_backBuffers[i] = pBackBuffer;
+        if (FAILED(pSwapChain->GetBuffer(i, IID_PPV_ARGS(&pBackBuffer)))) {
+            UILog("ERROR: Failed to acquire back buffer " + std::to_string(i));
+            return false;
         }
+        g_d3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, g_rtvHandles[i]);
+        g_backBuffers[i] = pBackBuffer;
 
         // Create per-frame command allocator
         if (FAILED(g_d3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_cmdAllocators[i])))) {
@@ -127,7 +131,7 @@ static void SafeShutdownStaleImGui() {
 }
 
 // ============================================================================
-// ImGui Initialization (called once from first Present after queue is captured)
+// ImGui Initialization (called once from the first Present after an open request)
 // ============================================================================
 static bool InitImGui(IDXGISwapChain* pSwapChain) {
     std::lock_guard<std::mutex> lock(g_initMutex);
@@ -159,7 +163,10 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
 
     // Get the HWND from the swap chain
     DXGI_SWAP_CHAIN_DESC desc{};
-    pSwapChain->GetDesc(&desc);
+    if (FAILED(pSwapChain->GetDesc(&desc)) || !desc.OutputWindow || desc.BufferCount == 0) {
+        UILog("ERROR: Swap-chain description is unavailable or incomplete.");
+        return false;
+    }
     g_hWnd = desc.OutputWindow;
     g_backBufferFormat = desc.BufferDesc.Format;
     g_numBackBuffers = desc.BufferCount;
@@ -204,6 +211,10 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
         CloseHandle(g_fenceEvent);
     }
     g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!g_fenceEvent) {
+        UILog("ERROR: Failed to create the overlay fence event.");
+        return false;
+    }
     g_fenceValue = 0;
 
     // Setup ImGui context
@@ -242,24 +253,54 @@ static bool InitImGui(IDXGISwapChain* pSwapChain) {
     colors[ImGuiCol_TabSelected]     = ImVec4(0.22f, 0.27f, 0.50f, 1.00f);
 
     // Init Win32 backend
-    ImGui_ImplWin32_Init(g_hWnd);
+    if (!ImGui_ImplWin32_Init(g_hWnd)) {
+        UILog("ERROR: ImGui Win32 backend initialization failed.");
+        return false;
+    }
 
     // Init DX12 backend — use the actual back buffer format
-    ImGui_ImplDX12_Init(
+    if (!ImGui_ImplDX12_Init(
         g_d3dDevice,
         static_cast<int>(g_numBackBuffers),
         g_backBufferFormat,
         g_srvDescHeap,
         g_srvDescHeap->GetCPUDescriptorHandleForHeapStart(),
         g_srvDescHeap->GetGPUDescriptorHandleForHeapStart()
-    );
+    )) {
+        UILog("ERROR: ImGui D3D12 backend initialization failed.");
+        return false;
+    }
 
     // Hook WndProc
     g_origWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(HookedWndProc)));
+    if (!g_origWndProc) {
+        UILog("ERROR: Failed to install the workbench window-input hook.");
+        return false;
+    }
 
     g_initialized.store(true);
+    // ToggleUI records an open request before initialization. Apply cursor/input
+    // state only after both ImGui backends and the window hook are ready.
+    if (g_isOpen.load(std::memory_order_relaxed)) {
+        g_hadClipRect = GetClipCursor(&g_savedClipRect) != 0;
+        ClipCursor(nullptr);
+        while (ShowCursor(TRUE) < 0) {}
+        io.MouseDrawCursor = true;
+    }
     UILog("ImGui D3D12 overlay initialized successfully.");
     return true;
+}
+
+// Keep structured exception handling outside InitImGui itself: that function owns
+// C++ lock guards and strings which MSVC cannot place directly inside __try.
+static bool TryInitImGui(IDXGISwapChain* pSwapChain) {
+    bool initialized = false;
+    __try {
+        initialized = InitImGui(pSwapChain);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        initialized = false;
+    }
+    return initialized;
 }
 
 // ============================================================================
@@ -285,6 +326,7 @@ static bool TryReleaseResources() {
         }
         if (g_fence) g_fence->Release();
         if (g_fenceEvent) CloseHandle(g_fenceEvent);
+        if (g_frameFenceValues) delete[] g_frameFenceValues;
         if (g_d3dDevice) g_d3dDevice->Release();
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -302,22 +344,32 @@ static void HandleRenderException() {
     // display mode transition, and touching them throws a SECOND exception
     // from inside this handler, which crashes the game.
     //
-    // We accept a minor GPU resource leak. InitImGui will recreate everything
-    // from scratch on the next Ctrl+Alt+B press.
+    // We accept a minor GPU resource leak. This failure is latched for the rest
+    // of the session so a bad renderer combination cannot enter a crash/retry loop.
+
+    if (g_faulted.exchange(true, std::memory_order_acq_rel)) return;
 
     RuntimePaths::Log("[UIHook]",
-        "D3D12 render exception caught — overlay disabled. Press Ctrl+Alt+B to reinit.");
+        "Workbench renderer failed and is disabled for this session; manual configuration and flight controls remain active.");
 
     // Restore Win32 cursor state if the overlay was open when the exception fired.
     // ToggleUI's closing branch normally handles this, but HandleRenderException
     // bypasses ToggleUI entirely — leaving the system cursor visible and unclipped.
     // Win32 cursor calls are safe here: no D3D12/COM dependency, no throw risk.
-    if (g_isOpen.load()) {
+    const bool wasInitialized = g_initialized.exchange(false, std::memory_order_acq_rel);
+    if (g_isOpen.load() && wasInitialized) {
         RestoreGameCursorState();
     }
 
     g_isOpen.store(false);
-    g_initialized.store(false);
+    g_inOverlaySubmit = false;
+
+    // Stop receiving input immediately. The original game WndProc remains valid
+    // even when the D3D12 resources or proxy swap chain are no longer trustworthy.
+    if (g_origWndProc && g_hWnd) {
+        SetWindowLongPtrW(g_hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
+        g_origWndProc = nullptr;
+    }
 
     // Attempt safe COM release in a separate block. Releasing references
     // is valid even if device is lost, but proxy objects might crash.
@@ -333,11 +385,11 @@ static void HandleRenderException() {
     g_cmdAllocators = nullptr;
     g_fence = nullptr;
     g_fenceEvent = nullptr;
+    g_frameFenceValues = nullptr;
     g_d3dDevice = nullptr;
     g_numBackBuffers = 0;
     g_targetSwapChain = nullptr;
-    // Clear the captured queue — it is stale after a render exception and must
-    // be recaptured before InitImGui is called again.
+    // Clear the captured queue so no stale renderer object is touched again.
     g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);
 }
 
@@ -373,9 +425,34 @@ static void LogOverlaySubmission(IDXGISwapChain* swapChain, ID3D12CommandQueue* 
         backBufferIdx, reinterpret_cast<uintptr_t>(g_targetSwapChain)));
 }
 
+static bool WaitForFrameAllocator(UINT backBufferIdx) {
+    if (!g_fence || !g_fenceEvent || !g_frameFenceValues
+        || backBufferIdx >= g_numBackBuffers) return false;
+
+    const UINT64 pendingValue = g_frameFenceValues[backBufferIdx];
+    if (pendingValue == 0) return true;
+    const UINT64 completedValue = g_fence->GetCompletedValue();
+    if (completedValue == UINT64_MAX) return false;  // device removed
+    if (completedValue >= pendingValue) return true;
+    if (FAILED(g_fence->SetEventOnCompletion(pendingValue, g_fenceEvent))) return false;
+    return WaitForSingleObject(g_fenceEvent, 2000) == WAIT_OBJECT_0;
+}
+
+static bool MarkFrameSubmitted(ID3D12CommandQueue* queue, UINT backBufferIdx) {
+    if (!queue || !g_fence || !g_frameFenceValues
+        || backBufferIdx >= g_numBackBuffers) return false;
+    const UINT64 submittedValue = ++g_fenceValue;
+    if (FAILED(queue->Signal(g_fence, submittedValue))) return false;
+    g_frameFenceValues[backBufferIdx] = submittedValue;
+    return true;
+}
+
 static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
     __try {
-        if (!RebindRenderTargetsIfNeeded(pSwapChain)) return;
+        if (!RebindRenderTargetsIfNeeded(pSwapChain)) {
+            HandleRenderException();
+            return;
+        }
 
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -395,8 +472,18 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
         }
 
         if (backBufferIdx < g_numBackBuffers && g_backBuffers[backBufferIdx] && g_cmdAllocators[backBufferIdx]) {
-            g_cmdAllocators[backBufferIdx]->Reset();
-            g_cmdList->Reset(g_cmdAllocators[backBufferIdx], nullptr);
+            // D3D12 forbids resetting a command allocator while the GPU may still
+            // execute lists recorded from it. Back-buffer rotation alone is not a
+            // synchronization guarantee, so wait on this frame context's fence.
+            if (!WaitForFrameAllocator(backBufferIdx)) {
+                HandleRenderException();
+                return;
+            }
+            if (FAILED(g_cmdAllocators[backBufferIdx]->Reset())
+                || FAILED(g_cmdList->Reset(g_cmdAllocators[backBufferIdx], nullptr))) {
+                HandleRenderException();
+                return;
+            }
 
             D3D12_RESOURCE_BARRIER barrier{};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -415,7 +502,10 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
             barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
             g_cmdList->ResourceBarrier(1, &barrier);
 
-            g_cmdList->Close();
+            if (FAILED(g_cmdList->Close())) {
+                HandleRenderException();
+                return;
+            }
 
             ID3D12CommandList* ppCmdLists[] = { g_cmdList };
             // Set re-entrancy flag so HookedExecuteCommandLists ignores this submission.
@@ -423,6 +513,10 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
             ID3D12CommandQueue* pQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
             if (pQueue) {
                 pQueue->ExecuteCommandLists(1, ppCmdLists);
+                if (!MarkFrameSubmitted(pQueue, backBufferIdx)) {
+                    HandleRenderException();
+                    return;
+                }
                 if (g_logNextOverlaySubmit.exchange(false, std::memory_order_relaxed)) {
                     LogOverlaySubmission(pSwapChain, pQueue, backBufferIdx);
                 }
@@ -441,11 +535,27 @@ static void RenderOverlayFrame(IDXGISwapChain* pSwapChain) {
 // swap-chain state monitor, lazy init, and overlay render. The caller forwards to
 // the appropriate original function afterward.
 static void HandlePresent(IDXGISwapChain* pSwapChain) {
+    if (g_faulted.load(std::memory_order_acquire)) return;
+
+    // Before ImGui owns the game WndProc, poll only the workbench hotkey edge.
+    // Once initialized, HookedWndProc handles it and this poll merely tracks the
+    // key state, preventing a double toggle on the initialization frame.
+    static bool previousBootstrapHotkey = false;
+    const bool bootstrapHotkey = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
+        && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
+        && (GetAsyncKeyState('B') & 0x8000) != 0;
+    const bool bootstrapHotkeyPressed = bootstrapHotkey && !previousBootstrapHotkey;
+    previousBootstrapHotkey = bootstrapHotkey;
+    if (!g_initialized.load(std::memory_order_relaxed) && bootstrapHotkeyPressed) {
+        UIHook::ToggleUI();
+    }
+
     ID3D12CommandQueue* selectedQueue = SelectPresentQueue(pSwapChain);
     ID3D12CommandQueue* activeQueue = g_gameCommandQueue.load(std::memory_order_relaxed);
     if (selectedQueue && selectedQueue != activeQueue) {
         if (g_initialized.load(std::memory_order_relaxed)) {
             HandleRenderException();
+            return;
         }
         g_gameCommandQueue.store(selectedQueue, std::memory_order_relaxed);
         UILog(std::format("Present selected swap chain 0x{:X} with queue 0x{:X} ({}).",
@@ -464,6 +574,7 @@ static void HandlePresent(IDXGISwapChain* pSwapChain) {
                 curDesc.BufferDesc.Width != g_lastSwapWidth ||
                 curDesc.BufferDesc.Height != g_lastSwapHeight) {
                 HandleRenderException();
+                return;
             }
 
             // Detect HWND change → re-hook WndProc
@@ -481,9 +592,13 @@ static void HandlePresent(IDXGISwapChain* pSwapChain) {
     // Belt-and-suspenders: C++ try/catch for C++ exceptions (0xE06D7363)
     // which MSVC /EHsc may not route to the __try/__except in RenderOverlayFrame.
     try {
-        if (!g_initialized.load(std::memory_order_relaxed)) {
+        if (g_isOpen.load(std::memory_order_relaxed)
+            && !g_initialized.load(std::memory_order_relaxed)) {
             if (g_gameCommandQueue.load(std::memory_order_relaxed)) {
-                InitImGui(pSwapChain);
+                if (!TryInitImGui(pSwapChain)) {
+                    HandleRenderException();
+                    return;
+                }
             }
         }
 
@@ -534,14 +649,20 @@ static HRESULT InvokeOrigResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCo
 // ResizeBuffers Hook
 // ============================================================================
 HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
+    if (g_faulted.load(std::memory_order_acquire)) {
+        return OriginalResizeBuffersFor(pSwapChain)(
+            pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    }
+
     // Force-close the overlay and clear the captured queue unconditionally.
     // Frame Generation reconfigures the presentation pipeline on enable/disable,
     // invalidating both our D3D12 resources and the command queue pointer.
-    if (g_isOpen.exchange(false)) RestoreGameCursorState();
+    const bool wasInitialized = g_initialized.load(std::memory_order_acquire);
+    if (g_isOpen.exchange(false) && wasInitialized) RestoreGameCursorState();
     // Keep the authoritative creation-time swap-chain/queue association. Clearing
     // it here used to make RTSS's next DIRECT submission win the fallback race.
 
-    if (g_initialized.load()) {
+    if (wasInitialized) {
         g_initialized.store(false);
 
         // Release back buffer COM references BEFORE calling ResizeBuffers.
@@ -563,6 +684,8 @@ HRESULT STDMETHODCALLTYPE HookedResizeBuffers(IDXGISwapChain* pSwapChain, UINT B
         g_cmdList       = nullptr;
         g_cmdAllocators = nullptr;
         g_fence         = nullptr;
+        delete[] g_frameFenceValues;
+        g_frameFenceValues = nullptr;
         if (g_fenceEvent) { CloseHandle(g_fenceEvent); g_fenceEvent = nullptr; }
         g_d3dDevice     = nullptr;
         g_numBackBuffers = 0;

@@ -72,21 +72,28 @@ Studied rather than reinvented:
    heuristic, but is strictly better than permanently latching the first DIRECT
    queue observed.
 
-3. **Per-instance swapchain hooking (robustness).** Install a private vtable on
-   the actual swapchain returned through the completed hook chain. This keeps
-   `Present`, `Present1`, and `ResizeBuffers` observable when RTSS or another
-   layer routes later calls around the canonical DXGI functions harvested from
-   a dummy device. Forward native entries through the MinHook trampoline so the
-   earlier injector remains downstream in the chain.
+3. **Canonical entry-point chaining.** Hook the SDK-defined DXGI/D3D12 entry
+   points with MinHook and always forward through its trampoline. Do not replace
+   an individual COM object's vtable: proxy swapchains may expose implementation
+   details that make copied table sizes and lifetime assumptions unsafe.
 
-4. **Detect-and-tell.** We already detect a prior hook on the render entry
-   points (the `[Compat]` diagnostic). Promote that into the shipping build as a
-   clear log line so a silent no-overlay becomes a self-serve diagnosis, e.g.:
-   *"Incompatible prior render hook detected on Present — another frame-gen /
-   capture / overlay layer owns the chain; the overlay may not render. Try
-   disabling frame generation or capture overlays."*
+4. **Fence every frame context.** Record the fence value after each overlay
+   submission and wait for it before resetting that back buffer's command
+   allocator. Swapchain rotation does not by itself prove the GPU has finished
+   using an allocator.
 
-5. **Documented incompatibilities + workarounds.** For injectors we can't
+5. **Detect-and-tell.** At startup, `[UIHook]` records recognizable inline hooks
+   on the render entry points, including the destination module when it can be
+   resolved. This turns a silent no-overlay into a useful lead. Vtable replacement,
+   proxy objects, and hooks installed after AbsoluteHOTAS remain invisible to this
+   check, so absence of the message does not clear other graphics layers.
+
+6. **Fail-open workbench.** Initialize ImGui/D3D12 only after the first open
+   request. A renderer failure is latched for the session and returns every hook
+   to transparent forwarding; controller polling and manual configuration remain
+   active. `[UI] bEnableWorkbench=false` bypasses renderer-hook installation.
+
+7. **Documented incompatibilities + workarounds.** For injectors we can't
    coexist with, name the conflict and the fix rather than chasing a universal
    solution. The overlay is a config-time tool (Ctrl+Alt+B), so toggling a
    conflicting layer off during setup is an acceptable workaround.
@@ -97,22 +104,56 @@ Studied rather than reinvented:
 | --- | --- |
 | Per-swapchain queue registry | `AssociateSwapChainQueue`, `SelectPresentQueue` |
 | Queue capture (primary / fallback) | `HookedCreateSwapChainForHwnd`, `HookedExecuteCommandLists` |
-| Prior-hook detection | `[Compat]` instrumentation at hook install |
+| Prior-hook detection | `[UIHook]` instrumentation at hook install |
 | Proxy/FG swapchain rebind | `RebindRenderTargetsIfNeeded`, per-frame monitor in `HandlePresent` |
-| Returned-instance hook | `InstallInstanceRenderHooks`, `OriginalPresentFor` |
+| Canonical hook forwarding | `OriginalPresentFor`, `OriginalPresent1For`, `OriginalResizeBuffersFor` |
+| Per-frame allocator fences | `WaitForFrameAllocator`, `MarkFrameSubmitted` |
+| Fail-open / manual bypass | `g_faulted`, `HandleRenderException`, `[UI] bEnableWorkbench` |
 | Submit to present queue | `RenderOverlayFrame` → `pQueue->ExecuteCommandLists` |
 
 ## Verified combinations
 
 | Layer | Result |
 | --- | --- |
-| RTSS 7.3.5, D3D12, RTSS loaded first | Verified: wizard renders through the returned-instance hook |
+| RTSS 7.3.5, D3D12, RTSS loaded first | Verified: wizard renders with canonical hook chaining |
 
-## Known incompatibilities
+## Reported combinations awaiting confirmation
+
+| Layer | Report | Current classification | Workaround / retest |
+| --- | --- | --- | --- |
+| Razer Cortex In-Game FPS/features overlay | One incompatibility report; AbsoluteHOTAS version uncertain and possibly 3.0.2 | Plausible member of the injected capture/overlay hook category, not yet a confirmed 4.0 incompatibility | In Razer Cortex, turn off the in-game features under **Game Booster → In-Game**, restart Starfield, and compare with them enabled on the latest AbsoluteHOTAS build |
+
+Razer documents that Cortex renders an in-game FPS overlay and that the features
+can be enabled or disabled under **Game Booster → In-Game**:
+[Razer Cortex support and FAQs](https://mysupport.razer.com/app/answers/detail/a_id/6104/~/razer-cortex-10-support-%26-faqs).
+Razer does not document the graphics entry points it intercepts. Legacy Cortex
+diagnostics observed during this review explicitly refer to process injection and
+hook lifecycle, which supports the category classification but does not prove a
+specific `Present`, `Present1`, or `ExecuteCommandLists` implementation.
+
+The current per-swapchain queue association landed after the packaged 3.0.2
+build. A 3.0.2-only report therefore must be
+reproduced on 4.0 before it becomes a named incompatibility.
+
+For a useful retest, record:
+
+- exact AbsoluteHOTAS and Razer Cortex versions;
+- whether the Razer FPS/features overlay is enabled;
+- whether the system cursor appears when `Ctrl+Alt+B` is pressed;
+- whether each overlay renders when tested alone;
+- launch order, display mode, frame-generation setting, and other graphics layers;
+- `AbsoluteHOTAS.log` from one enabled run and one Razer-disabled control run.
+
+The most useful `[UIHook]` lines are the prior-hook destination module,
+swapchain/queue association, selected present queue, ImGui
+initialization, and first overlay submission.
+
+## Risk categories and workarounds
 
 Workaround for all: disable the conflicting layer (at least while using the
-overlay). Update to the latest AbsoluteHOTAS first — the standardized hooking in
-3.0.1+ resolves several earlier cases.
+overlay). Presence in this table identifies a shared render-chain risk, not proof
+that every listed product/version conflicts. Update to the latest AbsoluteHOTAS
+first because the 4.0 renderer includes compatibility work absent from 3.0.2.
 
 | Layer | Where to disable |
 | --- | --- |
@@ -121,6 +162,7 @@ overlay). Update to the latest AbsoluteHOTAS first — the standardized hooking 
 | NVIDIA DLSS Override (forced FG) | NVIDIA App → Driver settings |
 | NVIDIA RTX HDR / Dynamic Vibrance | NVIDIA App → game filters |
 | Intel XeSS | In-game upscaler setting |
+| Razer Cortex FPS/features overlay | Razer Cortex → Game Booster → In-Game |
 | Capture / overlay (OBS, Steam, Discord, ShadowPlay) | The respective app's overlay/capture toggle |
 | Multi-display present-mode edge cases (MPO / independent flip) | Test single display; borderless vs. exclusive fullscreen |
 
@@ -132,3 +174,7 @@ overlay). Update to the latest AbsoluteHOTAS first — the standardized hooking 
 - Specific culprit on that log: **not** definitively identified — the module
   list leans toward NVIDIA Streamline, but recording/driver-level layers are not
   excluded. Identity does not change the approach above.
+- Razer Cortex: product feature and disable path are documented by Razer; process
+  injection/hook lifecycle is supported by locally observed legacy Cortex
+  diagnostics; exact graphics entry points and current 4.0 incompatibility remain
+  unverified.

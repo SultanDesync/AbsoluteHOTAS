@@ -1,0 +1,126 @@
+name: Bug report
+description: Report a reproducible AbsoluteHOTAS problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping stabilize 4.0.1. Please complete every relevant field.
+        Remove private information from files before attaching them.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am using an unmodified AbsoluteHOTAS DLL from an official release.
+          required: true
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I reproduced the problem after restarting the game.
+          required: true
+
+  - type: input
+    id: absolutehotas_version
+    attributes:
+      label: AbsoluteHOTAS version
+      description: Use the exact version shown by the download or at the top of AbsoluteHOTAS.log.
+      placeholder: 4.0.1
+    validations:
+      required: true
+
+  - type: input
+    id: game_sfse_versions
+    attributes:
+      label: Starfield and SFSE versions
+      placeholder: "Starfield 1.x.x; SFSE 0.x.x"
+    validations:
+      required: true
+
+  - type: input
+    id: install_environment
+    attributes:
+      label: Install environment
+      description: Include mod manager, Windows/Proton, and relevant input or overlay software.
+      placeholder: MO2 on Windows 11; Steam Input disabled
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Controller hardware
+      description: Give the exact device names and describe the bindings involved.
+      placeholder: |
+        VKB Gladiator NXT EVO
+        Throttle: device axis ...
+        Affected button/profile/macro: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Crash
+        - Configuration loss or corruption
+        - Stuck synthetic input
+        - Core flight, saving, or startup regression
+        - Profile or macro failure
+        - UI or documentation problem
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: State the observed result and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start the game with ...
+        2. Load ...
+        3. Move or press ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: frequency
+    attributes:
+      label: Reproduction rate
+      placeholder: Every time; 3 of 5 attempts; once
+    validations:
+      required: true
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Logs and configuration
+      description: |
+        Set bEnableLog=true, reproduce once, then attach AbsoluteHOTAS.log.
+        Also attach AbsoluteHOTAS.ini, AbsoluteHOTAS_Custom.ini, and affected profile
+        files when relevant. Drag files into this field. Remove private information first.
+      placeholder: Attach files here, or explain why they are unavailable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: mods
+    attributes:
+      label: Relevant mods and isolation results
+      description: List input, UI, camera, ship-control, or overlay mods and say whether disabling them changes the result.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add screenshots, video, workarounds, or the last known working version.

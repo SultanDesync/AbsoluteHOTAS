@@ -74,3 +74,9 @@ Consider 4.0.1 the stable promotion candidate after a meaningful spread of real
 installs produces no recurring major blockers, the most common profile UX problems
 are addressed, and installation/upgrade guidance has proved adequate. At that point,
 4.0.1 can become the main download and 3.0.2 can move to optional or archived files.
+
+Bug intake, severity, lifecycle, verification, and the promotion gate are defined
+in [`BUG-TRIAGE-v4.0.1.md`](BUG-TRIAGE-v4.0.1.md).
+
+The initial maintenance review and prioritized structural-risk backlog are recorded
+in [`TECH-DEBT-v4.0.1.md`](TECH-DEBT-v4.0.1.md).

@@ -119,8 +119,8 @@ Presentation
     fixed Save/status footer
     modal host
   Pages
-    Bind Controls
-    Tune
+    Flight Controls
+    Flight Modes
     Advanced
   Components
     responsive binding table, axis preview, section, choice group,
@@ -173,7 +173,7 @@ the renderer-sensitive implementation:
 - `UIHook.cpp` owns private state definitions and the public install, shutdown,
   toggle, visibility, and callback lifecycle;
 - `UIHookSwapChain.cpp` owns vtable discovery, prior-hook diagnostics,
-  per-instance hooks, command-queue association, and DXGI/D3D12 interception;
+  command-queue association, and DXGI/D3D12 interception;
 - `UIHookRenderer.cpp` owns ImGui/D3D12 initialization, render targets, frame
   submission, resize handling, teardown, and exception recovery;
 - `UIHookInput.cpp` owns the window procedure, hotkey message, input capture,
@@ -188,10 +188,19 @@ Only `UIHook.h` is consumed outside the overlay-host subsystem.
 The persistent shell shows the editing profile, dirty state, game-context
 warning, primary navigation, Save & Apply, status, and a close affordance.
 
-Primary tasks expose flight bindings, ship actions, and tuning directly.
-Optional capabilities reveal their subordinate controls only when selected or
-enabled. Macros, profile management, device tools, plugin controls, and
-diagnostics live in Advanced unless a contextual link brings the user there.
+The opening Flight Axes (Core) page treats direct flight control as the product,
+not as configuration data. Thrust, rotation, and six-degree-of-freedom
+translation are visually distinct groups. Each axis card keeps its binding,
+inversion, response controls, calibration context, status, and live signal
+together so configuring an axis never requires a second page. It also names the
+runtime injection destination and activation rule, and calls out any synthetic
+keyboard/mouse output associated with that axis.
+
+Flight Modes holds optional systems such as independent aiming and rate
+throttle. Their core switches remain linked from the axis they modify. Optional
+capabilities reveal subordinate controls when selected or enabled. Macros,
+profile management, device tools, plugin controls, and diagnostics live in
+Advanced unless a contextual link brings the user there.
 
 The style system then maps those roles to consistent spacing, typography,
 responsive tables, action hierarchy, semantic status colors, visible keyboard
@@ -202,6 +211,7 @@ Color reinforces meaning but is never its only carrier.
 
 - Exactly one main vertical scrollbar exists.
 - Primary task tabs are visually distinct from their labeled subordinate routes.
+- Every flight axis discloses its injection path and any modifier or shared-lane limitation.
 - Context and footer remain visible at 720p and supported DPI scales.
 - Every workflow is completable without a mouse.
 - Opening the workbench parks every plugin-owned gameplay output.
@@ -218,7 +228,7 @@ Color reinforces meaning but is never its only carrier.
 
 1. Establish the session, navigation, shell, and lifecycle contracts.
 2. Establish shared responsive components.
-3. Migrate Bind Controls, then Tune, then Advanced.
+3. Migrate Flight Controls, then Flight Modes, then Advanced.
 4. Route capture and persistence through typed session commands.
 5. Validate keyboard, DPI, gameplay/menu, profile, capture, and renderer
    lifecycle behavior.
@@ -240,7 +250,9 @@ The first workbench migration establishes:
 - runtime suspension of plugin memory writes and synthetic output while the
   workbench is open, with edge reseeding on resume; and
 - cursor/clip restoration during normal close, renderer failure, resize, and
-  shutdown.
+  shutdown;
+- first-open renderer initialization, session-latched renderer failure, and a
+  startup bypass that leave manual configuration and flight controls active.
 
 Remaining migration work is deliberately narrower: replace the numeric capture
 slot adapter with typed field targets, move repository commands behind a batch

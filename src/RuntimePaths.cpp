@@ -3,8 +3,10 @@
 #include "RuntimePaths.h"
 
 #include <windows.h>
+#include <atomic>
 #include <fstream>
 #include <cwctype>
+#include <mutex>
 
 namespace {
     std::filesystem::path ModulePath()
@@ -21,6 +23,24 @@ namespace {
         }
 
         return std::filesystem::current_path() / L"Data" / L"SFSE" / L"Plugins" / L"AbsoluteHOTAS.dll";
+    }
+
+    bool ParseIniBool(std::wstring_view text, bool fallback)
+    {
+        while (!text.empty() && std::iswspace(text.front())) text.remove_prefix(1);
+        while (!text.empty() && std::iswspace(text.back())) text.remove_suffix(1);
+
+        std::wstring normalized;
+        normalized.reserve(text.size());
+        for (const auto ch : text) {
+            normalized.push_back(static_cast<wchar_t>(std::towlower(ch)));
+        }
+
+        if (normalized == L"1" || normalized == L"true" ||
+            normalized == L"yes" || normalized == L"on") return true;
+        if (normalized == L"0" || normalized == L"false" ||
+            normalized == L"no" || normalized == L"off") return false;
+        return fallback;
     }
 }
 
@@ -50,11 +70,26 @@ namespace RuntimePaths {
         return PluginDirectory() / L"AbsoluteHOTAS.log";
     }
 
-    static bool g_loggingEnabled = false;
+    static std::atomic<bool> g_loggingEnabled{ false };
+    static std::mutex g_logMutex;
 
     bool IsLoggingEnabled()
     {
-        return g_loggingEnabled;
+        return g_loggingEnabled.load(std::memory_order_acquire);
+    }
+
+    bool IsWorkbenchEnabled()
+    {
+        wchar_t value[32]{};
+        GetPrivateProfileStringW(L"UI", L"bEnableWorkbench", L"1", value,
+                                 static_cast<DWORD>(std::size(value)), IniPath().c_str());
+        if (std::filesystem::exists(CustomIniPath())) {
+            wchar_t customValue[32]{};
+            GetPrivateProfileStringW(L"UI", L"bEnableWorkbench", value, customValue,
+                                     static_cast<DWORD>(std::size(customValue)), CustomIniPath().c_str());
+            std::copy(std::begin(customValue), std::end(customValue), std::begin(value));
+        }
+        return ParseIniBool(value, true);
     }
 
     void InitLogging()
@@ -76,21 +111,7 @@ namespace RuntimePaths {
             std::copy(std::begin(customValue), std::end(customValue), std::begin(value));
         }
 
-        std::wstring_view text{ value };
-        while (!text.empty() && std::iswspace(text.front())) {
-            text.remove_prefix(1);
-        }
-        while (!text.empty() && std::iswspace(text.back())) {
-            text.remove_suffix(1);
-        }
-
-        std::wstring normalized;
-        normalized.reserve(text.size());
-        for (const auto ch : text) {
-            normalized.push_back(static_cast<wchar_t>(std::towlower(ch)));
-        }
-
-        g_loggingEnabled = (normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on");
+        g_loggingEnabled.store(ParseIniBool(value, false), std::memory_order_release);
     }
 
     // Rotate a stale log once per session, before the first line is appended, so a
@@ -117,8 +138,11 @@ namespace RuntimePaths {
 
     void Log(const char* a_tag, const std::string& a_message)
     {
-        if (!g_loggingEnabled) return;
+        if (!g_loggingEnabled.load(std::memory_order_relaxed)) return;
 
+        // Called from controller, UI/render, and hook threads. Keep rotation and
+        // append in one critical section so lines cannot race or interleave.
+        std::lock_guard<std::mutex> lock(g_logMutex);
         RotateIfLarge();
 
         std::ofstream log(LogPath(), std::ios::app);

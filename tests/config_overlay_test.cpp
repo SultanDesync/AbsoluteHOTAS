@@ -1,8 +1,7 @@
 // Unit test for ProfileOverlay::ComputeDiff — the sparse-diff that turns a profile's
 // effective config + base into a minimal overlay. Built via the opt-in
 // `config_overlay_test` xmake target:
-//   xmake build config_overlay_test
-//   xmake run   config_overlay_test
+//   xmake test config_overlay_test/*
 //
 // ComputeDiff needs only SimpleIni, so the target compiles this file plus
 // src/ProfileOverlay.cpp with no PCH, independent of the plugin target.

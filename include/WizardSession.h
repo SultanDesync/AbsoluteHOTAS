@@ -10,13 +10,12 @@ namespace WizardSession {
 
 enum class Page { Bind, Tune, Advanced };
 enum class BindPage { FlightAxes, ShipButtons };
-enum class TunePage { FlightAxes, Aiming, GamepadThrottle };
+enum class TunePage { Aiming, GamepadThrottle };
 enum class AdvancedPage { Macros, PluginControls, Devices };
 
 enum class Route {
     BindFlightAxes,
     BindShipButtons,
-    TuneFlightAxes,
     TuneAiming,
     TuneGamepadThrottle,
     AdvancedMacros,

@@ -17,6 +17,8 @@
 namespace UIHook::Detail {
 
 std::atomic<bool> g_isOpen{false};
+std::atomic<bool> g_available{false};
+std::atomic<bool> g_faulted{false};
 CloseGuardCallback g_closeGuardCallback = nullptr;
 std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_logNextOverlaySubmit{false};
@@ -38,6 +40,7 @@ std::unordered_map<IUnknown*, ID3D12CommandQueue*> g_swapChainQueues;
 ID3D12Fence* g_fence = nullptr;
 HANDLE g_fenceEvent = nullptr;
 UINT64 g_fenceValue = 0;
+UINT64* g_frameFenceValues = nullptr;
 UINT g_numBackBuffers = 0;
 ID3D12Resource** g_backBuffers = nullptr;
 D3D12_CPU_DESCRIPTOR_HANDLE* g_rtvHandles = nullptr;
@@ -59,8 +62,6 @@ void* g_presentTarget = nullptr;
 void* g_present1Target = nullptr;
 void* g_resizeBuffersTarget = nullptr;
 
-std::mutex g_instanceHooksMutex;
-std::unordered_map<IUnknown*, InstanceRenderHooks> g_instanceHooks;
 thread_local bool g_inOverlaySubmit = false;
 
 void UILog(const std::string& msg) {
@@ -76,6 +77,8 @@ using namespace Detail;
 
 
 bool Install() {
+    g_available.store(false, std::memory_order_relaxed);
+    g_faulted.store(false, std::memory_order_relaxed);
     UILog("Installing D3D12 hooks...");
 
     void* pPresent = nullptr;
@@ -136,11 +139,13 @@ bool Install() {
     if (MH_CreateHook(pCreateSwapChainForHwnd, &HookedCreateSwapChainForHwnd,
         reinterpret_cast<void**>(&g_origCreateSwapChainForHwnd)) != MH_OK) {
         UILog("ERROR: Failed to create CreateSwapChainForHwnd hook.");
+        MH_Uninitialize();
         return false;
     }
 
     if (MH_CreateHook(pPresent, &HookedPresent, reinterpret_cast<void**>(&g_origPresent)) != MH_OK) {
         UILog("ERROR: Failed to create Present hook.");
+        MH_Uninitialize();
         return false;
     }
 
@@ -153,6 +158,7 @@ bool Install() {
 
     if (MH_CreateHook(pResizeBuffers, &HookedResizeBuffers, reinterpret_cast<void**>(&g_origResizeBuffers)) != MH_OK) {
         UILog("ERROR: Failed to create ResizeBuffers hook.");
+        MH_Uninitialize();
         return false;
     }
 
@@ -160,20 +166,26 @@ bool Install() {
     if (MH_CreateHook(pExecuteCommandLists, &HookedExecuteCommandLists,
         reinterpret_cast<void**>(&g_origExecuteCommandLists)) != MH_OK) {
         UILog("ERROR: Failed to create ExecuteCommandLists hook.");
+        MH_Uninitialize();
         return false;
     }
 
     if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
         UILog("ERROR: Failed to enable hooks.");
+        MH_Uninitialize();
         return false;
     }
 
+    g_available.store(true, std::memory_order_release);
     UILog("D3D12 hooks installed successfully. Press Ctrl+Alt+B to toggle overlay.");
     return true;
 }
 
 void Shutdown() {
-    if (g_isOpen.exchange(false)) RestoreGameCursorState();
+    g_available.store(false, std::memory_order_release);
+    if (g_isOpen.exchange(false) && g_initialized.load(std::memory_order_acquire)) {
+        RestoreGameCursorState();
+    }
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
@@ -206,12 +218,19 @@ void Shutdown() {
 
     delete[] g_backBuffers;  g_backBuffers = nullptr;
     delete[] g_rtvHandles;   g_rtvHandles = nullptr;
+    delete[] g_frameFenceValues; g_frameFenceValues = nullptr;
     g_gameCommandQueue.store(nullptr, std::memory_order_relaxed);
     g_recentDirectQueue.store(nullptr, std::memory_order_relaxed);
     ReleaseSwapChainQueueAssociations();
 }
 
 void ToggleUI() {
+    if (!g_available.load(std::memory_order_acquire)) return;
+    if (g_faulted.load(std::memory_order_acquire)) {
+        UILog("Workbench toggle ignored: renderer disabled for this session; manual configuration remains active.");
+        return;
+    }
+
     if (g_hWnd && GetCurrentThreadId() != GetWindowThreadProcessId(g_hWnd, nullptr)) {
         PostMessageW(g_hWnd, GetToggleUIMessage(), 0, 0);
         return;
@@ -227,6 +246,10 @@ void ToggleUI() {
         UILog(std::format("Overlay toggle requested: OPEN (initialized={}, swapChain=0x{:X}, queue=0x{:X}).",
             g_initialized.load(std::memory_order_relaxed), reinterpret_cast<uintptr_t>(g_targetSwapChain),
             reinterpret_cast<uintptr_t>(g_gameCommandQueue.load(std::memory_order_relaxed))));
+        if (!g_initialized.load(std::memory_order_acquire)) {
+            UILog("Workbench renderer initialization deferred to the next game Present.");
+            return;
+        }
         // --- Opening the overlay ---
         // Save the game's cursor clip rect so we can restore it on close
         g_hadClipRect = (GetClipCursor(&g_savedClipRect) != 0);
@@ -244,6 +267,7 @@ void ToggleUI() {
         }
     } else {
         UILog("Overlay toggle requested: CLOSE.");
+        if (!g_initialized.load(std::memory_order_acquire)) return;
         // --- Closing the overlay ---
         // Hide the software cursor
         if (g_initialized.load()) {
@@ -256,7 +280,9 @@ void ToggleUI() {
 }
 
 bool IsUIOpen() {
-    return g_isOpen.load(std::memory_order_relaxed);
+    return g_available.load(std::memory_order_relaxed)
+        && !g_faulted.load(std::memory_order_relaxed)
+        && g_isOpen.load(std::memory_order_relaxed);
 }
 
 void SetDrawCallback(DrawCallback cb) {

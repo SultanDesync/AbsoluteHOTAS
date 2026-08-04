@@ -1,11 +1,9 @@
 // Unit test for ControlMapReader. Built via the `control_map_reader_test` xmake
 // target (opt-in; not built by default). From the repo root, in PowerShell:
-//   xmake build control_map_reader_test
-//   xmake run   control_map_reader_test (Resolve-Path tests/fixtures).Path
+//   xmake test control_map_reader_test/*
 //
-// The fixtures directory is passed as argv[1]. Pass it ABSOLUTE: `xmake run`
-// launches the exe from the target's output dir, not the repo root, so a
-// relative "tests/fixtures" would not resolve.
+// The target supplies the fixtures directory as argv[1] and runs from the repo
+// root so the checked-in fixture paths resolve consistently.
 //
 // The target compiles this file plus src/ControlMapReader.cpp with no PCH, so it
 // stays independent of the plugin target.

@@ -62,8 +62,8 @@ static bool DrawSecondaryNavigationButton(const char* label, bool selected) {
 
 static const char* PrimarySectionLabel() {
     switch (WizardSession::GetPage()) {
-        case WizardSession::Page::Bind: return "Bind Controls";
-        case WizardSession::Page::Tune: return "Tune";
+        case WizardSession::Page::Bind: return "Flight Controls";
+        case WizardSession::Page::Tune: return "Flight Modes";
         case WizardSession::Page::Advanced: return "Advanced";
     }
     return "Section";
@@ -88,8 +88,8 @@ static void DrawPrimaryNavigation() {
             }
         };
 
-        DrawTab("Bind Controls##Primary", WizardSession::Page::Bind);
-        DrawTab("Tune##Primary", WizardSession::Page::Tune);
+        DrawTab("Flight Controls##Primary", WizardSession::Page::Bind);
+        DrawTab("Flight Modes##Primary", WizardSession::Page::Tune);
         DrawTab("Advanced##Primary", WizardSession::Page::Advanced);
         ImGui::EndTabBar();
     }
@@ -102,14 +102,13 @@ static void DrawSecondaryNavigation() {
     ImGui::Spacing();
     ImGui::SeparatorText(PrimarySectionLabel());
 
-    int columns = 2;
-    if (WizardSession::GetPage() != WizardSession::Page::Bind) columns = 3;
+    int columns = WizardSession::GetPage() == WizardSession::Page::Advanced ? 3 : 2;
     if (!ImGui::BeginTable("SecondaryNavigation", columns,
             ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_PadOuterX)) return;
 
     if (WizardSession::GetPage() == WizardSession::Page::Bind) {
         ImGui::TableNextColumn();
-        if (DrawSecondaryNavigationButton("Flight Axes##Secondary",
+        if (DrawSecondaryNavigationButton("Flight Axes (Core)##Secondary",
                 WizardSession::GetBindPage() == WizardSession::BindPage::FlightAxes))
             WizardSession::SelectBindPage(WizardSession::BindPage::FlightAxes);
         ImGui::TableNextColumn();
@@ -118,15 +117,11 @@ static void DrawSecondaryNavigation() {
             WizardSession::SelectBindPage(WizardSession::BindPage::ShipButtons);
     } else if (WizardSession::GetPage() == WizardSession::Page::Tune) {
         ImGui::TableNextColumn();
-        if (DrawSecondaryNavigationButton("Flight Axes##Secondary",
-                WizardSession::GetTunePage() == WizardSession::TunePage::FlightAxes))
-            WizardSession::SelectTunePage(WizardSession::TunePage::FlightAxes);
-        ImGui::TableNextColumn();
         if (DrawSecondaryNavigationButton("Aiming & Combat##Secondary",
                 WizardSession::GetTunePage() == WizardSession::TunePage::Aiming))
             WizardSession::SelectTunePage(WizardSession::TunePage::Aiming);
         ImGui::TableNextColumn();
-        if (DrawSecondaryNavigationButton("Gamepad Throttle##Secondary",
+        if (DrawSecondaryNavigationButton("Rate Throttle##Secondary",
                 WizardSession::GetTunePage() == WizardSession::TunePage::GamepadThrottle))
             WizardSession::SelectTunePage(WizardSession::TunePage::GamepadThrottle);
     } else {
@@ -151,9 +146,8 @@ static void DrawActivePage(WizardState& s, bool dirty) {
         WizardUI::DrawProfileManagementPanel(dirty);
 
     switch (WizardSession::GetRoute()) {
-        case WizardSession::Route::BindFlightAxes: WizardUI::DrawAxesTab(s, false); break;
+        case WizardSession::Route::BindFlightAxes: WizardUI::DrawAxesTab(s); break;
         case WizardSession::Route::BindShipButtons: WizardUI::DrawButtonsTab(s); break;
-        case WizardSession::Route::TuneFlightAxes: WizardUI::DrawAxesTab(s, true); break;
         case WizardSession::Route::TuneAiming: WizardUI::DrawAimingTab(s); break;
         case WizardSession::Route::TuneGamepadThrottle: WizardUI::DrawGamepadThrottleTab(s); break;
         case WizardSession::Route::AdvancedMacros: WizardUI::DrawMacrosTab(s); break;

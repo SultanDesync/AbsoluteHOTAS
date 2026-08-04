@@ -7,74 +7,20 @@ namespace UIHook::Detail {
 static IUnknown* GetComIdentity(IUnknown* object);
 
 
-static void InstallInstanceRenderHooks(IDXGISwapChain1* swapChain) {
-    if (!swapChain) return;
-    IUnknown* identity = GetComIdentity(swapChain);
-    if (!identity) return;
-
-    std::lock_guard<std::mutex> lock(g_instanceHooksMutex);
-    if (g_instanceHooks.contains(identity)) {
-        identity->Release();
-        return;
-    }
-
-    // IDXGISwapChain4 has 41 slots. A private table avoids modifying DXGI's
-    // process-wide vtable and remains attached if RTSS later repatches the
-    // canonical function prologue.
-    constexpr size_t kSwapChain4VtableSlots = 41;
-    void*** objectVtable = reinterpret_cast<void***>(swapChain);
-    void** current = *objectVtable;
-    void** shadow = new void*[kSwapChain4VtableSlots];
-    std::copy_n(current, kSwapChain4VtableSlots, shadow);
-
-    InstanceRenderHooks hooks{};
-    hooks.present = reinterpret_cast<PresentFn>(current[8]);
-    hooks.resizeBuffers = reinterpret_cast<ResizeBuffersFn>(current[13]);
-    hooks.present1 = reinterpret_cast<Present1Fn>(current[22]);
-    hooks.shadowVtable = shadow;
-    shadow[8] = reinterpret_cast<void*>(&HookedPresent);
-    shadow[13] = reinterpret_cast<void*>(&HookedResizeBuffers);
-    shadow[22] = reinterpret_cast<void*>(&HookedPresent1);
-
-    g_instanceHooks.emplace(identity, hooks);
-    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(objectVtable), shadow);
-    UILog(std::format("Installed per-instance render hooks on swap chain 0x{:X} (identity 0x{:X}).",
-        reinterpret_cast<uintptr_t>(swapChain), reinterpret_cast<uintptr_t>(identity)));
-    identity->Release();
-}
-
-static InstanceRenderHooks FindInstanceRenderHooks(IUnknown* swapChain) {
-    InstanceRenderHooks hooks{};
-    IUnknown* identity = GetComIdentity(swapChain);
-    if (!identity) return hooks;
-    {
-        std::lock_guard<std::mutex> lock(g_instanceHooksMutex);
-        auto it = g_instanceHooks.find(identity);
-        if (it != g_instanceHooks.end()) hooks = it->second;
-    }
-    identity->Release();
-    return hooks;
-}
-
 PresentFn OriginalPresentFor(IDXGISwapChain* swapChain) {
-    PresentFn fn = FindInstanceRenderHooks(swapChain).present;
-    return reinterpret_cast<void*>(fn) == g_presentTarget ? g_origPresent : (fn ? fn : g_origPresent);
+    (void)swapChain;
+    return g_origPresent;
 }
 
 Present1Fn OriginalPresent1For(IDXGISwapChain1* swapChain) {
-    Present1Fn fn = FindInstanceRenderHooks(swapChain).present1;
-    return reinterpret_cast<void*>(fn) == g_present1Target ? g_origPresent1 : (fn ? fn : g_origPresent1);
+    (void)swapChain;
+    return g_origPresent1;
 }
 
 ResizeBuffersFn OriginalResizeBuffersFor(IDXGISwapChain* swapChain) {
-    ResizeBuffersFn fn = FindInstanceRenderHooks(swapChain).resizeBuffers;
-    return reinterpret_cast<void*>(fn) == g_resizeBuffersTarget ? g_origResizeBuffers : (fn ? fn : g_origResizeBuffers);
+    (void)swapChain;
+    return g_origResizeBuffers;
 }
-
-// Re-entrancy guard: RenderOverlayFrame calls ExecuteCommandLists on the game queue to
-// submit overlay draw commands. Without this flag, HookedExecuteCommandLists would see
-// our own submission and could overwrite the captured queue or emit spurious log lines.
-static thread_local bool g_inOverlaySubmit = false;
 
 static IUnknown* GetComIdentity(IUnknown* object) {
     if (!object) return nullptr;
@@ -157,6 +103,11 @@ HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
     IDXGIOutput*   pRestrictToOutput,
     IDXGISwapChain1** ppSwapChain)
 {
+    if (g_faulted.load(std::memory_order_acquire)) {
+        return g_origCreateSwapChainForHwnd(
+            pThis, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain);
+    }
+
     if (!g_gameCommandQueue.load(std::memory_order_relaxed) && pDevice) {
         ID3D12CommandQueue* pQueue = nullptr;
         if (SUCCEEDED(pDevice->QueryInterface(IID_PPV_ARGS(&pQueue)))) {
@@ -186,7 +137,6 @@ HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
             AssociateSwapChainQueue(*ppSwapChain, queue);
             queue->Release();
         }
-        InstallInstanceRenderHooks(*ppSwapChain);
     }
     // Selection belongs to HandlePresent, where the returned swap-chain identity
     // can be matched to its queue. Do not preserve the legacy process-wide latch.
@@ -204,7 +154,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateSwapChainForHwnd(
 //      submit the overlay command list; g_inOverlaySubmit prevents that from
 //      overwriting the captured queue or emitting spurious fallback log entries.
 void STDMETHODCALLTYPE HookedExecuteCommandLists(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
-    if (!g_inOverlaySubmit) {
+    if (!g_faulted.load(std::memory_order_relaxed) && !g_inOverlaySubmit) {
         D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
         if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
             g_recentDirectQueue.store(pQueue, std::memory_order_relaxed);

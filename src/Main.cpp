@@ -116,12 +116,16 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
         }
     }
 
-    // Phase 2: D3D12 ImGui overlay
-    if (UIHook::Install()) {
+    // Phase 2: optional D3D12 ImGui workbench. This is intentionally independent
+    // of the controller: users with an incompatible renderer stack can disable
+    // every graphics hook and continue using their manual configuration.
+    if (!RuntimePaths::IsWorkbenchEnabled()) {
+        MainLog("Workbench disabled by [UI] bEnableWorkbench=false; manual configuration and flight controls remain active.");
+    } else if (UIHook::Install()) {
         BindingWizard::Initialize();
-        MainLog("UIHook + BindingWizard initialized. Press Ctrl+Alt+B in-game.");
+        MainLog("UIHook + BindingWizard armed. Press Ctrl+Alt+B in-game to initialize the renderer.");
     } else {
-        MainLog("WARNING: UIHook installation failed. In-game UI disabled.");
+        MainLog("WARNING: UIHook installation failed. Workbench disabled; manual configuration and flight controls remain active.");
     }
 
     MainLog("Plugin load complete.");

@@ -9,7 +9,7 @@ namespace {
 
 Page s_page = Page::Bind;
 BindPage s_bindPage = BindPage::FlightAxes;
-TunePage s_tunePage = TunePage::FlightAxes;
+TunePage s_tunePage = TunePage::Aiming;
 AdvancedPage s_advancedPage = AdvancedPage::Macros;
 Status s_status;
 std::string s_pendingProfile;
@@ -72,7 +72,7 @@ void CancelCaptureForContextChange() {
 void Initialize() {
     s_page = Page::Bind;
     s_bindPage = BindPage::FlightAxes;
-    s_tunePage = TunePage::FlightAxes;
+    s_tunePage = TunePage::Aiming;
     s_advancedPage = AdvancedPage::Macros;
     s_status = {};
     s_pendingProfile.clear();
@@ -100,7 +100,6 @@ Route GetRoute() {
                 ? Route::BindFlightAxes : Route::BindShipButtons;
         case Page::Tune:
             switch (s_tunePage) {
-                case TunePage::FlightAxes: return Route::TuneFlightAxes;
                 case TunePage::Aiming: return Route::TuneAiming;
                 case TunePage::GamepadThrottle: return Route::TuneGamepadThrottle;
             }
@@ -151,7 +150,6 @@ void Navigate(Route route) {
     switch (route) {
         case Route::BindFlightAxes: SelectBindPage(BindPage::FlightAxes); break;
         case Route::BindShipButtons: SelectBindPage(BindPage::ShipButtons); break;
-        case Route::TuneFlightAxes: SelectTunePage(TunePage::FlightAxes); break;
         case Route::TuneAiming: SelectTunePage(TunePage::Aiming); break;
         case Route::TuneGamepadThrottle: SelectTunePage(TunePage::GamepadThrottle); break;
         case Route::AdvancedMacros: SelectAdvancedPage(AdvancedPage::Macros); break;

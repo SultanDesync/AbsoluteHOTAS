@@ -23,14 +23,9 @@ using CreateSwapChainForHwndFn = HRESULT(STDMETHODCALLTYPE*)(
     IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
     const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
 
-struct InstanceRenderHooks {
-    PresentFn present = nullptr;
-    Present1Fn present1 = nullptr;
-    ResizeBuffersFn resizeBuffers = nullptr;
-    void** shadowVtable = nullptr;
-};
-
 extern std::atomic<bool> g_isOpen;
+extern std::atomic<bool> g_available;
+extern std::atomic<bool> g_faulted;
 extern CloseGuardCallback g_closeGuardCallback;
 extern std::atomic<bool> g_initialized;
 extern std::atomic<bool> g_logNextOverlaySubmit;
@@ -52,6 +47,7 @@ extern std::unordered_map<IUnknown*, ID3D12CommandQueue*> g_swapChainQueues;
 extern ID3D12Fence* g_fence;
 extern HANDLE g_fenceEvent;
 extern UINT64 g_fenceValue;
+extern UINT64* g_frameFenceValues;
 extern UINT g_numBackBuffers;
 extern ID3D12Resource** g_backBuffers;
 extern D3D12_CPU_DESCRIPTOR_HANDLE* g_rtvHandles;
@@ -73,8 +69,6 @@ extern void* g_presentTarget;
 extern void* g_present1Target;
 extern void* g_resizeBuffersTarget;
 
-extern std::mutex g_instanceHooksMutex;
-extern std::unordered_map<IUnknown*, InstanceRenderHooks> g_instanceHooks;
 extern thread_local bool g_inOverlaySubmit;
 
 void UILog(const std::string& message);

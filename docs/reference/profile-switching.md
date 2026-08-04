@@ -25,7 +25,7 @@ aim mode — the lot.
   modes, and import/export controls are implemented. Override markers/revert and
   independent-copy creation remain to be built.
 
-The Flight Axes tab exposes `Axis injection enabled`, backed by
+The Flight Axes (Core) page exposes `Injection enabled`, backed by
 `[Injection] bEnableInjection`. It is editable in base and profiles; the FPS starter
 overlay opens with it disabled while retaining button and macro output.
 
@@ -129,13 +129,20 @@ bindings, custom key outputs, and macros you want. The user defines what parking
 means; the engine only tracks the flag.
 
 `bEnableInjection = false` suppresses **all memory injection** — the flight cluster
-(pitch/yaw/roll/throttle/strafe) and the source-object aim — while leaving
-**SendInput untouched**: ship-button outputs, `[ButtonExpansion]` custom keys, and
-macros/turbos all keep working. It is the same mechanism the pilot gate's
-`InjectionOnly` mode already uses; the profile flag just folds into the one
-`injectionAllowed` check, so landing on a parked profile parks injection through the
-existing release/disarm transition — no separate logic, and no touching the master
-`active` gate.
+(pitch/yaw/roll/throttle/strafe) and the source-object aim — while leaving the
+synthetic-output system active: ship-button outputs, `[ButtonExpansion]` custom
+keys, and macros/turbos all keep working. The axis-driven strafe modifier also
+remains live because it is evaluated before `injectionAllowed`; a displaced analog
+strafe axis or held digital strafe button can therefore continue to hold
+Starfield's resolved **Switch Flight Modes** output in a parked profile. The
+throttle boost-zone output is the exception: it is explicitly tied to
+`bEnableInjection` and releases when memory injection is parked.
+
+This is the same memory-parking mechanism the pilot gate's `InjectionOnly` mode
+uses. The profile flag folds into the one `injectionAllowed` check, so landing on
+a parked profile releases the memory gates without touching the master `active`
+gate. A parked profile is therefore not a global synthetic-input safety gate:
+center strafe controls or use the master deactivate control before FPS play.
 
 This is why the earlier "disable detent that points at the ScrollLock kill" idea was
 dropped. Two tiers cover everything, and they are different tools:
@@ -144,6 +151,7 @@ dropped. Two tiers cover everything, and they are different tools:
 | --- | --- | --- |
 | Flight injection | off | off |
 | Button/macro outputs | **your parked mappings still run** | all released |
+| Axis-driven synthetic outputs | strafe modifier can remain live; boost zone releases | all released |
 | Granularity | per-profile, surgical | global panic kill |
 
 **A parked profile is a manual pilot-state signal that actually works.** Automatic
@@ -438,7 +446,7 @@ example rather than by manual.
 ### Profile context header (every tab)
 
 A compact, collapsed-by-default **"Editing: Main controls"** header sits at the top
-of each primary tab: **Bind Controls**, **Tune**, and **Advanced**. When a non-base
+of each primary tab: **Flight Controls**, **Flight Modes**, and **Advanced**. When a non-base
 profile is selected, its name replaces "Main controls" and the header gains a blue
 accent so it is difficult to edit the wrong target by accident. A basic user never
 needs to expand it, but always knows where Save & Apply will write.

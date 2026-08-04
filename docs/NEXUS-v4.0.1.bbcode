@@ -1,0 +1,79 @@
+[center][img]https://staticdelivery.nexusmods.com/mods/4187/images/16668/16668-1782428954-1893709378.gif[/img]
+
+[size=6][color=#00ccff][b]AbsoluteHOTAS 4.0.1[/b][/color][/size]
+[size=4][b][color=#ffaa00]Native HOTAS, HOSAS, flight-stick, throttle, pedal, and button-box support for Starfield.[/color][/b][/size]
+
+[i]Direct hardware polling and analog ship-control injection. No vJoy, Joystick Gremlin, x360ce, Steam Input, or gamepad emulation. Plug in your hardware, bind it in-game, and fly.[/i][/center]
+
+[line]
+
+[center][size=5][color=#00ff88][b]4.0.1 - stable core release[/b][/color][/size][/center]
+
+4.0.1 is the recommended main file, bringing AbsoluteHOTAS's native analog flight controls and rebuilt in-game configuration workbench to the stable release track.
+
+[b]Profiles and macros are included but remain experimental[/b] while they gain broader real-world hardware and workflow validation. Version 3.0.2 can remain available as a legacy 3.x option; 4.0.1 is the main current download.
+
+[line]
+
+[center][size=5][color=#ffcc00][b]Fly Starfield like a space sim[/b][/color][/size][/center]
+
+[list]
+[*][b][color=#00ff88]True Analog Flight Control:[/color][/b] Direct authority over pitch, yaw, roll, strafe, throttle, and reverse without converting flight hardware into a virtual Xbox controller.[/*]
+[*][b][color=#00ff88]Flight Axes Workbench:[/color][/b] Bind, invert, tune, calibrate, and monitor every core analog control from one opening page.[/*]
+[*][b][color=#00ff88]Hot-Swappable Profiles (Experimental):[/color][/b] Switch bindings, axes, tuning, aim behavior, and macros from a button or maintained selector position.[/*]
+[*][b][color=#00ff88]Macro Builder (Experimental):[/color][/b] Create chords, taps, timed holds, ordered sequences, and turbo actions. Named ship actions follow your current Starfield keybinds.[/*]
+[*][b]Multi-Device Input:[/b] Mix sticks, throttles, pedals, button boxes, and custom DirectInput hardware in one setup.[/*]
+[*][b]Advanced Throttle Support:[/b] Positional or self-centering throttle, reverse zones, detents, cruise controls, boost zones, and pilot turn assist.[/*]
+[*][b]Independent Aim and HOSAM/HOSAS Modes:[/b] Separate steering from the weapon reticle, use aim-driven steering, or combine a left-hand stick with native mouse steering.[/*]
+[*][b]Respects In-Game Rebinds:[/b] Ship buttons and macro actions reconcile against Starfield's current ControlMap instead of assuming vanilla keys.[/*]
+[/list]
+
+[line]
+
+[center][size=5][color=#00ccff][b]What changed in 4.0.1[/b][/color][/size][/center]
+
+[list]
+[*]Promoted the validated flight-control and configuration core to stable.[/*]
+[*]Redesigned the opening Flight Axes page so binding, tuning, calibration, and live input feedback are all in one place.[/*]
+[*]Improved compatibility and stability around overlays, frame-generation tools, graphics injectors, and translation layers.[/*]
+[*]Strengthened configuration validation, diagnostics, cleanup, and automated regression coverage.[/*]
+[/list]
+
+[b]Compatibility note:[/b] If a graphics utility conflicts with the workbench, configure and save AbsoluteHOTAS with that utility disabled, then set [b][UI] bEnableWorkbench = false[/b] before re-enabling it. Flight controls and saved configurations continue to work. See the changelog and full guide for technical details.
+
+[line]
+
+[center][size=5][color=#ff5555][b]Important 4.0 Upgrade Notice[/b][/color][/size][/center]
+
+[b]Updating from 4.0.0-beta:[/b] replace the DLL and shipped AbsoluteHOTAS.ini. Keep AbsoluteHOTAS_Custom.ini and Profiles; they are user-owned and are not included in the archive.
+
+[b]Updating from 3.x:[/b] 4.0 is a fresh configuration baseline. Do not copy a 3.x AbsoluteHOTAS.ini into this release or import it as a 4.0 profile. Back up the old file for reference, install both new files, and rebuild through the workbench.
+
+[line]
+
+[center][size=5][color=#00ccff][b]Install and fly[/b][/color][/size][/center]
+
+[b]Requirements[/b]
+[list]
+[*]Starfield 1.16.242 or 1.16.244[/*]
+[*]SFSE 0.2.20 or later[/*]
+[*]No Starfield Address Library required[/*]
+[/list]
+
+[list=1]
+[*]Install the archive normally with your mod manager.[/*]
+[*]Launch Starfield through SFSE.[/*]
+[*]Open the Starfield main or pause menu and press [color=#ffaa00][b]Ctrl+Alt+B[/b][/color].[/*]
+[*]Bind your primary flight axes and desired ship buttons.[/*]
+[*]Choose a convenient controller button for future workbench access, then click [b]Save & Close[/b].[/*]
+[/list]
+
+[i]For full mouse interaction, open the workbench from a Starfield menu. During gameplay the game retains its mouse lock; standard keyboard navigation remains available.[/i]
+
+[line]
+
+[center][size=5][url=https://github.com/SultanDesync/AbsoluteHOTAS#readme][color=#00ff88][b]Read the Complete 4.0 Guide on GitHub[/b][/color][/url][/size]
+
+[url=https://github.com/SultanDesync/AbsoluteHOTAS#profiles-and-runtime-input-layers]Profiles[/url] | [url=https://github.com/SultanDesync/AbsoluteHOTAS#macro-builder]Macros[/url] | [url=https://github.com/SultanDesync/AbsoluteHOTAS#multi-zone-throttle-calibration]Throttle Setup[/url] | [url=https://github.com/SultanDesync/AbsoluteHOTAS#troubleshooting]Troubleshooting[/url]
+
+[url=https://github.com/SultanDesync/AbsoluteHOTAS]Source[/url] | [url=https://github.com/SultanDesync/AbsoluteHOTAS/issues]Issue Tracker[/url][/center]

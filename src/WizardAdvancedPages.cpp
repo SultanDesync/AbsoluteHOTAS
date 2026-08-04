@@ -164,15 +164,13 @@ void DrawDevicesTab(WizardState& s) {
 
 void DrawPluginControls(WizardState& s) {
     ImGui::TextWrapped("Master runtime controls for enabling or parking AbsoluteHOTAS output.");
-    for (int i = 0; i < kToggleWizardButtonSlot; ++i) {
+    for (int i = 0; i < kNumButtonSlots; ++i) {
         ImGui::PushID(2000 + i);
         DrawBindingRow(kButtonSlots[i].label, s.buttonBindings[i], CaptureSlot::kButtonBase + i, false);
         ImGui::PopID();
     }
     ImGui::Spacing();
-    ImGui::TextDisabled("Wizard access is promoted to the start of Bind Controls so it can be configured first.");
-    if (ImGui::SmallButton("Go to wizard access"))
-        WizardSession::Navigate(WizardSession::Route::BindFlightAxes);
+    ImGui::TextDisabled("Ctrl+Alt+B always remains available as the keyboard recovery shortcut.");
 }
 
 // --- Tab: Macros ---

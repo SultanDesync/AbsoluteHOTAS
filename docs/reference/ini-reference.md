@@ -19,6 +19,20 @@ keyboard shortcut.
 
 ---
 
+## [UI]
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bEnableWorkbench` | bool | `true` | Install the optional D3D12 in-game workbench. Set to `false` to bypass all renderer hooks while retaining flight controls and manual INI configuration. Requires a game restart. |
+
+If a graphics injector conflicts with the workbench, temporarily disable that
+injector, configure and save AbsoluteHOTAS, then set `bEnableWorkbench=false` in
+`AbsoluteHOTAS_Custom.ini` before restoring the graphics stack. A renderer failure
+also disables the workbench for the remainder of that game session without
+disabling the controller.
+
+---
+
 ## [Hardware]
 
 Axis bindings use **HID Usage ID** syntax with optional device name prefix.

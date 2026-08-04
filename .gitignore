@@ -38,3 +38,13 @@ vsxmake*/
 .vsxmake/
 # leftover CommonLibSF plugin-template scaffold from the xmake migration
 temp-template/
+# Local reverse-engineering and scanning workbench. These files are intentionally
+# kept out of the public release repository.
+tools/research/
+docs/PATCH-5.0-CONTROL-TRACING-HANDOFF.md
+docs/research-harness.md
+docs/research-pipeline-map.md
+include/ResearchTelemetry.h
+include/ShipFunctionSeams.h
+src/ResearchTelemetry.cpp
+src/ShipFunctionSeams.cpp

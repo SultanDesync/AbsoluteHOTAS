@@ -1,25 +1,36 @@
-# AbsoluteHOTAS v4.0.0-beta
+# AbsoluteHOTAS v4.0.1
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release Status
 
-**4.0.0-beta is the opt-in feature track.** It has passed representative testing
-for core flight controls, configuration saving, profiles, macros, parking, and safe
-output release, but the full range of hardware and mod combinations cannot be
-exhaustively tested by one maintainer.
+**4.0.1 is the stable core release.** DirectInput polling, analog flight injection,
+safe output release, configuration saving, and the configuration workbench are the
+recommended release track. Profiles and macros remain experimental while they gain
+broader real-world hardware and workflow validation.
 
-Version **3.0.2-beta remains available as the established fallback** while 4.0 gains
-broader real-world use. Choose 4.0 for the new configuration workbench, runtime
-profiles, macros, and update-safe settings. Stay on 3.0.2 if you prefer the smaller
-established feature set and do not need those additions.
+Version **3.0.2 remains available as the legacy 3.x option**, but 4.0.1 is the main
+download for current features, update-safe settings, and ongoing support. Renderer
+compatibility with third-party overlays, frame-generation layers, and Proton graphics
+stacks is best effort; an explicit hook bypass keeps manual configuration and flight
+controls available when a graphics utility conflicts with the workbench.
 
-Beta reports are welcome, with priority given to crashes, configuration loss,
-stuck inputs, and regressions in core flight controls. See
-[Reporting a 4.0 beta issue](#reporting-a-40-beta-issue) for the information that
-makes a report actionable.
+Reports are welcome, with priority given to crashes, configuration loss, stuck
+inputs, and regressions in core flight controls. See
+[Reporting a 4.0 issue](#reporting-a-40-issue) for the information that makes a
+report actionable.
 
 ## Changelog
+
+### v4.0.1
+
+- **Stable Core Release:** The validated DirectInput, analog flight-injection, output-release, configuration, and workbench paths are promoted to the recommended release track. Profiles and macros remain explicitly experimental pending broader use.
+- **Renderer Compatibility Rewrite:** Replaced the fragile per-instance swap-chain vtable copy with canonical DXGI hook forwarding, removed the fixed vtable-size assumption, and hardened swap-chain/queue tracking for third-party graphics layers.
+- **Fail-Open Workbench:** D3D12 resources are created only when the workbench is first opened. Renderer failures are latched for the session and forward transparently instead of taking flight controls or manual configuration down with the overlay.
+- **Renderer Hook Bypass:** Set `[UI] bEnableWorkbench = false` in `AbsoluteHOTAS_Custom.ini` to install no AbsoluteHOTAS D3D12/DXGI hooks. Existing bindings and all flight controls continue to work.
+- **D3D12 Lifetime Safety:** Added per-back-buffer allocator fence tracking, stronger result validation, and safer window-procedure/cursor restoration.
+- **Flight Controls Workbench:** Consolidated binding, inversion, response, calibration, live signal, and injection ownership into the opening **Flight Axes (Core)** page, with clearer Flight Controls, Flight Modes, and Advanced navigation.
+- **Configuration and Diagnostics:** Binding references now reject partial, malformed, and overflowing numeric values. Log state is atomic and writes are serialized. Binding, profile-overlay, and ControlMap tests are registered with `xmake test`.
 
 ### v4.0.0-beta
 
@@ -86,7 +97,7 @@ fThrottleAtEngineStart = 0.0314
 * **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named ship actions follow your current Starfield keybinds.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
-* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay, then use the first **Wizard access** section to bind a preferred controller button for one-touch access. Bind axes and buttons by moving/pressing them on your hardware in real-time.
+* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. The opening **Flight Axes (Core)** page keeps every direct-flight binding, response control, calibration tool, and live input display together. Bind axes and buttons by moving/pressing them on your hardware in real-time.
 * **Frame Generation Support** — Supports Starfield's built-in FSR3 Frame Generation and reinitializes the overlay when the swap chain changes. Compatibility with third-party overlays, capture tools, and graphics injectors is best effort.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
@@ -125,8 +136,8 @@ INI. Use full profile exports for backup, sharing, and migration going forward.
 1. Install the plugin files.
 2. Launch the game via SFSE.
 3. Open the Starfield main or pause menu, then press `Ctrl+Alt+B`.
-4. Under **Bind Controls → Flight Axes**, bind each axis by moving the desired physical control. The first **Wizard access** section also lets you replace the default three-key shortcut with a controller button.
-5. Under **Bind Controls → Ship Buttons**, bind the ship actions you want on your hardware.
+4. Under **Flight Controls → Flight Axes (Core)**, bind and tune each axis while watching its live input display.
+5. Under **Flight Controls → Ship Buttons**, bind the ship actions you want on your hardware.
 6. Click **Save & Close**. Bindings take effect without restarting.
 
 `Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
@@ -139,9 +150,29 @@ The workbench uses three top-level task groups with visibly subordinate pages:
 
 | Group | Pages | Purpose |
 |-----|---------|---------|
-| **Bind Controls** | Flight Axes, Ship Buttons | The normal setup path: wizard access, flight axes, reverse strategy, digital axes, named ship actions, and custom keyboard/mouse outputs. |
-| **Tune** | Flight Axes, Aiming & Combat, Gamepad Throttle | Optional response curves, deadzones, saturation, throttle zones, HOSAM/HOSAS behavior, independent aiming, and pilot assists. |
-| **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation controls, device inspection, calibration, reassignment, and profile management. |
+| **Flight Controls** | Flight Axes (Core), Ship Buttons | The core setup path: visually grouped six-degree-of-freedom axes with binding, inversion, response, calibration, and live feedback in one place; plus reverse strategies, digital fallbacks, named ship actions, and custom outputs. |
+| **Flight Modes** | Aiming & Combat, Rate Throttle | Optional independent aiming, HOSAM support, self-centering throttle behavior, and pilot assists. |
+| **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation and wizard-access controls, device inspection, calibration, reassignment, and profile management. |
+
+### Flight-axis injection and modifiers
+
+Each core axis card identifies both the destination and the activation rule for
+its output. Throttle, pitch, yaw, and roll primarily use engine-timed memory
+gates. Aim-driven steering uses the source-object mouse accumulator instead.
+Strafe is a hybrid: it writes the flight cluster and holds Starfield's resolved
+**Switch Flight Modes** input (normally Space) while either strafe axis is beyond
+the larger of its configured deadzone or the 5% noise floor.
+
+Starfield currently uses one shared lane for roll and lateral strafe. The flight
+mode modifier changes how that lane is interpreted, so roll and strafe cannot be
+commanded simultaneously; lateral strafe takes priority. Vertical strafe also
+holds the modifier and therefore prevents roll while active.
+
+Axis-driven synthetic inputs can affect on-foot play. A strafe control left
+displaced can keep **Switch Flight Modes** held, and an enabled throttle boost
+zone can hold **Fire Boosters** (normally Left Shift). Turning off **Injection
+enabled** parks memory writes but does not suppress the strafe modifier. Center
+the controls or use the master deactivate control before FPS play.
 
 The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
 
@@ -199,7 +230,7 @@ available, and swaps are preloaded so activation does not read from disk during 
 
 ### Parking flight controls versus stopping the plugin
 
-Turning off **Axis injection enabled** under **Bind Controls → Flight Axes** creates
+Turning off **Injection enabled** under **Flight Controls → Flight Axes (Core)** creates
 a parked profile. Pitch, yaw, roll, throttle, strafe, and aim injection stop, while
 that profile's button outputs and macros remain available. This is intended for an
 on-foot or menu position on a hardware selector.
@@ -257,7 +288,9 @@ may hook the same DirectX entry points. AbsoluteHOTAS detects several common hoo
 conflicts and records them when logging is enabled, but compatibility with every
 injector combination is best effort. If the cursor appears without the workbench—or
 the workbench does not appear at all—test once without other graphics injectors
-before filing a report.
+before filing a report. The workbench renderer initializes only when first opened;
+if it fails, it is disabled for that session while flight controls and manual
+configuration continue normally.
 
 ## Manual Configuration
 
@@ -369,8 +402,8 @@ To handle reverse thrust smoothly in Starfield's flight model, the accumulator u
 
 #### Option A: In-Game Binding Wizard (Recommended)
 1. Press `Ctrl+Alt+B` to open the wizard.
-2. Under **Bind Controls → Flight Axes**, find **Throttle** and click **Bind**. Move your self-centering joystick axis (for example, the left stick Y-axis).
-3. Open **Tune → Gamepad Throttle**.
+2. Under **Flight Controls → Flight Axes (Core)**, find **Throttle** and click **Bind Axis**. Move your self-centering joystick axis (for example, the left stick Y-axis).
+3. Enable **Self-centering / rate throttle (HOSAS)** on the Throttle card, then open **Flight Modes → Rate Throttle**.
 4. Enable **Use gamepad-style throttle**.
 5. Set the parameters to your preference:
    * **Ramp Rate**: How fast the throttle ramps up when the stick is fully deflected forward (in throttle units per second).
@@ -392,7 +425,7 @@ Three activation modes are available:
 | **Hold** | Assist is only active while a bound button is held. |
 | **Toggle** | A button press toggles assist on/off. |
 
-Configure via the wizard under **Tune → Gamepad Throttle → Pilot Turn Assist**, or via INI:
+Configure via the wizard under **Flight Modes → Rate Throttle → Pilot Turn Assist**, or via INI:
 
 ```ini
 [DualStick]
@@ -448,10 +481,10 @@ Mice don't self-center like joysticks, so an optional **Alignment Assist** featu
 
 #### Option A: In-Game Binding Wizard (Recommended)
 1. Press `Ctrl+Alt+B` to open the wizard.
-2. Under **Bind Controls → Flight Axes**, bind your **Throttle** and optionally **Strafe** / **Roll** axes to your joystick.
-3. Leave **Pitch** and **Yaw** unbound; they are ignored in HOSAM mode.
-4. Open **Tune → Flight Axes** and enable **Mouse steering (HOSAM)**.
-5. Optionally check **Alignment Assist** and tune:
+2. Under **Flight Controls → Flight Axes (Core)**, enable **Mouse steering (HOSAM)** in the Rotation group.
+3. Bind your **Throttle** and optionally **Strafe** / **Roll** axes to your joystick.
+4. Leave **Pitch** and **Yaw** unbound; their cards remain visible but are marked as owned by mouse steering.
+5. Optionally enable **Alignment assist** on the same page and tune:
     * **Radius**: How close to center the mouse must be before the assist activates (default: 130 of 200 units).
     * **Idle Time**: How long the mouse must be idle before decay starts (default: 50ms).
     * **Decay Speed**: How fast steering decays to center (default: 8.0; higher = faster).
@@ -504,6 +537,16 @@ If the overlay crashes or refuses to open on `Ctrl+Alt+B`:
 
 Bindings load without opening the workbench, so a working
 `AbsoluteHOTAS_Custom.ini` can still be used while diagnosing an overlay-only issue.
+For a persistent conflict, disable the other graphics layer, open the workbench and
+save your bindings, then add this startup-only escape hatch to
+`AbsoluteHOTAS_Custom.ini` before restoring the graphics layer:
+
+```ini
+[UI]
+bEnableWorkbench = false
+```
+
+This skips all AbsoluteHOTAS D3D12/DXGI hooks; it does not disable flight controls.
 
 ### Logging & Diagnostic Data
 If you encounter hardware axis mapping or detection issues:
@@ -511,7 +554,7 @@ If you encounter hardware axis mapping or detection issues:
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
-### Reporting a 4.0 beta issue
+### Reporting a 4.0 issue
 
 Open an issue in the
 [GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and
@@ -529,7 +572,7 @@ include:
 For stuck inputs or configuration loss, say so in the title and describe how you
 recovered. For overlay problems, list other overlays, capture tools, graphics
 injectors, and frame-generation mods. Hardware-specific or cosmetic issues remain
-useful, but safety and core-flight regressions take priority during the beta.
+useful, but safety and core-flight regressions take priority during maintenance.
 
 ## Notes
 

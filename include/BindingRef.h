@@ -3,8 +3,11 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 // Represents a parsed INI binding reference.
 // Format: "DeviceName@0x32" or "#0@0x32" or just "0x32" / "42"
@@ -19,6 +22,32 @@ struct BindingRef {
     bool IsValid()   const { return value >= 0; }
 };
 
+namespace BindingRefDetail {
+
+inline void Trim(std::string_view& text) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))  text.remove_suffix(1);
+}
+
+inline bool ParseInt(std::string_view text, int base, int& result) {
+    Trim(text);
+    if (text.empty()) return false;
+
+    const std::string owned(text);
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(owned.c_str(), &end, base);
+    if (errno == ERANGE || end == owned.c_str() || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    result = static_cast<int>(parsed);
+    return true;
+}
+
+}  // namespace BindingRefDetail
+
 // Parses an INI value into a BindingRef.
 //   "S-TECS SPACE-L THROTTLE@0x32"  → { "S-TECS SPACE-L THROTTLE", 0x32, -1 }
 //   "#0@0x32"                       → { "", 0x32, 0 }
@@ -29,8 +58,7 @@ struct BindingRef {
 //   "-1"                             → { "", -1, -1 }
 //   ""                               → { "", -1, -1 }  (explicitly cleared)
 inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
-    BindingRef ref;
-    ref.deviceIndex = -1;
+    BindingRef ref{ "", -1, -1 };
 
     // Key missing entirely (nullptr) → use legacy default for backwards compat
     // Key present but empty ("") → user explicitly cleared it → unbound
@@ -45,9 +73,7 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
 
     std::string_view sv(iniValue);
 
-    // Trim leading/trailing whitespace
-    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) sv.remove_prefix(1);
-    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back())))  sv.remove_suffix(1);
+    BindingRefDetail::Trim(sv);
 
     if (sv.empty()) {
         ref.value = -1;
@@ -56,24 +82,17 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
 
     // Check for #N@ device index prefix (e.g., "#0@0x30", "#1@5")
     if (sv.front() == '#') {
-        auto atPos = sv.find('@');
-        if (atPos != std::string_view::npos && atPos > 1 && atPos < sv.size() - 1) {
-            std::string idxStr(sv.substr(1, atPos - 1));
-            char* endPtr = nullptr;
-            long idx = std::strtol(idxStr.c_str(), &endPtr, 10);
-            if (endPtr != idxStr.c_str() && idx >= 0) {
-                ref.deviceIndex = static_cast<int>(idx);
-
-                // Parse the value after @
-                std::string_view valPart = sv.substr(atPos + 1);
-                while (!valPart.empty() && std::isspace(static_cast<unsigned char>(valPart.front()))) valPart.remove_prefix(1);
-                std::string valStr(valPart);
-                endPtr = nullptr;
-                long parsed = std::strtol(valStr.c_str(), &endPtr, 0);
-                ref.value = (endPtr != valStr.c_str()) ? static_cast<int>(parsed) : -1;
-                return ref;
-            }
+        const auto atPos = sv.find('@');
+        int index = -1;
+        int value = -1;
+        if (atPos != std::string_view::npos &&
+            BindingRefDetail::ParseInt(sv.substr(1, atPos - 1), 10, index) &&
+            index >= 0 &&
+            BindingRefDetail::ParseInt(sv.substr(atPos + 1), 0, value)) {
+            ref.deviceIndex = index;
+            ref.value = value;
         }
+        return ref;
     }
 
     // Find the last '@' — device names may contain spaces but not '@'
@@ -84,25 +103,20 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
         std::string_view valPart = sv.substr(atPos + 1);
 
         // Trim the device name
-        while (!devPart.empty() && std::isspace(static_cast<unsigned char>(devPart.back())))  devPart.remove_suffix(1);
-        while (!devPart.empty() && std::isspace(static_cast<unsigned char>(devPart.front()))) devPart.remove_prefix(1);
-
-        ref.deviceName = std::string(devPart);
+        BindingRefDetail::Trim(devPart);
 
         // Trim the value part
-        while (!valPart.empty() && std::isspace(static_cast<unsigned char>(valPart.front()))) valPart.remove_prefix(1);
+        BindingRefDetail::Trim(valPart);
 
         // Parse as hex (0x...) or decimal
-        std::string valStr(valPart);
-        char* endPtr = nullptr;
-        long parsed = std::strtol(valStr.c_str(), &endPtr, 0); // base 0 auto-detects hex/dec
-        ref.value = (endPtr != valStr.c_str()) ? static_cast<int>(parsed) : defaultValue;
+        int value = -1;
+        if (!devPart.empty() && BindingRefDetail::ParseInt(valPart, 0, value)) {
+            ref.deviceName = std::string(devPart);
+            ref.value = value;
+        }
     } else {
         // No '@' found — legacy format, just a number
-        std::string valStr(sv);
-        char* endPtr = nullptr;
-        long parsed = std::strtol(valStr.c_str(), &endPtr, 0);
-        ref.value = (endPtr != valStr.c_str()) ? static_cast<int>(parsed) : defaultValue;
+        BindingRefDetail::ParseInt(sv, 0, ref.value);
     }
 
     return ref;

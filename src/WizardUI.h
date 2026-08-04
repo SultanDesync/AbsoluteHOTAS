@@ -16,7 +16,7 @@ namespace WizardUI {
     void DrawBindingSummaryRow(const char* label, const std::string& binding,
                                bool* invert = nullptr);
 
-    void DrawAxesTab(WizardState& state, bool tuningOnly);
+    void DrawAxesTab(WizardState& state);
     void DrawAimingTab(WizardState& state);
     void DrawGamepadThrottleTab(WizardState& state);
     void DrawButtonsTab(WizardState& state);
