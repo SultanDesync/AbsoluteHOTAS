@@ -1,13 +1,13 @@
 # AbsoluteHOTAS Key Output Reference
 
-AbsoluteHOTAS ship-button outputs use Windows `SendInput` scan-code output.
+AbsoluteHOTAS raw custom outputs use Windows `SendInput` scan-code output. Named
+ship actions do not use this table in 5.0.
 
-Use these values in `[ShipButtonOutputs]`:
+Use these values in `[ButtonExpansion]` or as explicit macro targets:
 
 ```ini
-sOpenScannerOutput = key:0x21
-sFireWeapon0Output = mouse:1
-sCancelOutput = none
+iButton99 = key:0x21
+iButton100 = mouse:1
 ```
 
 Mouse outputs:

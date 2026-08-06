@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("4.0.2")
+set_version("5.0.0-beta")
 set_languages("c++23")
 set_warnings("all")
 
@@ -41,10 +41,10 @@ target("AbsoluteHOTAS")
     set_pcxxheader("include/PCH.h")
 
     add_defines(
-        "PLUGIN_VERSION_MAJOR=4",
+        "PLUGIN_VERSION_MAJOR=5",
         "PLUGIN_VERSION_MINOR=0",
-        "PLUGIN_VERSION_PATCH=2",
-        "PLUGIN_VERSION_STABLE=1"
+        "PLUGIN_VERSION_PATCH=0",
+        "PLUGIN_VERSION_PRERELEASE=beta"
     )
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).

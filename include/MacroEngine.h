@@ -16,7 +16,7 @@
 enum class MacroAction { Tap, Hold };
 
 struct MacroStep {
-    std::vector<ShipOutput> targets;              // chord = multiple keys at once
+    std::vector<ShipControlTarget> targets;       // chord = multiple native/raw targets
     MacroAction             action = MacroAction::Tap;
     int                     amount = 1;           // Tap: repeat count; Hold: duration ms
     int                     gapMs  = 50;          // wait before the next step
@@ -34,8 +34,8 @@ struct Macro {
 
 namespace MacroEngine {
 
-// Parse every [Macro:<name>] section. Call AFTER LoadShipButtonBindings so that
-// action-id targets resolve to their control-map-aware outputs.
+// Parse every [Macro:<name>] section. Named action ids resolve to native ship
+// controls; explicit key:/mouse: targets resolve to raw outputs.
 void LoadMacros(CSimpleIniA& ini);
 
 // Mutable access to the loaded macros so the control loop can resolve each macro's
@@ -46,7 +46,7 @@ void LoadMacros(CSimpleIniA& ini);
 std::vector<Macro>& GetMacrosMutable();
 
 // Tick the macro state machines once per control-loop iteration: detect button
-// presses, advance active sequences, emit via SetOutputHeld. Call only when
+// presses, advance active sequences, emit through logical ownership. Call only when
 // macros should be live (armed, overlay closed).
 void Update();
 

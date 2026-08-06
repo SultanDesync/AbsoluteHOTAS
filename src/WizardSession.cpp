@@ -101,6 +101,7 @@ Route GetRoute() {
         case Page::Tune:
             switch (s_tunePage) {
                 case TunePage::Aiming: return Route::TuneAiming;
+                case TunePage::CameraLook: return Route::TuneCameraLook;
                 case TunePage::GamepadThrottle: return Route::TuneGamepadThrottle;
             }
             break;
@@ -151,6 +152,7 @@ void Navigate(Route route) {
         case Route::BindFlightAxes: SelectBindPage(BindPage::FlightAxes); break;
         case Route::BindShipButtons: SelectBindPage(BindPage::ShipButtons); break;
         case Route::TuneAiming: SelectTunePage(TunePage::Aiming); break;
+        case Route::TuneCameraLook: SelectTunePage(TunePage::CameraLook); break;
         case Route::TuneGamepadThrottle: SelectTunePage(TunePage::GamepadThrottle); break;
         case Route::AdvancedMacros: SelectAdvancedPage(AdvancedPage::Macros); break;
         case Route::AdvancedPluginControls: SelectAdvancedPage(AdvancedPage::PluginControls); break;

@@ -62,6 +62,9 @@ void DrawDevicesTab(WizardState& s) {
                     for (auto& b : s.digitalAimBindings) allBindings.push_back(&b);
                     allBindings.push_back(&s.toggleAimModeBinding);
                     allBindings.push_back(&s.turnAssistBinding);
+                    for (auto& b : s.headLookAxisBindings) allBindings.push_back(&b);
+                    allBindings.push_back(&s.headLookRecenterBinding);
+                    allBindings.push_back(&s.headLookToggleBinding);
                     for (auto& macro : s.macros) allBindings.push_back(&macro.buttonBinding);
 
                     for (auto* bp : allBindings) doSwap(*bp);
@@ -175,8 +178,8 @@ void DrawPluginControls(WizardState& s) {
 
 // --- Tab: Macros ---
 
-// Target picker: ship actions first (they follow the user's in-game rebinds), raw
-// keys/mouse second. An unrecognized token (hand-edited INI) previews as itself
+// Target picker: native ship actions first, raw keys/mouse second. An
+// unrecognized token (hand-edited INI) previews as itself
 // rather than vanishing.
 static void DrawTargetCombo(std::string& token) {
     const char* label   = FindMacroTargetLabel(token);
@@ -184,7 +187,7 @@ static void DrawTargetCombo(std::string& token) {
 
     ImGui::PushItemWidth(170);
     if (ImGui::BeginCombo("##target", preview)) {
-        ImGui::SeparatorText("Ship Actions (follow in-game binds)");
+        ImGui::SeparatorText("Native Ship Actions");
         for (int i = 0; i < kNumShipActionTargets; i++) {
             const bool sel = (token == kShipActionTargets[i].value);
             ImGui::PushID(i);
@@ -291,8 +294,8 @@ static void DrawMacroSteps(MacroRow& m) {
 
 void DrawMacrosTab(WizardState& s) {
     ImGui::TextWrapped(
-        "A macro plays an ordered sequence of key actions from one button press. Steps can target "
-        "ship actions (which follow your in-game Starfield keybinds automatically) or raw keys. "
+        "A macro plays an ordered sequence of actions from one button press. Steps can target "
+        "native ship actions or explicit raw keys/mouse buttons. "
         "Press '+' on a step to add targets pressed together as a chord.");
     ImGui::TextWrapped(
         "One press runs the whole sequence to the end - you do not need to hold the button. "

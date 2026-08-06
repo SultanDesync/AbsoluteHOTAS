@@ -1,15 +1,16 @@
 #pragma once
 #include "BindingRef.h"
+#include "NativeShipControl.h"
 #include <SimpleIni.h>
 #include <cstdint>
 #include <string_view>
 
 // ============================================================================
-// ShipOutput — SendInput emission and held-key ownership management
+// ShipOutput — native action ownership plus explicit raw-output management
 //
-// Manages keyboard/mouse output for ship action buttons and the ButtonExpansion
-// feature. Uses a reference-counted "held output" model so multiple logical
-// owners can share a single physical key press without early-releasing it.
+// Named ship actions resolve to NativeShipControl. Keyboard/mouse synthesis is
+// limited to explicit ButtonExpansion and key:/mouse: macro targets. Both paths
+// use reference-counted ownership so one owner cannot release another's hold.
 // ============================================================================
 
 enum class ShipOutputKind {
@@ -43,6 +44,13 @@ struct ShipButtonBinding {
 inline constexpr ShipOutput NoOutput    { ShipOutputKind::None,     0,    false };
 inline constexpr ShipOutput SpaceOutput { ShipOutputKind::Keyboard, 0x39, false };
 
+struct ShipControlTarget {
+    NativeShipControl::Action nativeAction = NativeShipControl::Action::Invalid;
+    ShipOutput output = NoOutput;
+
+    bool IsNative() const { return nativeAction != NativeShipControl::Action::Invalid; }
+};
+
 // Owner-ID constants for SetOutputHeld
 inline constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
 inline constexpr uint32_t OwnerBoostZone      = 0x00000004u;
@@ -74,7 +82,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held);
 void ReleaseOwnerOutputs(uint32_t ownerId);
 
 // ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
-// A profile swap preloads the ControlMap-resolved ship-button table per slot and
+// A profile swap preloads the ship-button table per slot and
 // restores one into place on swap. RestoreBindings does NOT touch held outputs —
 // the caller releases those first — and SeedDownButtonsConsumed then marks any
 // physically-held button as already-seen so it will not re-fire under its new
@@ -83,21 +91,16 @@ std::vector<ShipButtonBinding> SnapshotBindings();
 void RestoreBindings(const std::vector<ShipButtonBinding>& bindings);
 void SeedDownButtonsConsumed();
 
-// Returns true if the FireBoosters (index 0) output is currently held.
-bool IsBoostOutputHeld();
+// Returns true if any logical owner currently requests native Boost.
+bool IsBoostRequested();
 
 // Direct access to ship button bindings (for BindingWizard and ControlLoop).
 ShipButtonBinding* GetShipButtonBindings();
 int                GetShipButtonCount();
 
-// Resolved (control-map-aware) output for a named ship action. Lets the axis-
-// driven paths — throttle boost zone, strafe/flight-mode modifier — follow
-// in-game rebinds the same way the button path does. NoOutput if not found.
-ShipOutput GetShipButtonOutput(std::string_view actionId);
-
-// Resolve a macro/binding target token to an output: either a ship action id
-// (e.g. "NextSystem", resolved control-map-aware) or a raw "key:0xNN" / "mouse:N"
-// / "none". NoOutput if it resolves to nothing.
-ShipOutput ResolveOutputToken(std::string_view token);
+// Named ship actions resolve to native operations. Explicit key:/mouse: tokens
+// remain raw SendInput targets for ButtonExpansion and general-purpose macros.
+ShipControlTarget ResolveControlTarget(std::string_view token);
+void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held);
 
 } // namespace ShipOutputSystem

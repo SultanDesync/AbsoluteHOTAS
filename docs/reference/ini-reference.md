@@ -16,6 +16,7 @@ keyboard shortcut.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `bEnabled` | bool | `true` | Master enable for the plugin. |
+| `bSyncShipOutputsFromControlMap` | bool | `true` | Legacy 4.x output reconciliation. Retained for configuration compatibility; 5.0 named ship actions do not consume the resolved keyboard/mouse output. |
 
 ---
 
@@ -143,9 +144,54 @@ the hardware axis, and pressing another command changes the target.
 
 ---
 
+## [NativeControls]
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bEnabled` | bool | `true` | Master switch for 5.0 native ship actions, the native boost/strafe modifier paths, and the first-person camera pose hook. A failed exact runtime gate disables the affected operation; there is no synthetic-input fallback. |
+
+---
+
+## [HeadTracking]
+
+Rotational cockpit head tracking reads the FreeTrack 2.0 shared-memory output
+published by OpenTrack. For Tobii hardware, choose the Tobii tracker inside
+OpenTrack and enable FreeTrack 2.0 output. Translation is not implemented.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bEnabled` | bool | `false` | Master switch for first-person cockpit camera look. |
+| `bOpenTrackEnabled` | bool | `true` | Consume OpenTrack FreeTrack output. Disable for joystick-only camera look. |
+| `sSource` | enum | `OpenTrack` | `OpenTrack` or `TobiiViaOpenTrack`. Both consume OpenTrack's FreeTrack output; the latter provides source-specific diagnostics. |
+| `iRecenterButton` | binding | `-1` | DirectInput button used to capture the current pose as center. |
+| `iToggleButton` | binding | `-1` | DirectInput button that toggles camera authority on or off. Re-enabling captures a fresh OpenTrack center. |
+| `iLookYawAxis` | axis binding | unbound | Optional absolute joystick yaw override. |
+| `iLookPitchAxis` | axis binding | unbound | Optional absolute joystick pitch override. |
+| `iLookRollAxis` | axis binding | unbound | Optional absolute joystick roll override. |
+| `bYawEnabled` | bool | `true` | Apply the yaw component from OpenTrack or a joystick override. |
+| `bPitchEnabled` | bool | `true` | Apply the pitch component from OpenTrack or a joystick override. |
+| `bRollEnabled` | bool | `true` | Apply the roll component from OpenTrack or a joystick override. Disable for two-axis camera look. |
+| `fYawScale` | float | `1.0` | Yaw gain for OpenTrack and a joystick yaw override, range `0.05..10.0`. |
+| `fPitchScale` | float | `1.0` | Pitch gain for OpenTrack and a joystick pitch override, range `0.05..10.0`. |
+| `fRollScale` | float | `1.0` | Roll gain for OpenTrack and a joystick roll override, range `0.05..10.0`. |
+| `fMaxYawDegrees` | float | `85.0` | Maximum absolute yaw applied to the cockpit camera. |
+| `fMaxPitchDegrees` | float | `60.0` | Maximum absolute pitch applied to the cockpit camera. |
+| `fMaxRollDegrees` | float | `45.0` | Maximum absolute roll applied to the cockpit camera. |
+| `fDeadzoneDegrees` | float | `0.0` | Angular deadzone subtracted from each rotational axis. |
+| `fJoystickDeadzone` | float | `0.08` | Center deadzone for optional joystick camera axes, normalized `0.0..0.95`. |
+| `fSmoothing` | float | `0.15` | Frame-rate-adjusted pose retention, `0.0` for raw input through `0.99` for maximum smoothing. |
+| `iStaleMilliseconds` | int | `500` | Clear camera authority when OpenTrack's frame ID has not advanced for this interval. |
+| `bInvertYaw` | bool | `false` | Invert OpenTrack or joystick yaw. |
+| `bInvertPitch` | bool | `false` | Invert OpenTrack or joystick pitch (vertical look). |
+| `bInvertRoll` | bool | `false` | Invert OpenTrack or joystick roll. |
+
+---
+
 ## [ShipButtons]
 
-Map physical buttons to ship actions. All use 1-indexed DirectInput button IDs with optional `DeviceName@` prefix. Set to `-1` to leave unbound.
+Map physical buttons to native ship actions. All use 1-indexed DirectInput button
+IDs with optional `DeviceName@` prefix. Set to `-1` to leave unbound. These named
+actions do not emit keyboard or mouse input in 5.0.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -176,15 +222,18 @@ Map physical buttons to ship actions. All use 1-indexed DirectInput button IDs w
 
 ---
 
-## [ShipButtonOutputs]
+## [ShipButtonOutputs] (legacy)
 
-Optional keyboard/mouse overrides emitted when ship buttons are pressed. When a key is omitted, AbsoluteHOTAS reconciles the named action against the player's `ControlMap_Custom.txt` binding and falls back to the listed vanilla output only when necessary. An explicit value always wins.
+Retained so 4.x user files continue to parse and round-trip safely. In 5.0 these
+values are not emitted by any of the 23 named `[ShipButtons]` actions. Use
+`[ButtonExpansion]` or an explicit `key:`/`mouse:` macro target when raw synthetic
+input is intentionally required for a non-ship operation.
 
 **Format**: `key:0xNN` (DirectInput scancode), `mouse:1..4` (mouse button), or `none` (disabled).
 
 See [key-output-reference.md](key-output-reference.md) for the full scancode table.
 
-| Key | Default | Game Binding |
+| Key | Legacy Default | Former Game Binding |
 |-----|---------|-------------|
 | `sFireBoostersOutput` | `key:0x2A` | Left Shift |
 | `sSwitchFlightModesOutput` | `key:0x39` | Space |

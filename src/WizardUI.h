@@ -18,6 +18,7 @@ namespace WizardUI {
 
     void DrawAxesTab(WizardState& state);
     void DrawAimingTab(WizardState& state);
+    void DrawCameraLookTab(WizardState& state);
     void DrawGamepadThrottleTab(WizardState& state);
     void DrawButtonsTab(WizardState& state);
     void DrawDevicesTab(WizardState& state);

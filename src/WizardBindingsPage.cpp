@@ -86,7 +86,7 @@ static void DrawCustomKeyBindings(WizardState& s) {
 void DrawButtonsTab(WizardState& s) {
     if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("Bind physical controller buttons to named Starfield ship actions. Each action follows your current in-game keyboard/mouse binding automatically.");
+        ImGui::TextWrapped("Bind physical controller buttons to native Starfield ship actions. These controls call the game's ship systems directly and do not synthesize keyboard or mouse input.");
         ImGui::Spacing();
         for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
             ImGui::PushID(3000 + i);

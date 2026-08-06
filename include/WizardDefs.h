@@ -19,13 +19,17 @@ namespace CaptureSlot {
     constexpr int kDigitalAimBase  = 700;   // 700..704
     constexpr int kToggleAimMode   = 705;
     constexpr int kTurnAssistBtn   = 706;
+    constexpr int kHeadLookAxisBase = 710; // 710..712
+    constexpr int kHeadLookRecenter = 713;
+    constexpr int kHeadLookToggle   = 714;
     constexpr int kMacroBase       = 800;   // 800..899, one per macro trigger button
     constexpr int kProfileTrigger  = 900;
     constexpr int kControlExtensionBase = 920; // 920..935
 
     inline bool IsAxis(int slot) {
         return (slot >= kAxisBase && slot < kButtonBase)
-            || (slot >= kAimAxisBase && slot < kDigitalAimBase);
+            || (slot >= kAimAxisBase && slot < kDigitalAimBase)
+            || (slot >= kHeadLookAxisBase && slot < kHeadLookAxisBase + 3);
     }
     inline bool IsButton(int slot) { return !IsAxis(slot); }
 }
@@ -105,6 +109,24 @@ inline const AimAxisSlot kAimAxisSlots[] = {
 };
 inline constexpr int kNumAimAxisSlots = 2;
 
+// --- Camera-look axis slot ---
+struct HeadLookAxisSlot {
+    const char* label;
+    const char* iniKey;
+    const char* enabledIniKey;
+    const char* invertIniKey;
+    const char* sensitivityKey;
+    const char* maximumKey;
+};
+
+inline const HeadLookAxisSlot kHeadLookAxisSlots[] = {
+    {"Look Yaw",   "iLookYawAxis",   "bYawEnabled",   "bInvertYaw",   "fYawScale",   "fMaxYawDegrees"},
+    {"Look Pitch", "iLookPitchAxis", "bPitchEnabled", "bInvertPitch", "fPitchScale", "fMaxPitchDegrees"},
+    {"Look Roll",  "iLookRollAxis",  "bRollEnabled",  "bInvertRoll",  "fRollScale",  "fMaxRollDegrees"},
+};
+inline constexpr int kNumHeadLookAxisSlots =
+    sizeof(kHeadLookAxisSlots) / sizeof(kHeadLookAxisSlots[0]);
+
 // --- Digital aim slot ---
 struct DigitalAimSlot {
     const char* label;
@@ -137,9 +159,9 @@ struct CustomBindingRow {
 //
 // The wizard reads and writes [Macro:*] sections in AbsoluteHOTAS_Custom.ini rather than going
 // through MacroEngine. Two reasons, both about not losing the user's work:
-//   1. MacroStep stores *resolved* ShipOutputs, so "NextSystem" would round-trip
-//      out as "key:0x4D" — silently breaking the control-map-follows-your-rebinds
-//      property that makes action targets worth having.
+//   1. Runtime macro steps store resolved control targets. Keeping the source
+//      token preserves the distinction between a native action such as
+//      "NextSystem" and an explicit raw target such as "key:0x4D".
 //   2. MacroEngine drops macros it can't run (unbound button, no valid steps). A
 //      save built from its view would delete a half-configured macro from the file.
 // Editing the file's own tokens keeps the round-trip lossless.
@@ -159,7 +181,7 @@ struct MacroRow {
 };
 
 // Ship-action targets for the macro step picker. Values are the actionIds that
-// ShipOutputSystem::ResolveOutputToken understands; labels mirror the wizard's
+// ShipOutputSystem::ResolveControlTarget understands; labels mirror the wizard's
 // ship action rows. Order matches the binding table in ShipOutput.cpp.
 struct MacroTargetOption {
     const char* label;

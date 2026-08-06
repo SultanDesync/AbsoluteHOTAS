@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include "BindingRef.h"
+#include "HeadTracking.h"
 
 // DirectInput polling, normalization, and memory injection.
 // Runs on a dedicated background thread at ~120Hz.
@@ -12,8 +13,8 @@ class ThrottleController {
 public:
     // Pilot-state gate mode.
     //   Off           = legacy behavior (master switch controls everything).
-    //   InjectionOnly = while not piloting, park memory injection; keep SendInput.
-    //   Full          = while not piloting, park everything (injection + SendInput).
+    //   InjectionOnly = while not piloting, park flight-axis injection; keep discrete bindings.
+    //   Full          = while not piloting, park all plugin-owned control output.
     enum class GateMode { Off, InjectionOnly, Full };
 
     // Pilot signal source: Manual (toggle key) or Auto (reserved — no working
@@ -95,15 +96,20 @@ public:
         // [Injection]
         int     pollRateHz = 120;
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
-        bool    rollEnabled = true;       // Roll shares the +0x58 writer with lateral strafe.
+        bool    rollEnabled = true;       // Restored independently at the selected-handler output.
         bool    reverseAxisEnabled = true;
-        // Master switch for ALL memory injection (flight cluster + source-object aim).
-        // SendInput outputs, custom bindings, and macros are unaffected. Default true;
+        // Master switch for flight-axis, source-object aim, and head-pose injection.
+        // Discrete ship actions, raw custom bindings, and macros are unaffected. Default true;
         // a "parked" profile sets it false to disable flight injection on foot while
         // keeping its own button/macro mappings. See profile-switching.md.
         bool    bEnableInjection = true;
 
         bool    bHoldForBoost = true;   // Pause throttle injection while boost is held; cancel on release
+
+        // Patch 5.0 native control layer. Named ship operations fail closed at
+        // their exact Starfield gates and never need a ControlMap/SendInput path.
+        bool    bNativeShipControls = true;
+        HeadTracking::Settings headTracking;
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 

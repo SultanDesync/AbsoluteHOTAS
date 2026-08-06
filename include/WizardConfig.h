@@ -45,6 +45,20 @@ struct WizardState {
     float       digitalAimValue = 1.0f;
     std::string toggleAimModeBinding;
 
+    // Camera look: OpenTrack-compatible pose plus optional per-axis joystick overrides.
+    bool        headLookEnabled = false;
+    bool        headLookOpenTrackEnabled = true;
+    std::string headLookAxisBindings[kNumHeadLookAxisSlots]; // yaw, pitch, roll
+    bool        headLookAxisEnabled[kNumHeadLookAxisSlots];
+    bool        headLookInvert[kNumHeadLookAxisSlots];
+    float       headLookSensitivity[kNumHeadLookAxisSlots];
+    float       headLookMaxDegrees[kNumHeadLookAxisSlots];
+    float       headLookDeadzoneDegrees = 0.0f;
+    float       headLookJoystickDeadzone = 0.08f;
+    float       headLookSmoothing = 0.15f;
+    std::string headLookRecenterBinding;
+    std::string headLookToggleBinding;
+
     // DualStick accumulator mode
     bool        accumulatorThrottle = false;
     float       accumulatorRate = 1.0f;

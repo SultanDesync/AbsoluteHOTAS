@@ -1,19 +1,20 @@
-# AbsoluteHOTAS v4.0.2
+# AbsoluteHOTAS v5.0.0-beta
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release Status
 
-**4.0.2 is the stable core release.** DirectInput polling, analog flight injection,
-safe output release, configuration saving, and the configuration workbench are the
-recommended release track. Profiles and macros remain experimental while they gain
-broader real-world hardware and workflow validation.
+**5.0.0-beta is the native-control test track.** Named ship functions, the boost
+zone, and the strafe modifier now enter Starfield through validated internal ship
+control seams instead of synthesized keyboard or mouse input. The beta also adds
+OpenTrack-compatible rotational camera look, validated with Tobii and NeuralNet
+webcam tracker sources.
 
-Version **3.0.2 remains available as the legacy 3.x option**, but 4.0.2 is the main
-download for current features, update-safe settings, and ongoing support. Renderer
-compatibility with third-party overlays, frame-generation layers, and Proton graphics
-stacks is best effort; an explicit hook bypass keeps manual configuration and flight
-controls available when a graphics utility conflicts with the workbench.
+Version **4.0.2 remains the stable baseline** while 5.0 receives in-game coverage
+across ship states, cameras, and hardware. Renderer compatibility with third-party
+overlays, frame-generation layers, and Proton graphics stacks is best effort; an
+explicit hook bypass keeps manual configuration and flight controls available when a
+graphics utility conflicts with the workbench.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
@@ -21,6 +22,14 @@ inputs, and regressions in core flight controls. See
 report actionable.
 
 ## Changelog
+
+### v5.0.0-beta
+
+- **Native Ship Functions:** All 23 named ship-action bindings and named macro targets now use exact-gated Starfield control paths. These paths do not call `SendInput` or depend on the player's keyboard/mouse binds.
+- **Native Movement Modifiers:** Boost-zone activation uses the selected flight handler's native boost request, and analog strafe holds Starfield's native flight-mode modifier while preserving simultaneous roll and lateral output.
+- **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. POV and exterior zoom use the active camera-state handlers.
+- **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
+- **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
 
 ### v4.0.2
 
@@ -69,13 +78,13 @@ report actionable.
 - **Per-Offset Silence Gate:** The +0x68 (input target) and +0x6C (effective throttle) memory lanes are now independently silenceable, enabling the Pilot Turn Assist to let the game's native assist operate on +0x6C while the accumulator retains full authority over +0x68.
 - **Direct-Memory Reverse Flight:** Reverse flight no longer emulates the `S` key via keyboard injection. The plugin now writes directly to the flight control cluster's memory lanes, eliminating unintended keyboard inputs in menus, dialogue, and on-foot contexts.
 - **Improved Velocity Reading:** Ship velocity is now read directly from the validated flight control cluster, removing the dependency on a fragile HUD-based static address.
-- **Strafe Modifier Fix:** The Space modifier (which locks roll for strafing) now respects configured deadzone values. Previously a hardcoded 5% threshold caused minor stick noise to fire the modifier and steal roll authority.
+- **Strafe Modifier Fix (3.x path):** The legacy Space-key modifier respected configured deadzones. In 5.0 this path is superseded by the native modifier and simultaneous roll/strafe output split.
 - **Deadzone UI Fix:** The per-axis deadzone graph now correctly represents the deadzone as a proportion of the full axis range. The slider range is expanded to 0–95% (was previously capped at 50%).
 - **Mouse Steering Defaults:** HOSAM alignment assist defaults tuned for real-world use — radius 130/200 (was 15), idle 50ms (was 80), decay 8.0 (was 4.0). Wizard slider maximums raised accordingly.
 - **Codebase Hygiene:** Consolidated duplicate code, removed redundant imports, extracted shared utilities (`StringUtils.h`, `DeviceManager.h`), and removed the legacy `version.rc` resource.
 - **Signal Hunter Fallback:** The original Signal Hunter discovery method is preserved as a fallback via `bSignalHunterFallback = true` in the INI.
 
-This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle via memory injection. It includes an in-game binding wizard and configurable button-to-keyboard/mouse mapping for all ship actions.
+This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle. It includes an in-game workbench, native bindings for all named ship actions, and explicit raw keyboard/mouse passthroughs for custom non-ship commands.
 
 ## Flight Control Discovery
 
@@ -101,18 +110,19 @@ fThrottleAtEngineStart = 0.0314
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 * **Hot-Swappable Profiles** — Switch complete input layers during play, including bindings, axes, tuning, aim modes, and macros. Profiles support toggle, momentary, and selector-style activation.
-* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named ship actions follow your current Starfield keybinds.
+* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named ship-action targets use native Starfield control paths; explicit raw key/mouse targets remain available for general-purpose automation.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
 * **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. The opening **Flight Axes (Core)** page keeps every direct-flight binding, response control, calibration tool, and live input display together. Bind axes and buttons by moving/pressing them on your hardware in real-time.
 * **Frame Generation Support** — Supports Starfield's built-in FSR3 Frame Generation and reinitializes the overlay when the swap chain changes. Compatibility with third-party overlays, capture tools, and graphics injectors is best effort.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
-* **22 Ship Action Bindings** — Map physical buttons to flight functions (boost, weapons, power management, scanner, target selection, etc.).
+* **23 Native Ship Action Bindings** — Map physical buttons directly to boost, weapons, power management, scanner, target selection, camera controls, and other ship functions without synthetic keyboard/mouse input.
+* **OpenTrack-Compatible Camera Look** — Apply rotational pose directly to the first-person cockpit camera. Validated with OpenTrack's Tobii and NeuralNet webcam inputs; the Camera Look workbench adds live per-axis output graphs, enable switches, inversion/sensitivity/limits, joystick-axis overrides, toggle, and recenter bindings.
 * **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
 * **Button-based axes** — Use hat switches or buttons for roll, strafe, and reverse when analog axes are limited.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
-* **Safe Workbench Session** — Plugin-owned flight injection, synthetic outputs, macros, and profile switching are parked while the wizard is open. Open it from the main or pause menu for mouse interaction; keyboard navigation remains available during gameplay.
+* **Safe Workbench Session** — Plugin-owned flight injection, native actions, raw custom outputs, macros, and profile switching are parked while the wizard is open. Open it from the main or pause menu for mouse interaction; keyboard navigation remains available during gameplay.
 * **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
 * **Silent by default** — No log file is written at all unless you opt in with `bEnableLog = true` in the INI. When enabled it logs device enumeration, hook installation, and errors/crashes — no runtime spam.
 
@@ -170,16 +180,16 @@ Strafe is a hybrid: it writes the flight cluster and holds Starfield's resolved
 **Switch Flight Modes** input (normally Space) while either strafe axis is beyond
 the larger of its configured deadzone or the 5% noise floor.
 
-Starfield currently uses one shared lane for roll and lateral strafe. The flight
-mode modifier changes how that lane is interpreted, so roll and strafe cannot be
-commanded simultaneously; lateral strafe takes priority. Vertical strafe also
-holds the modifier and therefore prevents roll while active.
+Starfield's upstream intent lane is shared by roll and lateral strafe, but its
+selected flight handler exposes separate lateral and roll outputs. AbsoluteHOTAS
+lets the native flight-mode transform run, then restores both values at that
+validated output seam. Roll therefore remains available during lateral or vertical
+strafe.
 
-Axis-driven synthetic inputs can affect on-foot play. A strafe control left
-displaced can keep **Switch Flight Modes** held, and an enabled throttle boost
-zone can hold **Fire Boosters** (normally Left Shift). Turning off **Injection
-enabled** parks memory writes but does not suppress the strafe modifier. Center
-the controls or use the master deactivate control before FPS play.
+Strafe and throttle boost-zone activation use Starfield's internal
+**Switch Flight Modes** and **Fire Boosters** actions. They do not synthesize
+keyboard or mouse input, and turning off **Injection enabled** parks those native
+movement-modifier requests along with flight-axis and head-pose injection.
 
 The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
 
@@ -238,12 +248,14 @@ available, and swaps are preloaded so activation does not read from disk during 
 ### Parking flight controls versus stopping the plugin
 
 Turning off **Injection enabled** under **Flight Controls → Flight Axes (Core)** creates
-a parked profile. Pitch, yaw, roll, throttle, strafe, and aim injection stop, while
-that profile's button outputs and macros remain available. This is intended for an
-on-foot or menu position on a hardware selector.
+a parked profile. Pitch, yaw, roll, throttle, strafe, aim, head pose, and native
+strafe/boost-zone requests stop, while that profile's discrete button outputs and
+macros remain available. This is intended for an on-foot or menu position on a
+hardware selector.
 
-The master stop control is different: it releases flight injection, synthetic
-buttons, and macros together. Use it as the global panic or troubleshooting control.
+The master stop control is different: it releases flight injection, native actions,
+raw custom outputs, and macros together. Use it as the global panic or
+troubleshooting control.
 
 | State | Flight axes | Buttons and macros |
 |---|---:|---:|
@@ -348,15 +360,17 @@ iSelectTargetButton = VKB Gunfighter@2
 iIncreaseSystemPowerButton = -1
 ```
 
-Set an action to `-1` to disable it. Named ship actions automatically follow the player's current in-game Starfield keyboard/mouse bindings by reconciling `ControlMap_Custom.txt`; vanilla outputs are fallbacks when no override exists or the control map cannot be read.
+Set an action to `-1` to disable it. In 5.0, named ship actions call validated
+Starfield ship functions directly; they do not reconcile `ControlMap_Custom.txt`
+and do not use `[ShipButtonOutputs]`.
 
-Use `[ShipButtonOutputs]` only when you deliberately want to override the reconciled output:
+Raw keyboard/mouse passthroughs remain available under `[ButtonExpansion]` for
+menu helpers or other actions that are not native ship functions:
 
 ```ini
-[ShipButtonOutputs]
-sOpenScannerOutput = key:0x21
-sFireWeapon0Output = mouse:1
-sCancelOutput = none
+[ButtonExpansion]
+iButton99 = key:0x21
+iButton100 = mouse:3
 ```
 
 ## Multi-Zone Throttle Calibration

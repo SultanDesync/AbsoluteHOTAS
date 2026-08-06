@@ -93,9 +93,13 @@ hardware / keyboard / controller input
 
 The source object may eventually be the better insertion point for preserving more vanilla camera lead, assist curves, or mode behavior. It is not yet the public default because the current cluster writer-gate path has broader validation.
 
-## DirectInput And Synthetic Input
+## DirectInput And Native Actions
 
-Another practical finding is that Starfield remains willing to expose and accept DirectInput device state when the plugin polls it directly, even in setups where external keyboard/mouse emulation is inconsistent. This is why AbsoluteHOTAS treats DirectInput as the reliable hardware ingress path and keeps synthetic keyboard/mouse output as a final compatibility layer for game actions that still need Starfield's binding system.
+Another practical finding is that Starfield remains willing to expose DirectInput
+device state when the plugin polls it directly, even in setups where external
+keyboard/mouse emulation is inconsistent. AbsoluteHOTAS therefore treats
+DirectInput as the hardware ingress path and, in 5.0, routes named ship actions
+through validated native engine seams.
 
 Observed behavior:
 
@@ -108,18 +112,26 @@ Observed behavior:
 Design implication:
 
 - Use DirectInput polling for HOTAS/HOSAS hardware state whenever possible.
-- Use `SendInput` from the plugin only for discrete Starfield actions that need to pass through vanilla bindings, and mirror physical button hold/release instead of emitting instant pulses.
-- For named ship actions, reconcile synthetic outputs automatically from `ControlMap_Custom.txt`, with vanilla fallbacks and explicit `[ShipButtonOutputs]` as the final override. Raw custom outputs still require the user to choose a matching binding in Starfield's Controls menu.
+- Use native action paths for named ship functions, boost, and the flight-mode
+  modifier. Exact runtime mismatches fail closed.
+- Reserve `SendInput` for explicit raw `[ButtonExpansion]` and `key:`/`mouse:`
+  macro targets that intentionally operate outside the named ship-action layer.
 - Keep Steam Input out of the critical flight path unless the user has a specific reason to use it.
 
-## Roll And Strafe Share A Lane
+## Shared Intent Lane, Split Handler Outputs
 
-Roll and lateral strafe converge on the same signed lane in both the source object and downstream cluster. This is why AbsoluteHOTAS avoids owning the roll/lateral lane when the analog roll axis is centered: vanilla lateral strafe can continue to pass through while HOTAS roll is idle.
+Roll and lateral strafe converge on the same signed upstream intent lane. The
+selected flight handler's transform, however, produces separate lateral and roll
+output fields. AbsoluteHOTAS uses that validated post-transform seam to preserve
+both commands while the native strafe modifier is active.
 
-Important implication:
+5.0 implication:
 
-- `source+0x38` / `cluster+0x58` should not be treated as independent roll and lateral strafe channels.
-- A public analog strafe feature needs explicit ownership rules so it does not freeze or suppress normal roll/lateral behavior.
+- `source+0x38` / `cluster+0x58` is still a shared intent channel and should not
+  be described as two independent upstream writers.
+- The selected handler's downstream transform splits lateral and roll into
+  independent outputs; 5.0 restores both after that transform so they can be
+  commanded simultaneously.
 
 ## Reverse / Brake
 

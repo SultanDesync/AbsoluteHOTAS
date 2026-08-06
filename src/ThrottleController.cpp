@@ -9,6 +9,8 @@
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
 #include "UIHook.h"
+#include "NativeShipControl.h"
+#include "HeadTracking.h"
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -28,7 +30,7 @@ static bool s_turnAssistRuntimeActive = false;
 
 // ---- Profile switching (see docs/reference/profile-switching.md) ----
 // Each slot holds a fully-resolved snapshot of the three things a swap replaces:
-// the Config, the ControlMap-resolved ship-button table, and the macro set. Slot 0
+// the Config, the ship-button table, and the macro set. Slot 0
 // is the base profile; slots 1+ are switch profiles with a trigger button. All of
 // this is control-thread-only state — no locking.
 // How a slot's trigger button selects it.
@@ -58,15 +60,11 @@ struct ProfileSlot {
 static std::vector<ProfileSlot> s_profiles;   // [0] = base
 static int s_activeSlot = 0;
 static int s_lastSelectorPos = -2;            // last selector position acted on (-2 = re-eval)
-static ShipOutput s_boostOutput = NoOutput;
-static ShipOutput s_flightModeOutput = NoOutput;
 
 static void ApplyProfile(const ProfileSlot& slot, ThrottleController::Config& config) {
     config = slot.config;
     ShipOutputSystem::RestoreBindings(slot.shipBindings);
     MacroEngine::RestoreMacros(slot.macros);
-    s_boostOutput = ShipOutputSystem::GetShipButtonOutput("FireBoosters");
-    s_flightModeOutput = ShipOutputSystem::GetShipButtonOutput("SwitchFlightModes");
 }
 
 enum class CruiseAssistMode { Off, HoldCurrent, Stop, Half, Max };
@@ -244,6 +242,53 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.bHoldForBoost     = ini.GetBoolValue("DualStick", "bHoldForBoost",
                                      ini.GetBoolValue("Injection", "bHoldForBoost", true));
 
+    s_config.bNativeShipControls = ini.GetBoolValue("NativeControls", "bEnabled", true);
+    s_config.headTracking.enabled = ini.GetBoolValue("HeadTracking", "bEnabled", false);
+    s_config.headTracking.openTrackEnabled = ini.GetBoolValue(
+        "HeadTracking", "bOpenTrackEnabled", true);
+    {
+        const char* source = ini.GetValue("HeadTracking", "sSource", "OpenTrack");
+        s_config.headTracking.source = _stricmp(source, "TobiiViaOpenTrack") == 0
+            ? HeadTracking::Source::TobiiViaOpenTrack
+            : HeadTracking::Source::OpenTrack;
+    }
+    s_config.headTracking.recenterButton = ParseBindingRef(
+        ini.GetValue("HeadTracking", "iRecenterButton", ""), -1);
+    s_config.headTracking.toggleButton = ParseBindingRef(
+        ini.GetValue("HeadTracking", "iToggleButton", ""), -1);
+    s_config.headTracking.yawAxis = ParseBindingRef(
+        ini.GetValue("HeadTracking", "iLookYawAxis", ""), -1);
+    s_config.headTracking.pitchAxis = ParseBindingRef(
+        ini.GetValue("HeadTracking", "iLookPitchAxis", ""), -1);
+    s_config.headTracking.rollAxis = ParseBindingRef(
+        ini.GetValue("HeadTracking", "iLookRollAxis", ""), -1);
+    s_config.headTracking.yawScale = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fYawScale", 1.0)), 0.05F, 10.0F);
+    s_config.headTracking.pitchScale = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fPitchScale", 1.0)), 0.05F, 10.0F);
+    s_config.headTracking.rollScale = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fRollScale", 1.0)), 0.05F, 10.0F);
+    s_config.headTracking.maxYawDegrees = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxYawDegrees", 85.0)), 1.0F, 180.0F);
+    s_config.headTracking.maxPitchDegrees = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxPitchDegrees", 60.0)), 1.0F, 180.0F);
+    s_config.headTracking.maxRollDegrees = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxRollDegrees", 45.0)), 1.0F, 180.0F);
+    s_config.headTracking.deadzoneDegrees = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fDeadzoneDegrees", 0.0)), 0.0F, 20.0F);
+    s_config.headTracking.joystickDeadzone = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fJoystickDeadzone", 0.08)), 0.0F, 0.95F);
+    s_config.headTracking.smoothing = std::clamp(
+        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fSmoothing", 0.15)), 0.0F, 0.99F);
+    s_config.headTracking.staleMilliseconds = std::clamp(
+        static_cast<int>(ini.GetLongValue("HeadTracking", "iStaleMilliseconds", 500)), 50, 5000);
+    s_config.headTracking.yawEnabled = ini.GetBoolValue("HeadTracking", "bYawEnabled", true);
+    s_config.headTracking.pitchEnabled = ini.GetBoolValue("HeadTracking", "bPitchEnabled", true);
+    s_config.headTracking.rollEnabled = ini.GetBoolValue("HeadTracking", "bRollEnabled", true);
+    s_config.headTracking.invertYaw = ini.GetBoolValue("HeadTracking", "bInvertYaw", false);
+    s_config.headTracking.invertPitch = ini.GetBoolValue("HeadTracking", "bInvertPitch", false);
+    s_config.headTracking.invertRoll = ini.GetBoolValue("HeadTracking", "bInvertRoll", false);
+
     // [Gate] pilot-state gate (framework). Default Off = legacy behavior.
     {
         const char* gm = ini.GetValue("Gate", "PilotGateMode", "Off");
@@ -394,6 +439,11 @@ void ThrottleController::ResolveActiveDevices() {
     ResolveAndOpen(cfg.digitalAimCenterButton);
     ResolveAndOpen(cfg.toggleAimModeButton);
     ResolveAndOpen(cfg.turnAssistButton);
+    ResolveAndOpen(cfg.headTracking.recenterButton);
+    ResolveAndOpen(cfg.headTracking.toggleButton);
+    ResolveAndOpen(cfg.headTracking.yawAxis);
+    ResolveAndOpen(cfg.headTracking.pitchAxis);
+    ResolveAndOpen(cfg.headTracking.rollAxis);
 
     int count = ShipOutputSystem::GetShipButtonCount();
     for (int i = 0; i < count; i++)
@@ -620,7 +670,7 @@ void ThrottleController::ControlLoop() {
     auto sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
     uint64_t iter = 0;
     float lastInjectedHardwareValue = -999.0f;
-    // Master runtime gate. When false, ALL SendInput outputs and axis injection
+    // Master runtime gate. When false, all plugin-owned outputs and axis injection
     // are suppressed; driven by the activate/stop bindings (and Ctrl+Alt+F8).
     // Initialized from bAlwaysOn so default users come up active, while users who
     // want manual control (bAlwaysOn=false) come up deactivated until they press
@@ -689,7 +739,7 @@ void ThrottleController::ControlLoop() {
             SignalHunter::ArmForReacquire();
             lastInjectedHardwareValue = -999.0f;
         }
-        // Deactivate: full shutdown — release every held SendInput output AND stop
+        // Deactivate: full shutdown — release every held output and stop
         // axis injection. Triggered by the stop binding or the keyboard toggle when
         // currently active. Lets the user kill all ghost inputs on foot.
         else if ((curStop && !prevStop) || (toggleEdge && active)) {
@@ -713,6 +763,7 @@ void ThrottleController::ControlLoop() {
         prevToggleWizard = curToggleWizard;
         prevWizardChord  = curWizardChord;
         const bool overlayOpen = UIHook::IsUIOpen();
+        if (overlayOpen) HeadTracking::PollPreview(s_config.headTracking);
 
         // ---- Profile switch triggers ----
         // Three activation modes coexist (a rig may use any mix): momentary and
@@ -824,12 +875,14 @@ void ThrottleController::ControlLoop() {
         const bool fullClosed = (s_config.pilotGateMode == ThrottleController::GateMode::Full) && !piloting;
 
         // ---- Master active gate ----
-        // While deactivated, suppress ALL SendInput outputs and axis injection.
+        // While deactivated, suppress all plugin-owned outputs and axis injection.
         // The deactivate edge above already released held keys; this transition
         // guard is a safety net for any other path that clears `active`.
         // Full gate folds in here: when not piloting, park everything like deactivate.
         if (!active || fullClosed) {
             if (wasActive) {
+                NativeShipControl::SetEnabled(false);
+                HeadTracking::Suspend();
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 SignalHunter::Disarm();
@@ -858,9 +911,11 @@ void ThrottleController::ControlLoop() {
         // polling DirectInput only so capture and the close binding remain live.
         if (overlayOpen) {
             if (!overlayWasOpen) {
-                CtrlLog("[Wizard] Parking gameplay injection and synthetic outputs.");
+                CtrlLog("[Wizard] Parking gameplay injection and plugin-owned outputs.");
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
+                NativeShipControl::SetEnabled(false);
+                HeadTracking::Suspend();
                 SignalHunter::SuspendInjection();
                 injectionWasAllowed = false;
                 s_resetCruiseEdges = true;
@@ -879,6 +934,10 @@ void ThrottleController::ControlLoop() {
             CtrlLog("[Wizard] Gameplay input resumed; held edge controls reseeded.");
         }
 
+        NativeShipControl::SetEnabled(s_config.bNativeShipControls);
+        const bool flightInjectionAllowed = s_config.bEnableInjection &&
+            ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
+
         // Ship action buttons are live only outside the wizard workbench.
         if (s_config.shipButtonsEnabled)
             ShipOutputSystem::UpdateShipButtonBindings();
@@ -886,6 +945,7 @@ void ThrottleController::ControlLoop() {
             ShipOutputSystem::ReleaseShipButtonBindingOutputs();
 
         MacroEngine::Update();
+        NativeShipControl::PumpControllerThread();
 
         // ---- Reverse input ----
         const bool digitalReverseBound = s_config.digitalReverseButton.IsValid()
@@ -921,21 +981,19 @@ void ThrottleController::ControlLoop() {
                 reverseHeld = true;
         }
 
-        // Boost zone: fire boosters when the throttle axis is above boostZone+dz.
-        // Compute inBoostZone unconditionally (false when the feature is off or there
-        // is no throttle source) and ALWAYS drive SetOutputHeld with it, so a gate
-        // flip — e.g. unbinding the throttle — releases the held boost output instead
-        // of orphaning it down. A gated release left Shift stuck (no sprint on foot)
-        // until a manual deactivate.
+        // Boost zone: request the native booster action above boostZone+dz. Compute
+        // inBoostZone unconditionally and always publish its ownership state so a
+        // gate flip (for example, unbinding the throttle) cannot orphan the request.
         bool inBoostZone = false;
-        if (s_config.bEnableInjection && s_config.bBoostZone && s_config.bUnipolarReverse
+        if (flightInjectionAllowed && s_config.bBoostZone && s_config.bUnipolarReverse
             && s_config.unipolarMode
             && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
             long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             inBoostZone = rawThrottle > s_config.boostZoneCenter + s_config.boostZoneDeadzone;
         }
-        ShipOutputSystem::SetOutputHeld(s_boostOutput, OwnerBoostZone, inBoostZone);
+        NativeShipControl::SetActionHeld(
+            NativeShipControl::Action::FireBoosters, OwnerBoostZone, inBoostZone);
 
         // ---- Throttle ----
         float throttle = 0.0f;
@@ -1003,7 +1061,8 @@ void ThrottleController::ControlLoop() {
         if (cruiseOverride) {
             throttle = s_cruiseAssistTarget;
             reverseHeld = false;
-            ShipOutputSystem::SetOutputHeld(s_boostOutput, OwnerBoostZone, false);
+            NativeShipControl::SetActionHeld(
+                NativeShipControl::Action::FireBoosters, OwnerBoostZone, false);
         }
 
         // ---- Rotation axes ----
@@ -1076,14 +1135,15 @@ void ThrottleController::ControlLoop() {
 
         // Strafe activation gate. Tested against the PRE-deadzone magnitude (or a
         // digital button) so the deadzone isn't double-counted; the 0.05 floor is a
-        // fixed noise gate so jitter never fires the Space modifier (which locks
-        // roll) even when the configured deadzone is 0.
+        // fixed noise gate so jitter never fires the native flight-mode modifier,
+        // even when the configured deadzone is 0.
         const float strafeActThreshX = std::max(0.05f, s_config.fStrafeDeadzone);
         const float strafeActThreshY = std::max(0.05f, s_config.fStrafeVertDeadzone);
         const bool strafeLatActive  = std::abs(strafeLatNorm)  > strafeActThreshX || digStrafeLeft || digStrafeRight;
         const bool strafeVertActive = std::abs(strafeVertNorm) > strafeActThreshY || digStrafeUp   || digStrafeDown;
-        ShipOutputSystem::SetOutputHeld(s_flightModeOutput, OwnerStrafeModifier,
-            strafeLatActive || strafeVertActive);
+        NativeShipControl::SetActionHeld(
+            NativeShipControl::Action::SwitchFlightModes, OwnerStrafeModifier,
+            flightInjectionAllowed && (strafeLatActive || strafeVertActive));
 
         // ---- Aim mode toggle ----
         {
@@ -1138,17 +1198,15 @@ void ThrottleController::ControlLoop() {
             resetOverlayEdges = false;
 
             // ---- SignalHunter / AimController (pilot-gated injection) ----
-            // InjectionOnly: while not piloting, park the memory injection but leave
-            // SendInput bindings live (those are processed above, ungated here).
+            // InjectionOnly: while not piloting, park axis/head injection but leave
+            // discrete bindings live (those are processed above, ungated here).
             //
             // bEnableInjection is the per-profile switch for the same thing: a "parked"
-            // profile sets it false to disable ALL memory injection (flight cluster +
-            // aim) while its buttons/macros keep working. It rides the config swap, so
+            // profile sets it false to disable flight-axis, aim, and head-pose injection
+            // while its buttons/macros keep working. It rides the config swap, so
             // landing on such a profile parks injection via the same transition path as
             // the pilot gate — no separate release logic. See profile-switching.md.
-            const bool injectionAllowed = !overlayOpen && s_config.bEnableInjection
-                && ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
-            if (injectionAllowed) {
+            if (flightInjectionAllowed) {
                 injectionWasAllowed = true;
                 int candCount = ThrottleHook::GetCandidateCount();
                 SignalHunter::Tick(candCount, iter);
@@ -1157,10 +1215,12 @@ void ThrottleController::ControlLoop() {
                 AimController::Update(s_config, yaw, pitch,
                     hasSeparateAimInput, hasSeparateAimAxes, hasDigitalAimButtons, dt);
             } else if (injectionWasAllowed) {
-                // Transition to parked: stop memory injection, keep SendInput live.
+                // Transition to parked: stop axis/head injection, keep discrete bindings live.
                 SignalHunter::SuspendInjection();
                 injectionWasAllowed = false;
             }
+            HeadTracking::Update(s_config.headTracking, s_config.axisCalibration,
+                                 dt, flightInjectionAllowed);
         }
 
         std::this_thread::sleep_for(sleepDuration);
@@ -1168,6 +1228,8 @@ void ThrottleController::ControlLoop() {
 
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     MacroEngine::ReleaseAll();
+    NativeShipControl::SetEnabled(false);
+    HeadTracking::Shutdown();
     DeviceManager::Shutdown();
 }
 
@@ -1199,6 +1261,8 @@ void ThrottleController::Stop() {
     s_running = false;
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     MacroEngine::ReleaseAll();
+    NativeShipControl::SetEnabled(false);
+    HeadTracking::Shutdown();
 }
 
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }

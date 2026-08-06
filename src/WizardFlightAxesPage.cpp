@@ -428,9 +428,9 @@ static void DrawButtonBasedAxes(WizardState& s) {
 
     ImGui::Indent(12.0f);
     ImGui::TextWrapped("Use buttons or a hat switch for roll or strafe when you do not have enough analog axes.");
-    DrawWrappedColored(ImVec4(1.0f, 0.66f, 0.26f, 1.0f),
-        "Digital strafe uses the same Switch Flight Modes modifier and the same "
-        "roll/strafe exclusivity as analog strafe.");
+    DrawWrappedColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
+        "Digital strafe uses the same native flight-mode modifier and selected-handler "
+        "output split as analog strafe, so roll remains available while strafing.");
     ImGui::Spacing();
     for (int i = 1; i < kNumDigitalAxisSlots; ++i) {
         ImGui::PushID(4000 + i);
@@ -509,11 +509,11 @@ static const char* CoreAxisInjectionPath(const WizardState& s, int axisIndex) {
                 return "SOURCE OBJECT  /  AIM-DRIVEN YAW";
             return "DIRECT MEMORY  /  FLIGHT-CLUSTER YAW GATE";
         case 3:
-            return "DIRECT MEMORY  /  SHARED ROLL–LATERAL LANE";
+            return "DIRECT MEMORY + NATIVE OUTPUT SPLIT  /  ROLL";
         case 4:
-            return "DIRECT MEMORY + SYNTHETIC INPUT  /  SHARED ROLL–LATERAL LANE";
+            return "DIRECT MEMORY + NATIVE MODIFIER  /  LATERAL STRAFE";
         case 5:
-            return "DIRECT MEMORY + SYNTHETIC INPUT  /  VERTICAL-STRAFE LANE";
+            return "DIRECT MEMORY + NATIVE MODIFIER  /  VERTICAL STRAFE";
         default:
             return "DIRECT MEMORY";
     }
@@ -533,19 +533,19 @@ static const char* CoreAxisInjectionBehavior(const WizardState& s, int axisIndex
                 return "With no separate aim input, this axis is mirrored into the source-object aim accumulator and steering follows the reticle.";
             return "The plugin owns this flight-cluster lane while memory injection is enabled.";
         case 3:
-            return "Roll claims the shared lateral writer above its 5% output gate. Any active strafe modifier changes that writer's meaning and roll is unavailable.";
+            return "Roll is restored to the selected handler's dedicated roll output after Starfield processes the native strafe modifier.";
         case 4:
-            return "Beyond max(deadzone, 5%), lateral strafe replaces roll in the shared writer and holds Starfield's Switch Flight Modes input.";
+            return "Beyond max(deadzone, 5%), lateral strafe holds Starfield's native Switch Flight Modes action; the selected-handler split preserves simultaneous roll.";
         case 5:
-            return "Beyond max(deadzone, 5%), vertical strafe owns its writer and holds Starfield's Switch Flight Modes input, which also prevents roll.";
+            return "Beyond max(deadzone, 5%), vertical strafe holds Starfield's native Switch Flight Modes action without suppressing roll.";
         default:
             return "";
     }
 }
 
 static void DrawCoreAxisInjection(const WizardState& s, int axisIndex) {
-    const bool syntheticInput = axisIndex == 4 || axisIndex == 5;
-    ImGui::TextColored(syntheticInput
+    const bool nativeModifier = axisIndex == 4 || axisIndex == 5;
+    ImGui::TextColored(nativeModifier
             ? ImVec4(1.0f, 0.70f, 0.28f, 1.0f)
             : ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
         "INJECTION PATH");
@@ -555,12 +555,12 @@ static void DrawCoreAxisInjection(const WizardState& s, int axisIndex) {
         CoreAxisInjectionBehavior(s, axisIndex));
     if (axisIndex == 0 && s.boostZone) {
         DrawWrappedColored(ImVec4(1.0f, 0.66f, 0.26f, 1.0f),
-            "BOOST ZONE OUTPUT  /  Holds Starfield's Fire Boosters input while "
+            "BOOST ZONE OUTPUT  /  Requests Starfield's native Fire Boosters action while "
             "the lever remains above the configured threshold.");
     }
-    if (syntheticInput) {
+    if (nativeModifier) {
         DrawWrappedColored(ImVec4(1.0f, 0.60f, 0.24f, 1.0f),
-            "MODIFIER OUTPUT REMAINS LIVE WHEN MEMORY INJECTION IS PARKED");
+            "MODIFIER OUTPUT IS GATED WITH FLIGHT INJECTION");
     }
 }
 
@@ -573,32 +573,30 @@ static void DrawInjectionSafetyNotice(const WizardState& s) {
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
             ImGui::GetColorU32(ImVec4(0.19f, 0.12f, 0.045f, 0.97f)));
 
-        ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.28f, 1.0f),
-            "CURRENT SHARED-LANE LIMIT");
+        ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
+            "SIMULTANEOUS ROLL + STRAFE");
         ImGui::TextWrapped(
-            "Roll and strafe cannot be commanded simultaneously. Roll and lateral "
-            "strafe share one game writer, and either strafe direction holds "
-            "Starfield's Switch Flight Modes input. While that modifier is active, "
-            "Starfield interprets the shared lane as strafe; lateral strafe takes "
-            "priority over roll.");
+            "Starfield's upstream intent lane is shared, but AbsoluteHOTAS uses the "
+            "validated selected-handler output to restore independent lateral and roll "
+            "values after the native flight-mode transform. Both axes remain available "
+            "while either strafe direction is active.");
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored(ImVec4(1.0f, 0.52f, 0.30f, 1.0f),
-            "AXIS-DRIVEN KEYBOARD / MOUSE OUTPUTS CAN FOLLOW YOU ON FOOT");
+        ImGui::TextColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
+            "NATIVE MOVEMENT MODIFIERS");
         ImGui::TextWrapped(
-            "A bound analog or digital strafe control holds Starfield's resolved "
-            "Switch Flight Modes input (normally Space) while active. A throttle "
-            "left in its boost zone can hold Fire Boosters (normally Left Shift). "
-            "Center these controls or deactivate the plugin before FPS play.");
-        DrawWrappedColored(ImVec4(1.0f, 0.75f, 0.38f, 1.0f),
-            "Important: Injection enabled parks memory writes only; the strafe "
-            "modifier is a separate synthetic output.");
+            "Analog and digital strafe request Starfield's internal Switch Flight Modes "
+            "action, and the throttle boost zone requests its internal Fire Boosters "
+            "action. Neither path synthesizes a keyboard or mouse event.");
+        DrawWrappedColored(ImVec4(0.55f, 0.75f, 0.82f, 1.0f),
+            "Turning off Injection enabled parks axis writes, head pose, and both "
+            "native movement-modifier requests.");
         if (!s.axisInjectionEnabled) {
-            DrawWrappedColored(ImVec4(1.0f, 0.42f, 0.28f, 1.0f),
-                "THIS PROFILE'S MEMORY INJECTION IS PARKED — STRAFE MODIFIER OUTPUT CAN STILL BE LIVE");
+            DrawWrappedColored(ImVec4(1.0f, 0.72f, 0.28f, 1.0f),
+                "THIS PROFILE'S FLIGHT INJECTION AND MOVEMENT MODIFIERS ARE PARKED");
         }
 
         ImGui::EndTable();
@@ -648,8 +646,8 @@ static void DrawFlightCoreHero(WizardState& s) {
     ImGui::Checkbox("Injection enabled", &s.axisInjectionEnabled);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip(
-            "Controls the memory-injection paths shown below.\n"
-            "Synthetic outputs, including the strafe modifier, are independent.");
+            "Controls the flight-axis, aim, head-pose, native strafe-modifier,\n"
+            "and native boost-zone paths shown below.");
 
     ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + height + ImGui::GetStyle().ItemSpacing.y));
 }

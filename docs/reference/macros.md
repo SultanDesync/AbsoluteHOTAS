@@ -22,13 +22,12 @@ A **step**:
 Chord = a one-step macro with N targets. Turbo = repeat the whole macro while the
 button is held. Sequence = multiple steps. One engine, no special cases.
 
-## Targeting — rides the ControlMap layer
+## Targeting — native actions and explicit raw outputs
 
 Steps name **logical ship actions** (`NextSystem`, `IncreaseSystemPower`, …)
-wherever possible, resolved through the same binding/ControlMap layer as ship
-buttons. So a macro **follows the user's in-game keybinds automatically** — write
-it once, it works whether they're on arrows, WASD, or a remap. Raw keys
-(`key:0xNN`, `mouse:N`) are allowed for non-ship outputs.
+wherever possible. In 5.0 those tokens resolve to the same native-control service
+as physical ship buttons, independent of keyboard/mouse binds. Raw keys
+(`key:0xNN`, `mouse:N`) remain available for deliberate non-ship output.
 
 ## Emission engine
 
@@ -37,7 +36,7 @@ running at the poll rate):
 
 - On press: start at step 0.
 - Each tick: advance by **wall-clock** elapsed time (poll-rate-independent);
-  press/hold/release targets via `SetOutputHeld` under a per-macro owner ID, so it
+  press/hold/release targets under a per-macro owner ID, so it
   composes with the existing reference-counted held-key system.
 - On completion: stop. If `turbo` and still held: loop from step 0.
 

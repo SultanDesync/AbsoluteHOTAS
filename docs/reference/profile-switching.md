@@ -128,21 +128,18 @@ sets `[Injection] bEnableInjection = false` and carries whatever on-foot button
 bindings, custom key outputs, and macros you want. The user defines what parking
 means; the engine only tracks the flag.
 
-`bEnableInjection = false` suppresses **all memory injection** — the flight cluster
-(pitch/yaw/roll/throttle/strafe) and the source-object aim — while leaving the
-synthetic-output system active: ship-button outputs, `[ButtonExpansion]` custom
-keys, and macros/turbos all keep working. The axis-driven strafe modifier also
-remains live because it is evaluated before `injectionAllowed`; a displaced analog
-strafe axis or held digital strafe button can therefore continue to hold
-Starfield's resolved **Switch Flight Modes** output in a parked profile. The
-throttle boost-zone output is the exception: it is explicitly tied to
-`bEnableInjection` and releases when memory injection is parked.
+`bEnableInjection = false` suppresses the flight cluster
+(pitch/yaw/roll/throttle/strafe), source-object aim, head pose, and the native
+strafe/boost-zone movement requests. Discrete named ship buttons,
+`[ButtonExpansion]` custom keys, and macros/turbos remain available according to
+that profile. Named ship actions use internal Starfield operations; only explicit
+raw custom targets use keyboard/mouse synthesis.
 
 This is the same memory-parking mechanism the pilot gate's `InjectionOnly` mode
 uses. The profile flag folds into the one `injectionAllowed` check, so landing on
 a parked profile releases the memory gates without touching the master `active`
-gate. A parked profile is therefore not a global synthetic-input safety gate:
-center strafe controls or use the master deactivate control before FPS play.
+gate. A parked profile is therefore not a global button/macro safety gate: use
+the master deactivate control when every plugin-owned output must be released.
 
 This is why the earlier "disable detent that points at the ScrollLock kill" idea was
 dropped. Two tiers cover everything, and they are different tools:
@@ -151,7 +148,7 @@ dropped. Two tiers cover everything, and they are different tools:
 | --- | --- | --- |
 | Flight injection | off | off |
 | Button/macro outputs | **your parked mappings still run** | all released |
-| Axis-driven synthetic outputs | strafe modifier can remain live; boost zone releases | all released |
+| Native movement modifiers | strafe and boost zone released | all released |
 | Granularity | per-profile, surgical | global panic kill |
 
 **A parked profile is a manual pilot-state signal that actually works.** Automatic
@@ -205,9 +202,9 @@ device names resolve to indices. A swap is then an index change plus a release o
 held outputs. Zero file I/O. This is mandatory, not an optimization: a momentary slot
 swaps twice per press.
 
-*What a swap costs.* Index change, one `SendInput` per currently-held output
-(typically 0–3), and a pass over the button table to seed `previousPressed`. Tens of
-microseconds against an 8.3 ms tick at 120 Hz — under 1% of one poll, imperceptible.
+*What a swap costs.* Index change, release of currently-held native/raw owners,
+and a pass over the button table to seed `previousPressed`. There is no file I/O
+or named-action `SendInput` dispatch on the swap path.
 
 *What a reload would cost.* `ReloadConfig` → `LoadConfig` parses three INIs, and
 `LoadShipButtonBindings` reads `ControlMap_Custom.txt` from the Documents folder.

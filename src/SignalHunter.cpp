@@ -3,6 +3,7 @@
 #include "ThrottleHook.h"
 #include "ShipOutput.h"
 #include "RuntimePaths.h"
+#include "NativeShipControl.h"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -105,6 +106,8 @@ void Disarm() {
     s_accumBurstFrames        = 0;
     s_lastAccumBurstValue     = -999.0f;
     s_prevBoostHeld           = false;
+    NativeShipControl::UpdateCluster(0);
+    NativeShipControl::SetSplitFlightAxes(0.0F, 0.0F, false);
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
@@ -116,10 +119,9 @@ void Disarm() {
 }
 
 void SuspendInjection() {
-    // InjectionOnly pilot gate: stop all memory injection but leave SendInput
-    // outputs untouched (unlike Disarm, which also releases ship outputs and
-    // tears down capture). Capture stays live so injection resumes cleanly on
-    // re-pilot.
+    // InjectionOnly pilot gate: stop flight-axis injection while leaving discrete
+    // bindings untouched (unlike Disarm, which also releases ship actions/raw
+    // outputs and tears down capture). Capture stays live for clean re-pilot.
     s_lastInjectedThrottle = -999.0f;
     s_throttleBurstFrames  = 0;
     s_throttleBurstValue   = 0.0f;
@@ -127,6 +129,7 @@ void SuspendInjection() {
     s_accumBurstFrames     = 0;
     s_lastAccumBurstValue  = -999.0f;
     s_prevBoostHeld        = false;
+    NativeShipControl::SetSplitFlightAxes(0.0F, 0.0F, false);
     ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
@@ -141,6 +144,8 @@ void ArmForReacquire() {
     s_activeThrottlePtr     = 0;
     s_plausibilityFailCount = 0;
     s_throttleBurstFrames   = 0;
+    NativeShipControl::UpdateCluster(0);
+    NativeShipControl::SetSplitFlightAxes(0.0F, 0.0F, false);
     ThrottleHook::SetReverseOverride(false);
     ThrottleHook::SetRotationalOverride(0.0f, 0.0f, 0.0f, false);
     ThrottleHook::SetSilenceEnabled(false);
@@ -218,6 +223,8 @@ void Tick(int candCount, uint64_t iter) {
         else if (!s_discoveryLocked && !s_discoveryArmed)
             ArmForReacquire();
     }
+
+    NativeShipControl::UpdateCluster(s_activeThrottlePtr);
 }
 
 void Inject(float throttle, float pitch, float yaw, float roll,
@@ -267,8 +274,12 @@ void Inject(float throttle, float pitch, float yaw, float roll,
         strafeY, strafeVertOverrideActive,
         yawGateEnabled, pitchGateEnabled);
 
+    NativeShipControl::SetSplitFlightAxes(
+        cfg.rollEnabled ? roll : 0.0F, strafeX,
+        rollOverrideActive || strafeLatOverrideActive);
+
     // --- BOOST GUARD & CANCEL LOGIC ---
-    const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostOutputHeld();
+    const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostRequested();
     
     if (!boostHeld && s_prevBoostHeld) {
         if (cfg.bAccumulatorThrottle) {

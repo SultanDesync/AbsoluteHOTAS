@@ -122,12 +122,10 @@ static uint32_t ShipOwnerIdForIndex(size_t index) {
 }
 
 // ============================================================================
-// ControlMap auto-alignment
+// Legacy 4.x ControlMap output reconciliation
 // ============================================================================
-// Reads the player's in-game Starfield ship bindings from ControlMap_Custom.txt
-// and folds them in as the effective default for each action, so plugin output
-// follows in-game rebinds without manual [ShipButtonOutputs] edits. See
-// docs/reference/control-map-ship-functions.md.
+// Kept so existing configuration/profile snapshots round-trip their former
+// outputs. Recognized 5.0 ship actions never emit these values.
 
 static std::filesystem::path ControlMapCustomPath() {
     PWSTR docs = nullptr;
@@ -252,6 +250,7 @@ void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
 }
 
 void ReleaseOwnerOutputs(uint32_t ownerId) {
+    NativeShipControl::ReleaseOwner(ownerId);
     for (auto it = s_heldShipOutputs.begin(); it != s_heldShipOutputs.end();) {
         std::erase(it->owners, ownerId);
         if (it->owners.empty()) {
@@ -264,6 +263,7 @@ void ReleaseOwnerOutputs(uint32_t ownerId) {
 }
 
 void ReleaseAllShipButtonOutputs() {
+    NativeShipControl::ReleaseAll();
     for (const auto& h : s_heldShipOutputs) EmitShipOutput(h.output, true);
     s_heldShipOutputs.clear();
     for (auto& b : s_shipButtonBindings) b.previousPressed = false;
@@ -297,12 +297,8 @@ void SeedDownButtonsConsumed() {
         b.previousPressed = DeviceManager::IsButtonPressed(b.buttonRef);
 }
 
-bool IsBoostOutputHeld() {
-    if (s_shipButtonBindings.empty()) return false;
-    const auto& boostBinding = s_shipButtonBindings[0];
-    for (const auto& held : s_heldShipOutputs)
-        if (SameOutput(held.output, boostBinding.output)) return true;
-    return false;
+bool IsBoostRequested() {
+    return NativeShipControl::IsActionHeld(NativeShipControl::Action::FireBoosters);
 }
 
 ShipButtonBinding* GetShipButtonBindings() {
@@ -313,26 +309,29 @@ int GetShipButtonCount() {
     return static_cast<int>(s_shipButtonBindings.size());
 }
 
-ShipOutput GetShipButtonOutput(std::string_view actionId) {
-    for (const auto& b : s_shipButtonBindings)
-        if (actionId == b.actionId) return b.output;
-    return NoOutput;
-}
-
-ShipOutput ResolveOutputToken(std::string_view token) {
+ShipControlTarget ResolveControlTarget(std::string_view token) {
     const std::string lowered = TrimLower(token);
     // Raw key/mouse outputs (and "none") carry a ':' or are the literal "none".
     if (lowered == "none" || lowered.find(':') != std::string::npos)
-        return ParseShipOutput(token, NoOutput);
-    // Otherwise a ship action id — resolved control-map-aware.
-    return GetShipButtonOutput(token);
+        return { NativeShipControl::Action::Invalid, ParseShipOutput(token, NoOutput) };
+    // Otherwise treat the token as a native ship action id.
+    return { NativeShipControl::ActionFromId(token), NoOutput };
+}
+
+void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held) {
+    if (target.IsNative())
+        NativeShipControl::SetActionHeld(target.nativeAction, ownerId, held);
+    else
+        SetOutputHeld(target.output, ownerId, held);
 }
 
 void LoadShipButtonBindings(CSimpleIniA& ini) {
     s_shipButtonBindings.clear();
     s_shipButtonBindings.reserve(kBindingDefs.size());
 
-    // Auto-alignment layer. Precedence per action:
+    // Retained 4.x output metadata. Named 5.0 actions ignore this resolved output
+    // and dispatch through NativeShipControl; only ButtonExpansion is raw output.
+    // Legacy precedence per action:
     //   vanilla default -> control-map-derived (in-game rebind) -> explicit [ShipButtonOutputs].
     const bool syncFromControlMap = ini.GetBoolValue("General", "bSyncShipOutputsFromControlMap", true);
     const ControlMap::ControlMapFile controlMap =
@@ -430,7 +429,11 @@ void UpdateShipButtonBindings() {
         bool pressed  = DeviceManager::IsButtonPressed(binding.buttonRef);
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
-        if (binding.mode == ShipBindingMode::Hold) {
+        const auto nativeAction = NativeShipControl::ActionFromId(binding.actionId);
+        if (nativeAction != NativeShipControl::Action::Invalid) {
+            if (pressed != binding.previousPressed)
+                NativeShipControl::SetActionHeld(nativeAction, ownerId, pressed);
+        } else if (binding.mode == ShipBindingMode::Hold) {
             if (pressed != binding.previousPressed)
                 SetOutputHeld(binding.output, ownerId, pressed);
         } else if (pressed && !binding.previousPressed) {

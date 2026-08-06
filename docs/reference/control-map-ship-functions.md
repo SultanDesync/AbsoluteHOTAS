@@ -1,4 +1,4 @@
-# Starfield ControlMap_Custom.txt — Ship Function Reference
+# Legacy ControlMap_Custom.txt Ship-Function Reference
 
 This document records the reverse-engineered format of Starfield's
 `ControlMap_Custom.txt` and the complete vanilla binding map for every spaceship
@@ -8,14 +8,17 @@ function AbsoluteHOTAS emits. It is the source of truth for the lookup tables in
 File location:
 `%USERPROFILE%/Documents/My Games/Starfield/ControlMap_Custom.txt`
 
-## Why the plugin reads it
+## 5.0 status
 
-AbsoluteHOTAS triggers spaceship actions by injecting the *vanilla* keyboard /
-mouse key for each function through `SendInput` (see `ShipOutput.cpp`). If a user
-rebinds a ship control in Starfield's own settings menu, the vanilla key no
-longer fires that action and the plugin's output breaks. `ControlMap_Custom.txt`
-records exactly those rebinds, so the plugin can read it and realign its output
-to whatever key the function is now on.
+This table documents the retired 4.x ship-function output path. In 5.0, all 23
+named ship actions and named macro targets use validated internal Starfield
+operations. They do not emit keyboard/mouse input, do not depend on the player's
+bindings, and never fall back to `SendInput`.
+
+The parser and fixtures remain useful as a reverse-engineering reference and for
+legacy configuration metadata. Explicit `[ButtonExpansion]` and `key:`/`mouse:`
+macro targets are still raw outputs by design, but their values are supplied by
+the user rather than resolved as named ship functions through this table.
 
 ## Binary format
 

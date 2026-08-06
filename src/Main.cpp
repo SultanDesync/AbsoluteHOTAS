@@ -6,6 +6,7 @@
 #include "SettingBeacon.h"
 #include "UIHook.h"
 #include "BindingWizard.h"
+#include "NativeShipControl.h"
 #include "SFSEInterface.h"
 #include <windows.h>
 #include <format>
@@ -104,6 +105,10 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
     if (!hookOk) {
         MainLog("WARNING: Hook installation failed. Throttle injection disabled.");
         MainLog("The game may have updated; the .text signature scan found no match.");
+    }
+
+    if (!NativeShipControl::Initialize()) {
+        MainLog("WARNING: Native 5.0 control seams did not pass their exact runtime gates.");
     }
 
     if (hookOk) {

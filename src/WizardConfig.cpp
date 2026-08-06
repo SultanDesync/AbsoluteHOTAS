@@ -163,6 +163,39 @@ void LoadCurrentBindings() {
     s.digitalAimValue      = cfg.fDigitalAimValue;
     s.toggleAimModeBinding = FormatBindingRef(cfg.toggleAimModeButton, false);
 
+    // Camera look
+    s.headLookEnabled = cfg.headTracking.enabled;
+    s.headLookOpenTrackEnabled = cfg.headTracking.openTrackEnabled;
+    const BindingRef* headAxes[] = {
+        &cfg.headTracking.yawAxis, &cfg.headTracking.pitchAxis, &cfg.headTracking.rollAxis
+    };
+    const bool headInvert[] = {
+        cfg.headTracking.invertYaw, cfg.headTracking.invertPitch, cfg.headTracking.invertRoll
+    };
+    const bool headEnabled[] = {
+        cfg.headTracking.yawEnabled, cfg.headTracking.pitchEnabled,
+        cfg.headTracking.rollEnabled
+    };
+    const float headSensitivity[] = {
+        cfg.headTracking.yawScale, cfg.headTracking.pitchScale, cfg.headTracking.rollScale
+    };
+    const float headMaximums[] = {
+        cfg.headTracking.maxYawDegrees, cfg.headTracking.maxPitchDegrees,
+        cfg.headTracking.maxRollDegrees
+    };
+    for (int i = 0; i < kNumHeadLookAxisSlots; ++i) {
+        s.headLookAxisBindings[i] = FormatBindingRef(*headAxes[i], true);
+        s.headLookAxisEnabled[i] = headEnabled[i];
+        s.headLookInvert[i] = headInvert[i];
+        s.headLookSensitivity[i] = headSensitivity[i];
+        s.headLookMaxDegrees[i] = headMaximums[i];
+    }
+    s.headLookDeadzoneDegrees = cfg.headTracking.deadzoneDegrees;
+    s.headLookJoystickDeadzone = cfg.headTracking.joystickDeadzone;
+    s.headLookSmoothing = cfg.headTracking.smoothing;
+    s.headLookRecenterBinding = FormatBindingRef(cfg.headTracking.recenterButton, false);
+    s.headLookToggleBinding = FormatBindingRef(cfg.headTracking.toggleButton, false);
+
     // Calibration data
     s.calibData = ThrottleController::GetCalibrationData();
 

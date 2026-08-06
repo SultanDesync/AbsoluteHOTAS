@@ -55,6 +55,13 @@ void OnCaptureCommit(int slot, const char* binding) {
         s.toggleAimModeBinding = binding;
     } else if (slot == CaptureSlot::kTurnAssistBtn) {
         s.turnAssistBinding = binding;
+    } else if (slot >= CaptureSlot::kHeadLookAxisBase
+               && slot < CaptureSlot::kHeadLookAxisBase + kNumHeadLookAxisSlots) {
+        s.headLookAxisBindings[slot - CaptureSlot::kHeadLookAxisBase] = binding;
+    } else if (slot == CaptureSlot::kHeadLookRecenter) {
+        s.headLookRecenterBinding = binding;
+    } else if (slot == CaptureSlot::kHeadLookToggle) {
+        s.headLookToggleBinding = binding;
     } else if (slot >= CaptureSlot::kMacroBase && slot < CaptureSlot::kMacroBase + 100) {
         int idx = slot - CaptureSlot::kMacroBase;
         if (idx < (int)s.macros.size()) s.macros[idx].buttonBinding = binding;

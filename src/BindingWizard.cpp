@@ -102,7 +102,8 @@ static void DrawSecondaryNavigation() {
     ImGui::Spacing();
     ImGui::SeparatorText(PrimarySectionLabel());
 
-    int columns = WizardSession::GetPage() == WizardSession::Page::Advanced ? 3 : 2;
+    int columns = WizardSession::GetPage() == WizardSession::Page::Advanced
+        || WizardSession::GetPage() == WizardSession::Page::Tune ? 3 : 2;
     if (!ImGui::BeginTable("SecondaryNavigation", columns,
             ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_PadOuterX)) return;
 
@@ -120,6 +121,10 @@ static void DrawSecondaryNavigation() {
         if (DrawSecondaryNavigationButton("Aiming & Combat##Secondary",
                 WizardSession::GetTunePage() == WizardSession::TunePage::Aiming))
             WizardSession::SelectTunePage(WizardSession::TunePage::Aiming);
+        ImGui::TableNextColumn();
+        if (DrawSecondaryNavigationButton("Camera Look##Secondary",
+                WizardSession::GetTunePage() == WizardSession::TunePage::CameraLook))
+            WizardSession::SelectTunePage(WizardSession::TunePage::CameraLook);
         ImGui::TableNextColumn();
         if (DrawSecondaryNavigationButton("Rate Throttle##Secondary",
                 WizardSession::GetTunePage() == WizardSession::TunePage::GamepadThrottle))
@@ -149,6 +154,7 @@ static void DrawActivePage(WizardState& s, bool dirty) {
         case WizardSession::Route::BindFlightAxes: WizardUI::DrawAxesTab(s); break;
         case WizardSession::Route::BindShipButtons: WizardUI::DrawButtonsTab(s); break;
         case WizardSession::Route::TuneAiming: WizardUI::DrawAimingTab(s); break;
+        case WizardSession::Route::TuneCameraLook: WizardUI::DrawCameraLookTab(s); break;
         case WizardSession::Route::TuneGamepadThrottle: WizardUI::DrawGamepadThrottleTab(s); break;
         case WizardSession::Route::AdvancedMacros: WizardUI::DrawMacrosTab(s); break;
         case WizardSession::Route::AdvancedPluginControls: WizardUI::DrawPluginControls(s); break;

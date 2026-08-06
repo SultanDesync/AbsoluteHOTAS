@@ -1,6 +1,6 @@
 # AbsoluteHOTAS Standalone Plugin
 
-AbsoluteHOTAS 3.0 ships as a standalone SFSE DLL and INI. The previous
+AbsoluteHOTAS 5.0 ships as a standalone SFSE DLL and INI. The previous
 Papyrus/ESM driver bridge has been removed from the release path.
 
 ## Target Artifact
@@ -26,7 +26,7 @@ immediate flight control without manual activation.
 
 ## Package Layout
 
-CMake post-build output is staged under:
+xmake post-build output is staged under:
 
 ```text
 contrib\PluginRelease\Data\SFSE\Plugins\

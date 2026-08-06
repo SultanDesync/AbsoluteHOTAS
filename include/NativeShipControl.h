@@ -1,0 +1,78 @@
+#pragma once
+
+#include <cstdint>
+#include <string_view>
+
+// Production-native Starfield control seams recovered and causally validated by
+// the 5.0 research pass. The implementation is exact-build/object gated and
+// fails closed: this layer never falls back to Windows input synthesis.
+namespace NativeShipControl {
+
+enum class Action : std::uint8_t {
+    FireBoosters,
+    SwitchFlightModes,
+    TogglePov,
+    FireWeapon0,
+    FireWeapon1,
+    FireWeapon2,
+    ShipAction1,
+    SelectTarget,
+    IncreaseSystemPower,
+    DecreaseSystemPower,
+    PreviousSystem,
+    NextSystem,
+    OpenScanner,
+    Repair,
+    ShipAlternateControlHold,
+    Cruise,
+    Cancel,
+    UndockTakeOff,
+    GetUp,
+    ExitShipFromCockpit,
+    ZoomCameraIn,
+    ZoomCameraOut,
+    AutopilotOnOff,
+    Count,
+    Invalid = 0xFF,
+};
+
+// Installs the exact-gated camera and selected-flight-handler hooks. It is safe
+// to call once during plugin load; individual capabilities remain unavailable
+// until their live object gates pass.
+bool Initialize();
+void Shutdown();
+
+// Master authority for native ship actions, continuous split output, and head
+// pose. Disabling requests releases every logical owner and clears all poses.
+void SetEnabled(bool enabled);
+bool Enabled();
+
+// Refresh the selected handler from SignalHunter's acquired flight cluster.
+// Passing zero invalidates ship-thread operations immediately.
+void UpdateCluster(std::uintptr_t cluster);
+bool ShipHandlerReady();
+
+Action ActionFromId(std::string_view actionId);
+std::string_view ActionId(Action action);
+
+// Reference-counted logical ownership. Multiple bindings/macros can own the
+// same native operation without generating duplicate press/release edges.
+void SetActionHeld(Action action, std::uint32_t ownerId, bool held);
+void ReleaseOwner(std::uint32_t ownerId);
+void ReleaseAll();
+bool IsActionHeld(Action action);
+
+// Dispatches content-keyed semantic action edges from the controller thread.
+// Ship-thread-only work is consumed by the selected-handler hook instead.
+void PumpControllerThread();
+
+// The selected-handler transform runs first. These values replace only its
+// separated lateral (output[0]) and roll (output[5]) fields.
+void SetSplitFlightAxes(float roll, float lateral, bool active);
+
+// Head pose is a normalized NiQuaternion in (w,x,y,z) order. The camera hook
+// post-composes it after Starfield's native FirstPersonState rotation.
+void SetHeadQuaternion(float w, float x, float y, float z, bool active);
+void ClearHeadPose();
+
+} // namespace NativeShipControl

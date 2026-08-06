@@ -228,6 +228,33 @@ void ApplyProfileScalars(const CSimpleIniA& ini, WizardState& s) {
     APPLY_LONG("Aim", "iAlignmentIdleMs", alignmentIdleMs);
     APPLY_FLOAT("Aim", "fAlignmentDecayRate", alignmentDecayRate);
 
+    APPLY_BOOL("HeadTracking", "bEnabled", headLookEnabled);
+    APPLY_BOOL("HeadTracking", "bOpenTrackEnabled", headLookOpenTrackEnabled);
+    for (int i = 0; i < kNumHeadLookAxisSlots; ++i) {
+        const auto& slot = kHeadLookAxisSlots[i];
+        s.headLookAxisBindings[i] = IniBinding(
+            ini, "HeadTracking", slot.iniKey, s.headLookAxisBindings[i], true);
+        if (ini.GetValue("HeadTracking", slot.enabledIniKey, nullptr))
+            s.headLookAxisEnabled[i] = ini.GetBoolValue(
+                "HeadTracking", slot.enabledIniKey, s.headLookAxisEnabled[i]);
+        if (ini.GetValue("HeadTracking", slot.invertIniKey, nullptr))
+            s.headLookInvert[i] = ini.GetBoolValue(
+                "HeadTracking", slot.invertIniKey, s.headLookInvert[i]);
+        if (ini.GetValue("HeadTracking", slot.sensitivityKey, nullptr))
+            s.headLookSensitivity[i] = static_cast<float>(ini.GetDoubleValue(
+                "HeadTracking", slot.sensitivityKey, s.headLookSensitivity[i]));
+        if (ini.GetValue("HeadTracking", slot.maximumKey, nullptr))
+            s.headLookMaxDegrees[i] = static_cast<float>(ini.GetDoubleValue(
+                "HeadTracking", slot.maximumKey, s.headLookMaxDegrees[i]));
+    }
+    APPLY_FLOAT("HeadTracking", "fDeadzoneDegrees", headLookDeadzoneDegrees);
+    APPLY_FLOAT("HeadTracking", "fJoystickDeadzone", headLookJoystickDeadzone);
+    APPLY_FLOAT("HeadTracking", "fSmoothing", headLookSmoothing);
+    s.headLookRecenterBinding = IniBinding(
+        ini, "HeadTracking", "iRecenterButton", s.headLookRecenterBinding, false);
+    s.headLookToggleBinding = IniBinding(
+        ini, "HeadTracking", "iToggleButton", s.headLookToggleBinding, false);
+
     APPLY_BOOL("DualStick", "bAccumulatorThrottle", accumulatorThrottle);
     APPLY_FLOAT("DualStick", "fAccumulatorRate", accumulatorRate);
     APPLY_FLOAT("DualStick", "fAccumulatorDecay", accumulatorDecay);
@@ -358,6 +385,33 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
         const char* val = (s.toggleAimModeBinding != "(unbound)") ? s.toggleAimModeBinding.c_str() : "-1";
         ini.SetValue("Aim", "iToggleAimModeButton", val);
     }
+
+    // Camera look
+    ini.SetBoolValue("HeadTracking", "bEnabled", s.headLookEnabled);
+    ini.SetBoolValue("HeadTracking", "bOpenTrackEnabled", s.headLookOpenTrackEnabled);
+    for (int i = 0; i < kNumHeadLookAxisSlots; ++i) {
+        const auto& slot = kHeadLookAxisSlots[i];
+        const char* axis = s.headLookAxisBindings[i] != "(unbound)"
+            ? s.headLookAxisBindings[i].c_str() : "";
+        ini.SetValue("HeadTracking", slot.iniKey, axis);
+        ini.SetBoolValue("HeadTracking", slot.enabledIniKey, s.headLookAxisEnabled[i]);
+        ini.SetBoolValue("HeadTracking", slot.invertIniKey, s.headLookInvert[i]);
+        SetIniFloat(ini, "HeadTracking", slot.sensitivityKey,
+                    s.headLookSensitivity[i]);
+        SetIniFloat(ini, "HeadTracking", slot.maximumKey,
+                    s.headLookMaxDegrees[i], "%.1f");
+    }
+    SetIniFloat(ini, "HeadTracking", "fDeadzoneDegrees",
+                s.headLookDeadzoneDegrees);
+    SetIniFloat(ini, "HeadTracking", "fJoystickDeadzone",
+                s.headLookJoystickDeadzone);
+    SetIniFloat(ini, "HeadTracking", "fSmoothing", s.headLookSmoothing);
+    ini.SetValue("HeadTracking", "iRecenterButton",
+        s.headLookRecenterBinding != "(unbound)"
+            ? s.headLookRecenterBinding.c_str() : "-1");
+    ini.SetValue("HeadTracking", "iToggleButton",
+        s.headLookToggleBinding != "(unbound)"
+            ? s.headLookToggleBinding.c_str() : "-1");
 
     // DualStick accumulator
     ini.SetBoolValue("DualStick", "bAccumulatorThrottle", s.accumulatorThrottle);

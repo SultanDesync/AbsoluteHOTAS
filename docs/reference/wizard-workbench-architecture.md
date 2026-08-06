@@ -64,8 +64,8 @@ when the boundary is visually explicit.
 
 ### Safe editing
 
-While the workbench is open, plugin-owned memory injection and synthetic output
-are parked, macros and profile switching are suspended, and capture remains
+While the workbench is open, plugin-owned flight injection and outputs are
+parked, macros and profile switching are suspended, and capture remains
 available. Closing reseeds edges so held controls do not fire unexpectedly.
 
 ### Context-bound capture
@@ -196,9 +196,11 @@ together so configuring an axis never requires a second page. It also names the
 runtime injection destination and activation rule, and calls out any synthetic
 keyboard/mouse output associated with that axis.
 
-Flight Modes holds optional systems such as independent aiming and rate
-throttle. Their core switches remain linked from the axis they modify. Optional
-capabilities reveal subordinate controls when selected or enabled. Macros,
+Flight Modes holds optional systems such as independent aiming, camera look, and
+rate throttle. Camera Look owns OpenTrack enablement, optional per-component
+joystick overrides, inversion, sensitivity, output limits, filtering, toggle,
+and recenter bindings. Core switches remain linked from the axes they modify.
+Optional capabilities reveal subordinate controls when selected or enabled. Macros,
 profile management, device tools, plugin controls, and diagnostics live in
 Advanced unless a contextual link brings the user there.
 
@@ -247,7 +249,7 @@ The first workbench migration establishes:
 - modal, profile-and-route-bound capture;
 - complete draft-only duplicate-device reassignment across bindings, macros,
   calibration, and profile activations;
-- runtime suspension of plugin memory writes and synthetic output while the
+- runtime suspension of plugin flight injection and outputs while the
   workbench is open, with edge reseeding on resume; and
 - cursor/clip restoration during normal close, renderer failure, resize, and
   shutdown;

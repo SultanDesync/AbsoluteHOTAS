@@ -120,9 +120,9 @@ Output TokenToOutput(uint16_t token) {
     // (VK_LSHIFT). The retired configurator's older 0x01xx tokens carry the
     // same VK in the low byte, so masking handles both encodings.
     //
-    // MapVirtualKey converts the VK to a scancode for the USER'S actual keyboard
-    // layout — what the SendInput layer needs, and more correct than a fixed US
-    // table. The extended flag comes from IsExtendedVk (the VK), not the scancode.
+    // MapVirtualKey converts the VK to a scancode for the user's actual keyboard
+    // layout, as required by the retained raw-output path. The extended flag comes
+    // from IsExtendedVk (the VK), not the scancode.
     const UINT vk = token & 0x00FFu;
     const UINT sc = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     if (sc == 0) return {};  // unmapped / unassigned VK

@@ -12,9 +12,9 @@
 //
 // Starfield stores keyboard/mouse binding *overrides* (deltas from the base
 // ControlMap.txt) in a small binary file confusingly given a .txt extension.
-// This module parses it so the plugin can discover when a user has rebound a
-// spaceship control in Starfield's own settings menu and realign its SendInput
-// output to the new key.
+// This module parses it as retained 4.x compatibility metadata and as a tested
+// reverse-engineering reference. In 5.0, named ship actions use internal
+// Starfield operations and never dispatch through this output table.
 //
 // Format (reverse-engineered; see docs/reference/control-map-ship-functions.md):
 //
@@ -46,8 +46,8 @@ inline constexpr uint8_t  kPrimaryFlag  = 0x00;
 
 enum class OutputKind { None, Keyboard, Mouse };
 
-// A keyboard scancode / mouse button resolved from a Starfield token, ready for
-// the SendInput layer. Mirrors ShipOutput's fields without coupling to it.
+// A keyboard scancode / mouse button resolved from a Starfield token for the
+// legacy/raw output layer. Mirrors ShipOutput's fields without coupling to it.
 struct Output {
     OutputKind kind     = OutputKind::None;
     uint16_t   code     = 0;      // keyboard scancode, or mouse button 1-4

@@ -43,13 +43,13 @@ static uint32_t MacroOwner(size_t index) {
 }
 
 static void PressStep(const MacroStep& step, uint32_t owner) {
-    for (const ShipOutput& t : step.targets)
-        ShipOutputSystem::SetOutputHeld(t, owner, true);
+    for (const ShipControlTarget& target : step.targets)
+        ShipOutputSystem::SetControlTargetHeld(target, owner, true);
 }
 
 static void ReleaseStep(const MacroStep& step, uint32_t owner) {
-    for (const ShipOutput& t : step.targets)
-        ShipOutputSystem::SetOutputHeld(t, owner, false);
+    for (const ShipControlTarget& target : step.targets)
+        ShipOutputSystem::SetControlTargetHeld(target, owner, false);
 }
 
 static void BeginStep(MacroRuntime& rt, const Macro& m, uint64_t now) {
@@ -100,8 +100,9 @@ static bool ParseStep(std::string_view line, MacroStep& out) {
     if (tok.size() < 3) return false;  // need targets + action + amount
 
     for (const std::string& t : Split(tok[0], '+')) {
-        const ShipOutput o = ShipOutputSystem::ResolveOutputToken(t);
-        if (o.kind != ShipOutputKind::None) out.targets.push_back(o);
+        const ShipControlTarget target = ShipOutputSystem::ResolveControlTarget(t);
+        if (target.IsNative() || target.output.kind != ShipOutputKind::None)
+            out.targets.push_back(target);
     }
     if (out.targets.empty()) return false;
 
