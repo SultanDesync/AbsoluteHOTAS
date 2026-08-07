@@ -18,7 +18,7 @@ graphics utility conflicts with the workbench.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
-[Reporting a 4.0 issue](#reporting-a-40-issue) for the information that makes a
+[Reporting a 5.0 beta issue](#reporting-a-50-beta-issue) for the information that makes a
 report actionable.
 
 ## Changelog
@@ -26,10 +26,11 @@ report actionable.
 ### v5.0.0-beta
 
 - **Native Ship Functions:** All 23 named ship-action bindings and named macro targets now use exact-gated Starfield control paths. These paths do not call `SendInput` or depend on the player's keyboard/mouse binds.
-- **Native Movement Modifiers:** Boost-zone activation uses the selected flight handler's native boost request, and analog strafe holds Starfield's native flight-mode modifier while preserving simultaneous roll and lateral output.
+- **Native Boost and Strafe:** Boost-zone activation and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.
 - **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. POV and exterior zoom use the active camera-state handlers.
 - **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
 - **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
+- **Validated 4.x Migration:** One maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after the 5.0.0-beta deployment with no rebinding. This is a successful real-install smoke test, not a guarantee for every device or mod stack.
 
 ### v4.0.2
 
@@ -130,6 +131,7 @@ fThrottleAtEngineStart = 0.0314
 
 - Starfield 1.16.242 or 1.16.244
 - SFSE 0.2.20 or later
+- OpenTrack with FreeTrack 2.0 output only when using tracker-based camera look
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 
@@ -147,6 +149,12 @@ Back it up for reference, install both new files, and rebuild the setup through 
 wizard. After the first save, user-owned settings live in
 `AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
 INI. Use full profile exports for backup, sharing, and migration going forward.
+
+When updating from 4.0.x to 5.0.0-beta, replace only `AbsoluteHOTAS.dll` and the
+shipped `AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles`
+directory. A real 4.0.0 setup completed this migration without losing bindings or
+profile data; back up both user-owned locations because broader beta coverage is
+still in progress.
 
 ## Quick Start
 
@@ -171,25 +179,19 @@ The workbench uses three top-level task groups with visibly subordinate pages:
 | **Flight Modes** | Aiming & Combat, Rate Throttle | Optional independent aiming, HOSAM support, self-centering throttle behavior, and pilot assists. |
 | **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation and wizard-access controls, device inspection, calibration, reassignment, and profile management. |
 
-### Flight-axis injection and modifiers
+### Direct flight controls
 
-Each core axis card identifies both the destination and the activation rule for
-its output. Throttle, pitch, yaw, and roll primarily use engine-timed memory
-gates. Aim-driven steering uses the source-object mouse accumulator instead.
-Strafe is a hybrid: it writes the flight cluster and holds Starfield's resolved
-**Switch Flight Modes** input (normally Space) while either strafe axis is beyond
-the larger of its configured deadzone or the 5% noise floor.
+Each core axis card identifies the control mode and describes what the bound axis
+does. Throttle, pitch, yaw, roll, lateral strafe, and vertical strafe drive the
+ship directly. Aim-driven steering follows the weapon reticle, while HOSAM leaves
+pitch and yaw with Starfield's mouse steering.
 
-Starfield's upstream intent lane is shared by roll and lateral strafe, but its
-selected flight handler exposes separate lateral and roll outputs. AbsoluteHOTAS
-lets the native flight-mode transform run, then restores both values at that
-validated output seam. Roll therefore remains available during lateral or vertical
-strafe.
+Roll and strafe are independent controls in AbsoluteHOTAS 5.0 and can be commanded
+simultaneously. This applies to both analog axes and button/POV-based strafe.
 
-Strafe and throttle boost-zone activation use Starfield's internal
-**Switch Flight Modes** and **Fire Boosters** actions. They do not synthesize
-keyboard or mouse input, and turning off **Injection enabled** parks those native
-movement-modifier requests along with flight-axis and head-pose injection.
+Strafe and throttle boost-zone activation use Starfield's internal ship-control
+paths, so no keyboard bindings are required. Turning off **Flight controls
+enabled** parks flight axes, head pose, boost-zone, and strafe output together.
 
 The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
 
@@ -247,14 +249,14 @@ available, and swaps are preloaded so activation does not read from disk during 
 
 ### Parking flight controls versus stopping the plugin
 
-Turning off **Injection enabled** under **Flight Controls → Flight Axes (Core)** creates
-a parked profile. Pitch, yaw, roll, throttle, strafe, aim, head pose, and native
-strafe/boost-zone requests stop, while that profile's discrete button outputs and
-macros remain available. This is intended for an on-foot or menu position on a
-hardware selector.
+Turning off **Flight controls enabled** under **Flight Controls > Flight Axes
+(Core)** creates a parked profile. Pitch, yaw, roll, throttle, strafe, aim, head
+pose, and boost-zone output stop, while that profile's discrete button outputs
+and macros remain available. This is intended for an on-foot or menu position on
+a hardware selector.
 
-The master stop control is different: it releases flight injection, native actions,
-raw custom outputs, and macros together. Use it as the global panic or
+The master stop control is different: it releases direct flight controls, native
+actions, raw custom outputs, and macros together. Use it as the global panic or
 troubleshooting control.
 
 | State | Flight axes | Buttons and macros |
@@ -575,7 +577,7 @@ If you encounter hardware axis mapping or detection issues:
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
-### Reporting a 4.0 issue
+### Reporting a 5.0 beta issue
 
 Open an issue in the
 [GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and

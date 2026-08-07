@@ -193,8 +193,8 @@ not as configuration data. Thrust, rotation, and six-degree-of-freedom
 translation are visually distinct groups. Each axis card keeps its binding,
 inversion, response controls, calibration context, status, and live signal
 together so configuring an axis never requires a second page. It also names the
-runtime injection destination and activation rule, and calls out any synthetic
-keyboard/mouse output associated with that axis.
+control mode and explains its user-visible behavior. The page states plainly that
+roll and strafe are independent controls and can be commanded simultaneously.
 
 Flight Modes holds optional systems such as independent aiming, camera look, and
 rate throttle. Camera Look owns OpenTrack enablement, optional per-component
@@ -213,7 +213,7 @@ Color reinforces meaning but is never its only carrier.
 
 - Exactly one main vertical scrollbar exists.
 - Primary task tabs are visually distinct from their labeled subordinate routes.
-- Every flight axis discloses its injection path and any modifier or shared-lane limitation.
+- Every flight axis discloses its control mode and user-visible behavior.
 - Context and footer remain visible at 720p and supported DPI scales.
 - Every workflow is completable without a mouse.
 - Opening the workbench parks every plugin-owned gameplay output.

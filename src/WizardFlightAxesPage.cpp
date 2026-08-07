@@ -370,13 +370,12 @@ static void DrawReverseSetup(WizardState& s) {
     ImGui::Indent(12.0f);
     ImGui::TextWrapped("Choose the reverse control that fits your hardware. The throttle card above owns its zero-thrust reverse zone; the alternatives below are for a held button or a separate analog lever.");
     ImGui::TextColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
-        "INJECTION PATH");
+        "CONTROL MODE");
     ImGui::SameLine();
-    ImGui::TextWrapped("DIRECT MEMORY  /  THROTTLE TARGET + VERTICAL-STRAFE GATE");
+    ImGui::TextWrapped("DIRECT SHIP CONTROL  /  REVERSE THRUST");
     DrawWrappedColored(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
-        "The bound control is consumed internally rather than emitted as a key. "
-        "When the velocity gate permits reverse, it temporarily claims the "
-        "vertical-strafe lane and writes reverse thrust.");
+        "The button or lever brakes toward zero and applies reverse thrust when "
+        "the configured velocity gate permits it.");
     ImGui::Spacing();
 
     ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Hold a button (recommended)");
@@ -427,10 +426,9 @@ static void DrawButtonBasedAxes(WizardState& s) {
     };
 
     ImGui::Indent(12.0f);
-    ImGui::TextWrapped("Use buttons or a hat switch for roll or strafe when you do not have enough analog axes.");
+    ImGui::TextWrapped("Buttons and POV/hat directions can command roll or strafe directly.");
     DrawWrappedColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
-        "Digital strafe uses the same native flight-mode modifier and selected-handler "
-        "output split as analog strafe, so roll remains available while strafing.");
+        "Analog roll and strafe remain independent and may be used at the same time.");
     ImGui::Spacing();
     for (int i = 1; i < kNumDigitalAxisSlots; ++i) {
         ImGui::PushID(4000 + i);
@@ -497,25 +495,25 @@ static bool HasSeparateAimInput(const WizardState& s) {
 static const char* CoreAxisInjectionPath(const WizardState& s, int axisIndex) {
     switch (axisIndex) {
         case 0:
-            return "DIRECT MEMORY  /  THROTTLE TARGET + EFFECTIVE THROTTLE";
+            return "DIRECT THROTTLE CONTROL";
         case 1:
-            if (s.hosamMode) return "NATIVE MOUSE  /  FLIGHT-CLUSTER PITCH GATE RELEASED";
+            if (s.hosamMode) return "STARFIELD MOUSE STEERING";
             if (s.sourceObjectAim && !HasSeparateAimInput(s))
-                return "SOURCE OBJECT  /  AIM-DRIVEN PITCH";
-            return "DIRECT MEMORY  /  FLIGHT-CLUSTER PITCH GATE";
+                return "AIM-DRIVEN SHIP ROTATION";
+            return "DIRECT SHIP ROTATION";
         case 2:
-            if (s.hosamMode) return "NATIVE MOUSE  /  FLIGHT-CLUSTER YAW GATE RELEASED";
+            if (s.hosamMode) return "STARFIELD MOUSE STEERING";
             if (s.sourceObjectAim && !HasSeparateAimInput(s))
-                return "SOURCE OBJECT  /  AIM-DRIVEN YAW";
-            return "DIRECT MEMORY  /  FLIGHT-CLUSTER YAW GATE";
+                return "AIM-DRIVEN SHIP ROTATION";
+            return "DIRECT SHIP ROTATION";
         case 3:
-            return "DIRECT MEMORY + NATIVE OUTPUT SPLIT  /  ROLL";
+            return "DIRECT ROLL CONTROL";
         case 4:
-            return "DIRECT MEMORY + NATIVE MODIFIER  /  LATERAL STRAFE";
+            return "DIRECT LATERAL STRAFE";
         case 5:
-            return "DIRECT MEMORY + NATIVE MODIFIER  /  VERTICAL STRAFE";
+            return "DIRECT VERTICAL STRAFE";
         default:
-            return "DIRECT MEMORY";
+            return "DIRECT SHIP CONTROL";
     }
 }
 
@@ -523,44 +521,36 @@ static const char* CoreAxisInjectionBehavior(const WizardState& s, int axisIndex
     switch (axisIndex) {
         case 0:
             return s.accumulatorThrottle
-                ? "Stick deflection updates an accumulated throttle target; the plugin owns the target while rate throttle is active."
-                : "Movement starts a short authority burst; while this axis is bound, the game's competing throttle writers are silenced.";
+                ? "Stick deflection changes the held throttle target; returning to center holds the commanded value."
+                : "Hardware position commands ship thrust directly.";
         case 1:
         case 2:
             if (s.hosamMode)
-                return "The plugin releases this flight-cluster lane so Starfield's native mouse steering can own it.";
+                return "Starfield's mouse steering controls this rotation axis while HOSAM is enabled.";
             if (s.sourceObjectAim && !HasSeparateAimInput(s))
-                return "With no separate aim input, this axis is mirrored into the source-object aim accumulator and steering follows the reticle.";
-            return "The plugin owns this flight-cluster lane while memory injection is enabled.";
+                return "This axis steers through the weapon reticle while Aim-Driven Steering is active.";
+            return "The bound axis commands ship rotation directly.";
         case 3:
-            return "Roll is restored to the selected handler's dedicated roll output after Starfield processes the native strafe modifier.";
+            return "The bound axis commands roll directly and remains available while strafing.";
         case 4:
-            return "Beyond max(deadzone, 5%), lateral strafe holds Starfield's native Switch Flight Modes action; the selected-handler split preserves simultaneous roll.";
+            return "The bound axis commands lateral strafe directly and can be combined with roll.";
         case 5:
-            return "Beyond max(deadzone, 5%), vertical strafe holds Starfield's native Switch Flight Modes action without suppressing roll.";
+            return "The bound axis commands vertical strafe directly and can be combined with roll.";
         default:
             return "";
     }
 }
 
 static void DrawCoreAxisInjection(const WizardState& s, int axisIndex) {
-    const bool nativeModifier = axisIndex == 4 || axisIndex == 5;
-    ImGui::TextColored(nativeModifier
-            ? ImVec4(1.0f, 0.70f, 0.28f, 1.0f)
-            : ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
-        "INJECTION PATH");
+    ImGui::TextColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
+        "CONTROL MODE");
     ImGui::SameLine();
     ImGui::TextWrapped("%s", CoreAxisInjectionPath(s, axisIndex));
     DrawWrappedColored(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
         CoreAxisInjectionBehavior(s, axisIndex));
     if (axisIndex == 0 && s.boostZone) {
         DrawWrappedColored(ImVec4(1.0f, 0.66f, 0.26f, 1.0f),
-            "BOOST ZONE OUTPUT  /  Requests Starfield's native Fire Boosters action while "
-            "the lever remains above the configured threshold.");
-    }
-    if (nativeModifier) {
-        DrawWrappedColored(ImVec4(1.0f, 0.60f, 0.24f, 1.0f),
-            "MODIFIER OUTPUT IS GATED WITH FLIGHT INJECTION");
+            "BOOST ZONE  /  Crossing the configured threshold activates ship boost.");
     }
 }
 
@@ -571,32 +561,29 @@ static void DrawInjectionSafetyNotice(const WizardState& s) {
             ImGuiTableFlags_NoSavedSettings)) {
         ImGui::TableNextColumn();
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-            ImGui::GetColorU32(ImVec4(0.19f, 0.12f, 0.045f, 0.97f)));
+            ImGui::GetColorU32(ImVec4(0.06f, 0.15f, 0.18f, 0.97f)));
 
         ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
-            "SIMULTANEOUS ROLL + STRAFE");
+            "5.0 DIRECT FLIGHT CONTROL");
         ImGui::TextWrapped(
-            "Starfield's upstream intent lane is shared, but AbsoluteHOTAS uses the "
-            "validated selected-handler output to restore independent lateral and roll "
-            "values after the native flight-mode transform. Both axes remain available "
-            "while either strafe direction is active.");
+            "Pitch, yaw, roll, throttle, lateral strafe, and vertical strafe are "
+            "independent flight controls. Roll and strafe may be commanded simultaneously.");
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
         ImGui::TextColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
-            "NATIVE MOVEMENT MODIFIERS");
+            "NATIVE BOOST + STRAFE");
         ImGui::TextWrapped(
-            "Analog and digital strafe request Starfield's internal Switch Flight Modes "
-            "action, and the throttle boost zone requests its internal Fire Boosters "
-            "action. Neither path synthesizes a keyboard or mouse event.");
+            "Boost-zone and strafe activation use Starfield's internal ship-control "
+            "paths. No keyboard bindings are required for these flight functions.");
         DrawWrappedColored(ImVec4(0.55f, 0.75f, 0.82f, 1.0f),
-            "Turning off Injection enabled parks axis writes, head pose, and both "
-            "native movement-modifier requests.");
+            "Flight controls enabled is the profile-level switch for flight axes, "
+            "head pose, boost-zone, and strafe output.");
         if (!s.axisInjectionEnabled) {
             DrawWrappedColored(ImVec4(1.0f, 0.72f, 0.28f, 1.0f),
-                "THIS PROFILE'S FLIGHT INJECTION AND MOVEMENT MODIFIERS ARE PARKED");
+                "THIS PROFILE'S FLIGHT CONTROLS ARE PARKED");
         }
 
         ImGui::EndTable();
@@ -631,7 +618,7 @@ static void DrawFlightCoreHero(WizardState& s) {
     ImGui::TextColored(ImVec4(0.38f, 0.87f, 1.0f, 1.0f),
         "DIRECT FLIGHT CONTROL");
     ImGui::TextUnformatted("Bind the ship, then shape how every axis responds.");
-    ImGui::TextDisabled("These are the controls AbsoluteHOTAS injects directly into Starfield.");
+    ImGui::TextDisabled("These bindings drive Starfield's ship controls directly.");
 
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 20.0f, pos.y + 75.0f));
     const float progress = required > 0 ? static_cast<float>(ready) / required : 0.0f;
@@ -643,11 +630,11 @@ static void DrawFlightCoreHero(WizardState& s) {
     ImGui::SameLine();
     ImGui::Text("%d / %d active axes bound", ready, required);
     ImGui::SameLine();
-    ImGui::Checkbox("Injection enabled", &s.axisInjectionEnabled);
+    ImGui::Checkbox("Flight controls enabled", &s.axisInjectionEnabled);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip(
-            "Controls the flight-axis, aim, head-pose, native strafe-modifier,\n"
-            "and native boost-zone paths shown below.");
+            "Profile-level switch for flight axes, aim, head pose, boost zone,\n"
+            "and strafe output.");
 
     ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + height + ImGui::GetStyle().ItemSpacing.y));
 }
@@ -692,7 +679,7 @@ static void DrawCoreAxisTuning(WizardState& s, int axisIndex) {
             ImGui::SliderFloat("##Sensitivity", &s.axisSensitivity[axisIndex],
                 0.1f, 3.0f, "%.2f");
         } else {
-            ImGui::TextDisabled("Shared with lateral strafe");
+            ImGui::TextDisabled("Uses lateral strafe tuning");
         }
 
         ImGui::TableNextColumn();
