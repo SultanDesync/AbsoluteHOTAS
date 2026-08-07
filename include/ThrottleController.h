@@ -17,9 +17,8 @@ public:
     //   Full          = while not piloting, park all plugin-owned control output.
     enum class GateMode { Off, InjectionOnly, Full };
 
-    // Pilot signal source: Manual (toggle key) or Auto (reserved — no working
-    // automatic signal yet; currently falls back to the manual value). See the
-    // dead-ends catalogue in PilotState.cpp.
+    // Pilot signal source: Manual (legacy toggle key) or Auto (selected-handler
+    // output freshness with menu/loading suspension).
     enum class PilotSignal { Manual, Auto };
 
     // Configuration loaded from AbsoluteHOTAS.ini.
@@ -114,9 +113,10 @@ public:
         bool    shipButtonsEnabled = true;
 
         // [Gate] pilot-state gate
-        GateMode    pilotGateMode = GateMode::Off;
-        PilotSignal pilotSignal = PilotSignal::Manual;   // Manual (toggle); Auto reserved (no auto signal yet)
+        GateMode    pilotGateMode = GateMode::InjectionOnly;
+        PilotSignal pilotSignal = PilotSignal::Auto;
         int         pilotGateManualToggleKey = 0;        // VK to toggle the manual signal (0 = disabled)
+        int         pilotLatchMilliseconds = 5000;       // General flight context hysteresis; head pose uses 400 ms
 
         // [Aim] - Source-object reticle injection
         bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle

@@ -29,6 +29,7 @@ report actionable.
 - **Native Boost and Strafe:** Boost-zone activation and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.
 - **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. POV and exterior zoom use the active camera-state handlers.
 - **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
+- **Automatic Pilot Context:** Fresh selected flight-handler output identifies active piloting even when Starfield keeps the old ship object cached after getting up. Flight controls park automatically on foot by default; menus/loading suspend output without being classified as FPS, and Camera Look uses its own conservative 400 ms gate.
 - **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
 - **Validated 4.x Migration:** One maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after the 5.0.0-beta deployment with no rebinding. This is a successful real-install smoke test, not a guarantee for every device or mod stack.
 
@@ -120,6 +121,7 @@ fThrottleAtEngineStart = 0.0314
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
 * **23 Native Ship Action Bindings** — Map physical buttons directly to boost, weapons, power management, scanner, target selection, camera controls, and other ship functions without synthetic keyboard/mouse input.
 * **OpenTrack-Compatible Camera Look** — Apply rotational pose directly to the first-person cockpit camera. Validated with OpenTrack's Tobii and NeuralNet webcam inputs; the Camera Look workbench adds live per-axis output graphs, enable switches, inversion/sensitivity/limits, joystick-axis overrides, toggle, and recenter bindings.
+* **Automatic Pilot/FPS Detection** — Uses the live selected flight-handler cadence rather than a cached ship pointer. Flight controls park automatically after leaving the seat, while menus/loading remain a separate suspended state.
 * **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
 * **Button-based axes** — Use hat switches or buttons for roll, strafe, and reverse when analog axes are limited.
 * **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
@@ -193,6 +195,13 @@ Strafe and throttle boost-zone activation use Starfield's internal ship-control
 paths, so no keyboard bindings are required. Turning off **Flight controls
 enabled** parks flight axes, head pose, boost-zone, and strafe output together.
 
+By default, the same controls park automatically after the selected flight
+handler has remained inactive for five seconds during gameplay. The longer latch
+tolerates brief targeting-mode pauses. Camera Look is independently protected by
+a 400 ms freshness gate, so head pose may pause during targeting rather than ever
+following the player on foot. Menus and loading screens suspend output without
+being treated as an FPS transition.
+
 The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
 
 ## Profiles and Runtime Input Layers
@@ -249,6 +258,11 @@ available, and swaps are preloaded so activation does not read from disk during 
 
 ### Parking flight controls versus stopping the plugin
 
+The default **Automatic pilot context** setting under **Advanced > Plugin
+Controls** parks flight axes after leaving the pilot seat. It can instead be set
+to park every plugin-owned output or disabled. The flight-control latch is
+adjustable; Camera Look always retains its separate 400 ms safety gate.
+
 Turning off **Flight controls enabled** under **Flight Controls > Flight Axes
 (Core)** creates a parked profile. Pitch, yaw, roll, throttle, strafe, aim, head
 pose, and boost-zone output stop, while that profile's discrete button outputs
@@ -263,6 +277,7 @@ troubleshooting control.
 |---|---:|---:|
 | Normal profile | Active | Active |
 | Parked profile | Off | Active |
+| Automatic on-foot parking (default) | Off | Active |
 | Master stop | Off | Off |
 
 ### Export, import, and backup

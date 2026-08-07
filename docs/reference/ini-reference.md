@@ -129,6 +129,26 @@ Plugin control buttons. IDs 1–128 are physical DirectInput buttons and 129–1
 
 ---
 
+## [Gate]
+
+Automatic context uses the freshness of the selected flight handler's live output
+callback. A cached handler pointer alone is not sufficient because Starfield keeps
+it after the player gets up. Menus and loading screens report `Suspended`, not
+`OnFoot`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `PilotGateMode` | enum | `InjectionOnly` | `Off` leaves flight-axis parking to profiles/manual controls; `InjectionOnly` parks flight axes, aim, boost/strafe output, and head pose outside the seat while retaining buttons/macros; `Full` parks every plugin-owned output. |
+| `PilotSignal` | enum | `Auto` | `Auto` uses selected-handler freshness. `Manual` retains the legacy diagnostic toggle. |
+| `iPilotLatchMilliseconds` | int | `5000` | General flight-context latch, clamped to 500–30000 ms. A longer latch tolerates targeting-mode pauses before declaring `OnFoot`. |
+| `iManualToggleKey` | int | `0` | Windows virtual-key code used only with `PilotSignal=Manual`; `0` disables the toggle. |
+
+Camera Look always uses a separate fixed 400 ms freshness window. It may pause
+during targeting mode; this is intentional and prevents cockpit head pose from
+being applied on foot.
+
+---
+
 ## [ControlExtensions]
 
 Native AbsoluteHOTAS flight-assist commands. They are mutually exclusive toggles:
@@ -307,8 +327,8 @@ Internal engine control. Most users should not modify these.
 | `iPollRateHz` | int | `120` | DirectInput polling frequency in Hz |
 | `iThrottleBurstMs` | int | `250` | Duration of throttle authority burst after movement (ms) |
 | `bEnableLog` | bool | `false` | Write `AbsoluteHOTAS.log` (device enumeration, hook installation with addresses, errors, crashes). When off, nothing is written at all — not even crashes. Logs rotate at 1 MB. |
-| `bHoldForBoost` | bool | `true` | Pause throttle injection while boost is held; cancel on release |
 | `bRollEnabled` | bool | `true` | Enable roll axis injection |
+| `bEnableInjection` | bool | `true` | Per-profile flight-control switch. `false` parks axes, aim, head pose, boost-zone, and strafe output while retaining discrete bindings/macros. |
 
 ---
 

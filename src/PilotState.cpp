@@ -1,58 +1,90 @@
 #include "PCH.h"
 #include "PilotState.h"
+#include "NativeShipControl.h"
 #include "RuntimePaths.h"
+#include "ThrottleHook.h"
 
 // ============================================================================
-// PilotState — the gate's "is the player piloting" signal.
+// PilotState — the selected handler's output cadence is the validated positive
+// cockpit signal. It runs continuously while piloting and stops as the get-up
+// transition begins, even though the handler and flight cluster remain cached.
 //
-// WORKING signal: the manual toggle bound to a config key.
-// This is the only validated pilot signal today.
+// Earlier candidates remain useful only as context or documented dead ends:
 //
-// DEAD ENDS — automatic pilot detection. Every native signal investigated was
-// invalidated. There is currently NO working automatic pilot signal. Do not
-// re-attempt these without new evidence:
-//
-//   1. GetSpaceshipPilot (Address Library ID 173834). The function ID mis-resolved
-//      after the 1.16.x patch — the versionlib entry was present but pointed at an
-//      unrelated 4-arg handle-table routine, so calling it access-violated at the
-//      gate's poll rate. Function-ID *calls* are fragile across game patches and
-//      unsafe as a gate; prefer read-only signals.
-//   2. PlayerCamera camera-state read (currentState at +0x10 vs cameraStates[] at
-//      +0x188). Starfield renders first-person COCKPIT piloting with the same
-//      kFirstPerson camera state as on-foot first person — camera-indistinguishable,
-//      so it cannot gate the FP-cockpit case. Dead as a standalone signal.
-//   3. Source-object +0x1B4 flag. Turned out to be a MENU-OPEN flag (0 only while a
-//      game menu is up), not a piloting flag.
-//
-// A real signal almost certainly exists — piloting swaps in an entire HUD and input
-// scheme — but finding it is deferred. Until then, Auto mode falls back to the
-// manual value (transparent by default), and the +0x3C edge-trigger fix in
-// ThrottleHook removes the underlying reason the gate was needed for on-foot sprint.
+//   1. GetSpaceshipPilot (old Address Library ID 173834) mis-resolved after the
+//      1.16.x update and is unsafe to call as a high-frequency gate.
+//   2. First-person PlayerCamera state is shared by cockpit and on-foot views.
+//   3. Source-object +0x1B4 is not a pilot flag, but it does distinguish active
+//      gameplay from menus/loading. Auto uses it only to report Suspended so a
+//      paused or loading interval is never classified as an on-foot transition.
 // ============================================================================
 
 namespace PilotState {
+namespace {
 
-// Default TRUE so the gate is transparent until something says otherwise.
-static std::atomic<bool> s_piloting{ true };
+std::atomic<bool> s_manualPiloting{ true };
+std::atomic<State> s_lastAutomaticState{ State::Suspended };
 
-void Toggle() {
-    s_piloting.store(!s_piloting.load(std::memory_order_relaxed), std::memory_order_relaxed);
+std::optional<bool> ReadGameplayContext()
+{
+    const auto source = ThrottleHook::GetSourceBasePtr();
+    if (source < 0x10000) return std::nullopt;
+    __try {
+        return *reinterpret_cast<volatile std::uint8_t*>(source + 0x1B4) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return std::nullopt;
+    }
 }
 
-bool Update(bool autoSource) {
-    // Auto mode is a DEAD END for now (see header): no validated automatic pilot
-    // signal exists, so fall back to the manual value — the gate stays safe and
-    // transparent. Log once so an Auto config setting has visible, defined behavior.
-    if (autoSource) {
-        static bool s_warned = false;
-        if (!s_warned) {
-            s_warned = true;
-            RuntimePaths::Log("[PilotState]",
-                "PilotSignal=Auto, but no automatic pilot signal is available "
-                "(all candidates invalidated) — using the manual value.");
-        }
+const char* StateName(State state)
+{
+    switch (state) {
+    case State::Piloting: return "Piloting";
+    case State::OnFoot: return "OnFoot";
+    case State::Suspended: return "Suspended";
     }
-    return s_piloting.load(std::memory_order_relaxed);
+    return "Unknown";
+}
+
+} // namespace
+
+void Toggle()
+{
+    s_manualPiloting.store(
+        !s_manualPiloting.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
+Snapshot Update(bool autoSource, int pilotLatchMilliseconds)
+{
+    Observation observation;
+    observation.selectedOutputAgeMilliseconds =
+        NativeShipControl::SelectedHandlerOutputAgeMilliseconds();
+    if (const auto gameplay = ReadGameplayContext()) {
+        observation.gameplayContextKnown = true;
+        observation.gameplayContextActive = *gameplay;
+    }
+
+    Snapshot snapshot;
+    snapshot.headTrackingAllowed = EvaluateHeadTracking(observation);
+    if (!autoSource) {
+        snapshot.state = s_manualPiloting.load(std::memory_order_relaxed)
+            ? State::Piloting : State::OnFoot;
+        return snapshot;
+    }
+
+    snapshot.state = EvaluateAutomatic(
+        observation, std::clamp(pilotLatchMilliseconds, 500, 30000));
+    const auto previous = s_lastAutomaticState.exchange(
+        snapshot.state, std::memory_order_acq_rel);
+    if (previous != snapshot.state) {
+        RuntimePaths::Log("[PilotState]", std::format(
+            "Auto context {} -> {} (selected-output age={} ms, gameplay={}).",
+            StateName(previous), StateName(snapshot.state),
+            observation.selectedOutputAgeMilliseconds,
+            !observation.gameplayContextKnown ? "unknown" :
+                (observation.gameplayContextActive ? "active" : "suspended")));
+    }
+    return snapshot;
 }
 
 }  // namespace PilotState

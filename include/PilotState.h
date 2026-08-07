@@ -1,26 +1,62 @@
 #pragma once
 
+#include <cstdint>
+
 // ============================================================================
-// PilotState — the gate's "is the player piloting" signal.
-//
-// Manual mode: a toggle key flips the piloting value. This is the only validated
-// pilot signal and drives the gate plumbing (InjectionOnly / Full).
-//
-// Auto mode: DEAD END for now. Every automatic pilot signal investigated
-// (GetSpaceshipPilot ID, PlayerCamera camera-state, source-object +0x1B4) was
-// invalidated — see the dead-ends catalogue in PilotState.cpp. Auto currently
-// falls back to the manual value; do not re-attempt those approaches without new
-// evidence.
+// PilotState — live cockpit/FPS context derived from the selected flight
+// handler's output cadence. The handler pointer itself can remain cached after
+// getting up, so Auto uses timestamp freshness and reports menus/loading as a
+// separate suspended/unknown state rather than falsely declaring OnFoot.
 // ============================================================================
 
 namespace PilotState {
 
-// Flip the current state (bound to the test toggle key).
+enum class State : std::uint8_t {
+    Piloting,
+    OnFoot,
+    Suspended,
+};
+
+struct Observation {
+    std::int64_t selectedOutputAgeMilliseconds = -1;
+    bool gameplayContextKnown = false;
+    bool gameplayContextActive = false;
+};
+
+struct Snapshot {
+    State state = State::Suspended;
+    bool headTrackingAllowed = false;
+};
+
+// Pure policy functions kept in the header so the latch and conservative camera
+// gate can be exercised without loading Starfield or installing hooks.
+constexpr State EvaluateAutomatic(const Observation& observation,
+                                  std::int64_t pilotLatchMilliseconds) noexcept
+{
+    if (observation.gameplayContextKnown && !observation.gameplayContextActive)
+        return State::Suspended;
+    if (observation.selectedOutputAgeMilliseconds >= 0 &&
+        observation.selectedOutputAgeMilliseconds <= pilotLatchMilliseconds)
+        return State::Piloting;
+    if (!observation.gameplayContextKnown)
+        return State::Suspended;
+    return State::OnFoot;
+}
+
+constexpr bool EvaluateHeadTracking(const Observation& observation,
+                                    std::int64_t freshnessMilliseconds = 400) noexcept
+{
+    if (observation.gameplayContextKnown && !observation.gameplayContextActive)
+        return false;
+    return observation.selectedOutputAgeMilliseconds >= 0 &&
+        observation.selectedOutputAgeMilliseconds <= freshnessMilliseconds;
+}
+
+// Flip the legacy manual state (bound to the optional test toggle key).
 void Toggle();
 
-// Refresh and return the piloting signal. autoSource=false → manual toggle value;
-// autoSource=true → currently also the manual value (no working auto signal; see
-// PilotState.cpp).
-bool Update(bool autoSource);
+// Refresh both gates. Auto uses the selected-handler timestamp; Manual retains
+// the legacy toggle for diagnostics while head tracking remains freshness-gated.
+Snapshot Update(bool autoSource, int pilotLatchMilliseconds);
 
 }  // namespace PilotState

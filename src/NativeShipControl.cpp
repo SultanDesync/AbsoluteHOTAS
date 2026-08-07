@@ -74,6 +74,29 @@ ThrusterOutputFunction g_thrusterOutputOriginal = nullptr;
 CameraRotationFunction g_cameraRotationOriginal = nullptr;
 std::atomic<bool> g_thrusterHookInstalled{ false };
 std::atomic<bool> g_cameraHookInstalled{ false };
+std::atomic<std::int64_t> g_lastSelectedHandlerOutputMs{ 0 };
+
+constexpr std::int64_t kHeadPosePilotFreshMilliseconds = 400;
+
+std::int64_t SteadyNowMilliseconds()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::int64_t SelectedHandlerOutputAgeAt(std::int64_t nowMilliseconds)
+{
+    const auto observed = g_lastSelectedHandlerOutputMs.load(std::memory_order_acquire);
+    if (observed <= 0 || nowMilliseconds < observed) return -1;
+    return nowMilliseconds - observed;
+}
+
+bool SelectedHandlerOutputFreshAt(std::int64_t nowMilliseconds,
+                                  std::int64_t maximumAgeMilliseconds)
+{
+    const auto age = SelectedHandlerOutputAgeAt(nowMilliseconds);
+    return age >= 0 && age <= std::max<std::int64_t>(0, maximumAgeMilliseconds);
+}
 
 void NativeLog(std::string_view message)
 {
@@ -592,6 +615,10 @@ void HookedThrusterOutput(void* handler, const float* input, float* output)
     const auto drainHandler = g_drainHandler.load(std::memory_order_acquire);
     if (address != activeHandler && address != drainHandler) return;
 
+    if (address == activeHandler)
+        g_lastSelectedHandlerOutputMs.store(
+            SteadyNowMilliseconds(), std::memory_order_release);
+
     ProcessShipActions(handler, input, address == activeHandler);
     if (address == drainHandler && g_shipAppliedMask == 0) {
         auto expected = drainHandler;
@@ -614,7 +641,9 @@ void HookedCameraRotation(void* state, float* quaternion)
     original(state, quaternion);
     if (!state || !quaternion || !g_enabled.load(std::memory_order_acquire) ||
         !g_headPoseActive.load(std::memory_order_acquire) ||
-        !g_handler.load(std::memory_order_acquire)) return;
+        !g_handler.load(std::memory_order_acquire) ||
+        !SelectedHandlerOutputFreshAt(
+            SteadyNowMilliseconds(), kHeadPosePilotFreshMilliseconds)) return;
 
     const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     std::uintptr_t playerCamera = 0;
@@ -694,6 +723,7 @@ bool Initialize()
 void Shutdown()
 {
     SetEnabled(false);
+    g_lastSelectedHandlerOutputMs.store(0, std::memory_order_release);
     const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     if (!module) return;
     if (g_thrusterHookInstalled.exchange(false, std::memory_order_acq_rel)) {
@@ -730,7 +760,10 @@ void UpdateCluster(std::uintptr_t cluster)
     std::uintptr_t handler = 0;
     const bool valid = cluster && g_thrusterHookInstalled.load(std::memory_order_acquire) &&
                        ValidateSelectedHandler(cluster, handler);
-    const auto previous = g_handler.exchange(valid ? handler : 0, std::memory_order_acq_rel);
+    const auto next = valid ? handler : 0;
+    const auto previous = g_handler.exchange(next, std::memory_order_acq_rel);
+    if (previous != next)
+        g_lastSelectedHandlerOutputMs.store(0, std::memory_order_release);
     if (previous && previous != handler)
         g_drainHandler.store(previous, std::memory_order_release);
     if (valid && previous != handler)
@@ -742,6 +775,17 @@ void UpdateCluster(std::uintptr_t cluster)
 bool ShipHandlerReady()
 {
     return g_handler.load(std::memory_order_acquire) != 0;
+}
+
+std::int64_t SelectedHandlerOutputAgeMilliseconds()
+{
+    return SelectedHandlerOutputAgeAt(SteadyNowMilliseconds());
+}
+
+bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds)
+{
+    return SelectedHandlerOutputFreshAt(
+        SteadyNowMilliseconds(), maximumAgeMilliseconds);
 }
 
 Action ActionFromId(std::string_view actionId)

@@ -174,6 +174,37 @@ void DrawPluginControls(WizardState& s) {
     }
     ImGui::Spacing();
     ImGui::TextDisabled("Ctrl+Alt+B always remains available as the keyboard recovery shortcut.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("AUTOMATIC PILOT CONTEXT");
+    ImGui::TextWrapped(
+        "AbsoluteHOTAS detects active piloting from Starfield's selected flight-handler "
+        "cadence. The cached ship object is not used as a pilot flag.");
+
+    static constexpr const char* kGateModes[] = {
+        "Do not park automatically",
+        "Park flight controls only (recommended)",
+        "Park all plugin output",
+    };
+    s.pilotGateMode = std::clamp(s.pilotGateMode, 0, 2);
+    ImGui::SetNextItemWidth(320.0f);
+    ImGui::Combo("Outside the pilot seat", &s.pilotGateMode,
+                 kGateModes, static_cast<int>(std::size(kGateModes)));
+    ImGui::Checkbox("Use automatic pilot detection", &s.automaticPilotSignal);
+    if (s.automaticPilotSignal) {
+        ImGui::SetNextItemWidth(220.0f);
+        ImGui::SliderInt("Flight-control latch", &s.pilotLatchMilliseconds,
+                         500, 30000, "%d ms", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::TextDisabled(
+            "The longer latch tolerates targeting-mode pauses. Menus/loading suspend "
+            "output without being classified as on foot.");
+        ImGui::TextDisabled(
+            "Camera Look uses a separate conservative 400 ms freshness gate and may "
+            "pause temporarily in targeting mode.");
+    } else {
+        ImGui::TextDisabled(
+            "Manual is retained for diagnostics and follows [Gate] iManualToggleKey.");
+    }
 }
 
 // --- Tab: Macros ---

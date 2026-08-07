@@ -198,6 +198,13 @@ void ApplyProfileScalars(const CSimpleIniA& ini, WizardState& s) {
 
     for (int i = 0; i < kNumButtonSlots; ++i)
         s.buttonBindings[i] = IniBinding(ini, "Buttons", kButtonSlots[i].iniKey, s.buttonBindings[i], false);
+    if (const char* mode = ini.GetValue("Gate", "PilotGateMode", nullptr)) {
+        s.pilotGateMode = _stricmp(mode, "Full") == 0 ? 2
+            : (_stricmp(mode, "InjectionOnly") == 0 ? 1 : 0);
+    }
+    if (const char* signal = ini.GetValue("Gate", "PilotSignal", nullptr))
+        s.automaticPilotSignal = _stricmp(signal, "Auto") == 0;
+    APPLY_LONG("Gate", "iPilotLatchMilliseconds", pilotLatchMilliseconds);
     for (int i = 0; i < kNumControlExtensionSlots; ++i)
         s.controlExtensionBindings[i] = IniBinding(ini, "ControlExtensions",
             kControlExtensionSlots[i].iniKey, s.controlExtensionBindings[i], false);
@@ -343,6 +350,12 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
         const char* val = (s.buttonBindings[i] != "(unbound)") ? s.buttonBindings[i].c_str() : "-1";
         ini.SetValue("Buttons", kButtonSlots[i].iniKey, val);
     }
+    const char* gateMode = s.pilotGateMode == 2 ? "Full"
+        : (s.pilotGateMode == 1 ? "InjectionOnly" : "Off");
+    ini.SetValue("Gate", "PilotGateMode", gateMode);
+    ini.SetValue("Gate", "PilotSignal", s.automaticPilotSignal ? "Auto" : "Manual");
+    SetIniInt(ini, "Gate", "iPilotLatchMilliseconds",
+        std::clamp(s.pilotLatchMilliseconds, 500, 30000));
     for (int i = 0; i < kNumControlExtensionSlots; ++i) {
         const char* val = s.controlExtensionBindings[i] != "(unbound)"
             ? s.controlExtensionBindings[i].c_str() : "-1";

@@ -116,6 +116,10 @@ void LoadCurrentBindings() {
     for (int i = 0; i < kNumButtonSlots; i++) {
         s.buttonBindings[i] = FormatBindingRef(*btnRefs[i], false);
     }
+    s.pilotGateMode = cfg.pilotGateMode == ThrottleController::GateMode::Full ? 2
+        : (cfg.pilotGateMode == ThrottleController::GateMode::InjectionOnly ? 1 : 0);
+    s.automaticPilotSignal = cfg.pilotSignal == ThrottleController::PilotSignal::Auto;
+    s.pilotLatchMilliseconds = cfg.pilotLatchMilliseconds;
     const BindingRef* extensionRefs[] = {
         &cfg.cruiseHoldButton, &cfg.fullStopButton, &cfg.cruiseHalfButton, &cfg.cruiseMaxButton
     };

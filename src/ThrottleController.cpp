@@ -289,20 +289,24 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.headTracking.invertPitch = ini.GetBoolValue("HeadTracking", "bInvertPitch", false);
     s_config.headTracking.invertRoll = ini.GetBoolValue("HeadTracking", "bInvertRoll", false);
 
-    // [Gate] pilot-state gate (framework). Default Off = legacy behavior.
+    // [Gate] live pilot-state gate. InjectionOnly + Auto is the safe 5.0 default:
+    // flight writes park after leaving the seat while buttons/macros remain usable.
     {
-        const char* gm = ini.GetValue("Gate", "PilotGateMode", "Off");
+        const char* gm = ini.GetValue("Gate", "PilotGateMode", "InjectionOnly");
         if (_stricmp(gm, "InjectionOnly") == 0)  s_config.pilotGateMode = ThrottleController::GateMode::InjectionOnly;
         else if (_stricmp(gm, "Full") == 0)      s_config.pilotGateMode = ThrottleController::GateMode::Full;
         else                                     s_config.pilotGateMode = ThrottleController::GateMode::Off;
     }
     s_config.pilotGateManualToggleKey = (int)ini.GetLongValue("Gate", "iManualToggleKey", 0);
     {
-        const char* ps = ini.GetValue("Gate", "PilotSignal", "Manual");
+        const char* ps = ini.GetValue("Gate", "PilotSignal", "Auto");
         s_config.pilotSignal = (_stricmp(ps, "Auto") == 0)
             ? ThrottleController::PilotSignal::Auto
             : ThrottleController::PilotSignal::Manual;
     }
+    s_config.pilotLatchMilliseconds = std::clamp(
+        static_cast<int>(ini.GetLongValue("Gate", "iPilotLatchMilliseconds", 5000)),
+        500, 30000);
 
     s_config.digitalReverseButton     = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalReverseButton",     ""), -1);
     s_config.digitalRollLeftButton    = ParseBindingRef(ini.GetValue("DigitalAxes", "iDigitalRollLeftButton",    ""), -1);
@@ -679,6 +683,7 @@ void ThrottleController::ControlLoop() {
     bool wasActive = false;
     bool injectionWasAllowed = true;  // pilot gate (InjectionOnly): tracks memory-injection arm state
     bool overlayWasOpen = false;
+    bool fullGateWasClosed = false;
     bool resetOverlayEdges = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
 
@@ -859,27 +864,47 @@ void ThrottleController::ControlLoop() {
             }
         }
 
+        // Arm and tick cluster discovery before evaluating automatic pilot state.
+        // This prevents a parked startup (for example, loading on foot) from
+        // deadlocking discovery: the selected handler can still be acquired, its
+        // first live output hit opens the gate, and only Inject remains parked.
+        if (active && !wasActive) {
+            if (s_config.alwaysOn) {
+                CtrlLog("[Master] Active; discovery armed automatically.");
+                SignalHunter::ArmForReacquire();
+            }
+            lastInjectedHardwareValue = -999.0f;
+            wasActive = true;
+        }
+        if (active && !overlayOpen) {
+            const int candidateCount = ThrottleHook::GetCandidateCount();
+            SignalHunter::Tick(candidateCount, iter);
+        }
+
         // ---- Pilot-state gate ----
-        // Framework: a manual toggle key flips the test piloting signal so the gate
-        // plumbing can be validated before the native signal is wired. PilotState is
-        // the single swap point for that signal.
+        // Auto is driven by the selected flight handler's live output cadence.
+        // Menus/loading report Suspended; they never trigger an OnFoot transition.
         if (s_config.pilotGateManualToggleKey != 0) {
             bool gateKeyDown = (GetAsyncKeyState(s_config.pilotGateManualToggleKey) & 0x8000) != 0;
             static bool prevGateKey = false;
             if (gateKeyDown && !prevGateKey) PilotState::Toggle();
             prevGateKey = gateKeyDown;
         }
-        const bool gateOn   = s_config.pilotGateMode != ThrottleController::GateMode::Off;
-        const bool piloting = !gateOn ||
-            PilotState::Update(s_config.pilotSignal == ThrottleController::PilotSignal::Auto);
-        const bool fullClosed = (s_config.pilotGateMode == ThrottleController::GateMode::Full) && !piloting;
+        const bool automaticPilotSignal =
+            s_config.pilotSignal == ThrottleController::PilotSignal::Auto;
+        const auto pilotSnapshot = PilotState::Update(
+            automaticPilotSignal, s_config.pilotLatchMilliseconds);
+        const bool contextPiloting = pilotSnapshot.state == PilotState::State::Piloting;
+        const bool gateOn = s_config.pilotGateMode != ThrottleController::GateMode::Off;
+        const bool piloting = !gateOn || contextPiloting;
+        const bool fullClosed =
+            s_config.pilotGateMode == ThrottleController::GateMode::Full && !piloting;
 
         // ---- Master active gate ----
         // While deactivated, suppress all plugin-owned outputs and axis injection.
         // The deactivate edge above already released held keys; this transition
         // guard is a safety net for any other path that clears `active`.
-        // Full gate folds in here: when not piloting, park everything like deactivate.
-        if (!active || fullClosed) {
+        if (!active) {
             if (wasActive) {
                 NativeShipControl::SetEnabled(false);
                 HeadTracking::Suspend();
@@ -892,18 +917,37 @@ void ThrottleController::ControlLoop() {
                 s_cruiseAssistMode = CruiseAssistMode::Off;
                 s_resetCruiseEdges = true;
             }
+            fullGateWasClosed = false;
             std::this_thread::sleep_for(sleepDuration);
             continue;
         }
 
-        // ---- Entering active state (covers bAlwaysOn startup auto-arm) ----
-        if (!wasActive) {
-            if (s_config.alwaysOn) {
-                CtrlLog("[Master] Active; discovery armed automatically.");
-                SignalHunter::ArmForReacquire();
+        // Full closes plugin-owned output without tearing down detection. Keeping
+        // discovery alive is what lets a fresh selected-handler hit reopen the gate.
+        if (fullClosed) {
+            if (!fullGateWasClosed) {
+                CtrlLog("[PilotState] Full gate suspended plugin output outside the pilot seat.");
+                NativeShipControl::SetEnabled(false);
+                HeadTracking::Suspend();
+                ShipOutputSystem::ReleaseAllShipButtonOutputs();
+                MacroEngine::ReleaseAll();
+                SignalHunter::SuspendInjection();
+                lastInjectedHardwareValue = -999.0f;
+                injectionWasAllowed = false;
+                s_cruiseAssistMode = CruiseAssistMode::Off;
+                s_resetCruiseEdges = true;
             }
+            fullGateWasClosed = true;
+            std::this_thread::sleep_for(sleepDuration);
+            continue;
+        }
+        if (fullGateWasClosed) {
+            fullGateWasClosed = false;
+            resetOverlayEdges = true;
+            ShipOutputSystem::SeedDownButtonsConsumed();
+            MacroEngine::SeedDownButtonsConsumed();
             lastInjectedHardwareValue = -999.0f;
-            wasActive = true;
+            CtrlLog("[PilotState] Piloting resumed; full gate reopened.");
         }
 
         // The workbench is a capture/editing context, not a second flight-input
@@ -934,7 +978,11 @@ void ThrottleController::ControlLoop() {
             CtrlLog("[Wizard] Gameplay input resumed; held edge controls reseeded.");
         }
 
-        NativeShipControl::SetEnabled(s_config.bNativeShipControls);
+        // Native ship actions use the longer automatic latch even when the flight
+        // injection gate is Off. Manual signal mode preserves the legacy override.
+        const bool nativeShipContextAllowed = !automaticPilotSignal || contextPiloting;
+        NativeShipControl::SetEnabled(
+            s_config.bNativeShipControls && nativeShipContextAllowed);
         const bool flightInjectionAllowed = s_config.bEnableInjection &&
             ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
 
@@ -1198,8 +1246,8 @@ void ThrottleController::ControlLoop() {
             resetOverlayEdges = false;
 
             // ---- SignalHunter / AimController (pilot-gated injection) ----
-            // InjectionOnly: while not piloting, park axis/head injection but leave
-            // discrete bindings live (those are processed above, ungated here).
+            // Discovery already ticked above regardless of gate state. InjectionOnly
+            // parks axis/head injection while leaving raw buttons and macros live.
             //
             // bEnableInjection is the per-profile switch for the same thing: a "parked"
             // profile sets it false to disable flight-axis, aim, and head-pose injection
@@ -1208,8 +1256,6 @@ void ThrottleController::ControlLoop() {
             // the pilot gate — no separate release logic. See profile-switching.md.
             if (flightInjectionAllowed) {
                 injectionWasAllowed = true;
-                int candCount = ThrottleHook::GetCandidateCount();
-                SignalHunter::Tick(candCount, iter);
                 SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, reverseHeld, suppressClusterForAim,
                                      strafeLatActive, strafeVertActive, cruiseOverride, s_cruiseAssistTarget);
                 AimController::Update(s_config, yaw, pitch,
@@ -1220,7 +1266,8 @@ void ThrottleController::ControlLoop() {
                 injectionWasAllowed = false;
             }
             HeadTracking::Update(s_config.headTracking, s_config.axisCalibration,
-                                 dt, flightInjectionAllowed);
+                                 dt, flightInjectionAllowed &&
+                                     pilotSnapshot.headTrackingAllowed);
         }
 
         std::this_thread::sleep_for(sleepDuration);

@@ -139,3 +139,13 @@ target("binding_ref_test")
 
     add_includedirs("include")
     add_files("tests/binding_ref_test.cpp")
+
+-- Header-only pilot-context policy tests. These lock the distinction between
+-- piloting, on-foot, and suspended/menu states without loading the game runtime.
+target("pilot_state_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("freshness_policy")
+
+    add_includedirs("include")
+    add_files("tests/pilot_state_test.cpp")

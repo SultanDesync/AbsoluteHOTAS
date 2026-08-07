@@ -23,6 +23,9 @@ struct WizardState {
     // Control buttons
     std::string buttonBindings[kNumButtonSlots];
     std::string controlExtensionBindings[kNumControlExtensionSlots];
+    int         pilotGateMode = 1;       // 0=Off, 1=flight controls, 2=all plugin output
+    bool        automaticPilotSignal = true;
+    int         pilotLatchMilliseconds = 5000;
 
     // Ship actions (runtime-populated)
     std::vector<ShipActionSlot> shipActionSlots;

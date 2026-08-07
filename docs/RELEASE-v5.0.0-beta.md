@@ -27,6 +27,11 @@ only the plugin DLL and mod-owned default INI; it does not contain or overwrite
 - [x] Add Camera Look workbench controls for per-axis enable, inversion,
   sensitivity, maximum angle, filtering, joystick override, toggle, recenter, and
   live graph/readout.
+- [x] Derive piloting/FPS context from selected flight-handler output freshness,
+  with distinct `Piloting`, `OnFoot`, and menu/loading `Suspended` states.
+- [x] Park flight controls automatically by default after a 5000 ms general latch,
+  while enforcing an independent 400 ms head-pose gate at the camera hook.
+- [x] Add Automatic Pilot Context controls to Advanced > Plugin Controls.
 - [x] Preserve the explicit raw-output boundary for `[ButtonExpansion]` and
   `key:`/`mouse:` macro targets.
 - [x] Update runtime, INI, workbench, and reference documentation to describe the
@@ -42,7 +47,13 @@ only the plugin DLL and mod-owned default INI; it does not contain or overwrite
 - [x] Camera Look workbench panel and core workbench functions validated.
 - [x] One maintained 4.0.0 setup retained its bindings, profiles, and user data
   immediately after deployment with no rebinding.
-- [x] Release build completed and all three registered `xmake test` suites passed.
+- [x] Isolated lifecycle probe validated that the selected-handler callback runs
+  continuously while piloting and stops immediately when getting up while the
+  cached handler remains valid.
+- [x] Production Camera Look automatically deactivated when the maintainer exited
+  the pilot seat.
+- [x] Release build completed and all four registered `xmake test` suites passed,
+  including the pilot-context freshness policy.
 - [x] Verify the final two-file archive through a clean extraction and record all
   release hashes.
 
@@ -61,15 +72,18 @@ still back up their custom INI and Profiles directory before installing.
 - OpenTrack must be running with FreeTrack 2.0 Enhanced output for tracker input.
 - Exact native gates are version-specific and fail closed when a supported runtime
   signature or object validation does not match.
+- The production head-pose gate passed cockpit exit. Cockpit re-entry, the delayed
+  general flight-control latch, long targeting sessions, pause/loading transitions,
+  and Full mode still need broader beta coverage.
 
 ## Final artifacts
 
 - Archive: `releases/v5.0.0-beta/AbsoluteHOTAS-v5.0.0-beta-Release.zip`
-  - SHA-256: `120820BEE6F50B0CEB3D2336AF9AA227042A89640EF835557A589CF76F09B169`
+  - SHA-256: `827B32A195EA3809BE3DB59358661A71EBC0D099EBE140D3FD5D16F6BBCF3A17`
 - Packaged DLL:
-  - SHA-256: `8D9E9D9A3864852995DF993FF5723A44E00E5AD7537B49C823024D3FE3938250`
+  - SHA-256: `532CC8C10EDDFEF94DB2D2C3508D798FEB5B0A17315AEB3D4E67940378378B8C`
 - Packaged INI:
-  - SHA-256: `C3A5B227F840FE46F51FAF3E9B4D058C98707BFCA1002487DD319DCFD011FDBA`
+  - SHA-256: `C488591FB846B15BD45443599218E7C3A4A7E4D2692C1A257992F945541C1761`
 
 The clean-extracted archive must contain exactly:
 

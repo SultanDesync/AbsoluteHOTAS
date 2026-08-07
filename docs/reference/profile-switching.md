@@ -151,10 +151,13 @@ dropped. Two tiers cover everything, and they are different tools:
 | Native movement modifiers | strafe and boost zone released | all released |
 | Granularity | per-profile, surgical | global panic kill |
 
-**A parked profile is a manual pilot-state signal that actually works.** Automatic
-"am I on foot" detection has been a dead end every time; a physical detent is a
-reliable manual answer — dial to parked, injection stops, on-foot mappings take over —
-with none of the auto-detection that never panned out.
+The 5.0 selected-handler cadence now supplies a reliable automatic pilot/FPS
+context, but the gate deliberately does not choose a profile. `InjectionOnly`
+parks flight controls while leaving the currently selected profile's buttons and
+macros intact. A parked profile remains useful when a physical selector should
+also choose an explicit set of on-foot mappings. Automatically mapping `OnFoot`
+to a named profile is a separate arbitration feature because it must define how
+automatic context interacts with selector, momentary, and toggle profile owners.
 
 ### Sparse profiles are fallthrough
 
@@ -280,9 +283,10 @@ Guidance:
   deliberately lives in.
 - Deactivate always returns to base (above).
 
-Reading actual flight-mode state from the control cluster would close the loop and is
-the obvious dream. Resist it for now: every auto pilot-state flag investigated so far
-has been a dead end, and a headline feature should not hang on another one.
+The selected-handler cadence now closes the broad pilot-versus-FPS loop, but it
+does not confirm whether an individual game action succeeded. Cruise progression,
+targeting state, and other action-specific modes still need their own validated
+feedback before an action-coupled profile swap can be transactional.
 
 ## INI form
 

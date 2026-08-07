@@ -52,6 +52,14 @@ bool Enabled();
 void UpdateCluster(std::uintptr_t cluster);
 bool ShipHandlerReady();
 
+// Age of the most recent selected-handler flight-output execution. A negative
+// value means the current handler has never executed (or changed since the last
+// observation). Unlike ShipHandlerReady(), this is a live pilot-seat signal: the
+// handler pointer can remain cached after the player gets up, but this timestamp
+// stops advancing immediately.
+std::int64_t SelectedHandlerOutputAgeMilliseconds();
+bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds);
+
 Action ActionFromId(std::string_view actionId);
 std::string_view ActionId(Action action);
 
