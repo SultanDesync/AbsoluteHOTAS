@@ -1,16 +1,17 @@
 [center][img]https://staticdelivery.nexusmods.com/mods/4187/images/16668/16668-1782428954-1893709378.gif[/img]
 
-[size=6][color=#00ccff][b]AbsoluteHOTAS 5.0.0-beta[/b][/color][/size]
-[size=4][b][color=#ffaa00]Native ship controls, simultaneous roll + strafe, and OpenTrack-compatible cockpit head tracking.[/color][/b][/size]
+[size=6][color=#00ccff][b]AbsoluteHOTAS 5.0.1 Experimental[/b][/color][/size]
+[size=4][b][color=#ffaa00]Universal context controls, native ship controls, simultaneous roll + strafe, and OpenTrack-compatible cockpit head tracking.[/color][/b][/size]
 
-[i]This is an opt-in beta. AbsoluteHOTAS 4.0.2 remains available as the stable fallback while 5.0 receives broader hardware and ship-state testing.[/i][/center]
+[i]This is an opt-in experimental build. AbsoluteHOTAS 4.0.2 remains available as the stable fallback while 5.0 receives broader hardware, context-routing, and ship-state testing.[/i][/center]
 
 [line]
 
 [center][size=5][color=#ffcc00][b]What is new in 5.0[/b][/color][/size][/center]
 
 [list]
-[*][b][color=#00ff88]Native Ship Functions:[/color][/b] All 23 named ship-button actions and named macro targets use validated internal Starfield control paths. They do not emit keyboard/mouse input or depend on the player's keybinds.[/*]
+[*][b][color=#00ff88]Native Ship Functions + Universal Navigation:[/color][/b] Seventeen ship-specific actions use validated internal Starfield paths. The existing Select, Cancel, and four power-navigation bindings preserve user profiles across menus, dialogue, power, and targeting. Targeting Mode switches Left/Right from arrows to exact SelectLeft/SelectRight events so component selection does not also change ship power.[/*]
+[*][b][color=#00ff88]Optional Menu Control Reuse:[/color][/b] Independently reuse Pitch for Up/Down, Yaw for Left/Right, and Primary Weapon for Select/Accept. Per-profile inversion, thresholds, hysteresis, and neutral/release arming are available in the Ship Buttons workbench.[/*]
 [*][b][color=#00ff88]Native Boost and Strafe:[/color][/b] The throttle boost zone and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.[/*]
 [*][b][color=#00ff88]Simultaneous Roll + Strafe:[/color][/b] Lateral and vertical strafe can both be combined with roll for full six-degree-of-freedom control.[/*]
 [*][b][color=#00ff88]OpenTrack Camera Look:[/color][/b] Rotational cockpit yaw, pitch, and roll support for OpenTrack tracker sources, validated with Tobii Tracker 2 and NeuralNet webcam input.[/*]
@@ -25,7 +26,7 @@
 
 The release archive contains only [b]AbsoluteHOTAS.dll[/b] and the mod-owned default [b]AbsoluteHOTAS.ini[/b]. It does not include or overwrite [b]AbsoluteHOTAS_Custom.ini[/b], profiles, or logs.
 
-One real maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after installing 5.0.0-beta with no rebinding. That is a successful migration smoke test, but it is still a sample of one. [b]Back up AbsoluteHOTAS_Custom.ini and the Profiles directory before installing the beta.[/b]
+One real maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after installing 5.0.1 with no rebinding. That is a successful migration smoke test, but it is still a sample of one. [b]Back up AbsoluteHOTAS_Custom.ini and the Profiles directory before installing the experimental build.[/b]
 
 [line]
 
@@ -51,7 +52,7 @@ For tracker input, start OpenTrack and enable [b]freetrack 2.0 Enhanced[/b] outp
 
 [line]
 
-[center][size=5][color=#ffcc00][b]Beta boundaries and feedback[/b][/color][/size][/center]
+[center][size=5][color=#ffcc00][b]Experimental boundaries and feedback[/b][/color][/size][/center]
 
 [b]Undock / Take-Off[/b] and [b]Exit Ship From Cockpit[/b] use native contextual routes but still need broader seated-state testing. Other devices, duplicate-device rigs, overlays, profiles, and mod stacks may reveal issues not present in the maintainer setup.
 

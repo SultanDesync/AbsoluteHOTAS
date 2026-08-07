@@ -8,9 +8,10 @@
 // ============================================================================
 // ShipOutput — native action ownership plus explicit raw-output management
 //
-// Named ship actions resolve to NativeShipControl. Keyboard/mouse synthesis is
-// limited to explicit ButtonExpansion and key:/mouse: macro targets. Both paths
-// use reference-counted ownership so one owner cannot release another's hold.
+// Most named ship actions resolve to NativeShipControl. The six profile-stable
+// context inputs (Select, Back, Up, Down, Left, Right) emit fixed vanilla keys;
+// explicit ButtonExpansion and key:/mouse: macro targets remain raw as well.
+// Every path uses ownership so one owner cannot release another's hold.
 // ============================================================================
 
 enum class ShipOutputKind {
@@ -54,6 +55,11 @@ struct ShipControlTarget {
 // Owner-ID constants for SetOutputHeld
 inline constexpr uint32_t OwnerStrafeModifier = 0x00000001u;
 inline constexpr uint32_t OwnerBoostZone      = 0x00000004u;
+inline constexpr uint32_t OwnerMenuUp         = 0x00000010u;
+inline constexpr uint32_t OwnerMenuDown       = 0x00000011u;
+inline constexpr uint32_t OwnerMenuLeft       = 0x00000012u;
+inline constexpr uint32_t OwnerMenuRight      = 0x00000013u;
+inline constexpr uint32_t OwnerMenuSelect     = 0x00000014u;
 inline constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 inline constexpr uint32_t OwnerMacroBase      = 0x00002000u;  // + macro index
 
@@ -81,6 +87,11 @@ void ReleaseShipButtonBindingOutputs();
 void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held);
 void ReleaseOwnerOutputs(uint32_t ownerId);
 
+// Request one of the six profile-stable context inputs. The vanilla key is
+// always retained; targeting-selector directions add their exact native lane
+// only while Targeting Mode is active.
+void SetUniversalContextHeld(std::string_view actionId, uint32_t ownerId, bool held);
+
 // ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
 // A profile swap preloads the ship-button table per slot and
 // restores one into place on swap. RestoreBindings does NOT touch held outputs —
@@ -97,9 +108,11 @@ bool IsBoostRequested();
 // Direct access to ship button bindings (for BindingWizard and ControlLoop).
 ShipButtonBinding* GetShipButtonBindings();
 int                GetShipButtonCount();
+const ShipButtonBinding* FindShipButtonBinding(std::string_view actionId);
 
-// Named ship actions resolve to native operations. Explicit key:/mouse: tokens
-// remain raw SendInput targets for ButtonExpansion and general-purpose macros.
+// Named ship actions resolve to native operations except the six compatibility
+// aliases, which resolve to fixed vanilla context inputs. Explicit key:/mouse:
+// tokens remain raw SendInput targets for general-purpose macros.
 ShipControlTarget ResolveControlTarget(std::string_view token);
 void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held);
 

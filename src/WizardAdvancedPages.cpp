@@ -209,7 +209,7 @@ void DrawPluginControls(WizardState& s) {
 
 // --- Tab: Macros ---
 
-// Target picker: native ship actions first, raw keys/mouse second. An
+// Target picker: named ship/context actions first, raw keys/mouse second. An
 // unrecognized token (hand-edited INI) previews as itself
 // rather than vanishing.
 static void DrawTargetCombo(std::string& token) {
@@ -218,7 +218,7 @@ static void DrawTargetCombo(std::string& token) {
 
     ImGui::PushItemWidth(170);
     if (ImGui::BeginCombo("##target", preview)) {
-        ImGui::SeparatorText("Native Ship Actions");
+        ImGui::SeparatorText("Ship Actions & Context Inputs");
         for (int i = 0; i < kNumShipActionTargets; i++) {
             const bool sel = (token == kShipActionTargets[i].value);
             ImGui::PushID(i);
@@ -326,7 +326,7 @@ static void DrawMacroSteps(MacroRow& m) {
 void DrawMacrosTab(WizardState& s) {
     ImGui::TextWrapped(
         "A macro plays an ordered sequence of actions from one button press. Steps can target "
-        "native ship actions or explicit raw keys/mouse buttons. "
+        "named ship actions, universal context inputs, or explicit raw keys/mouse buttons. "
         "Press '+' on a step to add targets pressed together as a chord.");
     ImGui::TextWrapped(
         "One press runs the whole sequence to the end - you do not need to hold the button. "

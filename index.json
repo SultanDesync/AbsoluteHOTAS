@@ -1,13 +1,13 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "5.0.0-beta",
+  "version": "5.0.1",
   "type": "Standalone SFSE Plugin",
-  "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling, 23 internally dispatched ship actions, simultaneous roll/strafe output, and OpenTrack/Tobii rotational head tracking — no vJoy or Joystick Gremlin required.",
+  "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling, 17 internally dispatched ship actions, six universal context inputs, optional profile-aware flight-control reuse in menus, simultaneous roll/strafe output, and OpenTrack/Tobii rotational head tracking — no vJoy or Joystick Gremlin required.",
   "technologies": [
     "C++23",
     "Starfield Script Extender (SFSE)",
     "DirectInput 8",
-    "Windows SendInput API (raw custom bindings only)",
+    "Windows SendInput API (universal context and raw custom bindings)",
     "ImGui (D3D12 overlay)",
     "MinHook",
     "x86-64 assembly & trampoline hooks"
@@ -62,7 +62,7 @@
     },
     "src/ShipOutput.cpp": {
       "role": "Ship Action & Output Management",
-      "purpose": "Routes named ship actions into the native-control service while retaining ref-counted raw keyboard/mouse output only for explicit custom bindings."
+      "purpose": "Routes ship-specific named actions into the native-control service while retaining ref-counted universal context and explicit raw keyboard/mouse outputs."
     },
     "src/AimController.cpp": {
       "role": "Aim & Source Object Reticle Injection",

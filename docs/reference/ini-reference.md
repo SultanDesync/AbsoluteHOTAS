@@ -16,7 +16,7 @@ keyboard shortcut.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `bEnabled` | bool | `true` | Master enable for the plugin. |
-| `bSyncShipOutputsFromControlMap` | bool | `true` | Legacy 4.x output reconciliation. Retained for configuration compatibility; 5.0 named ship actions do not consume the resolved keyboard/mouse output. |
+| `bSyncShipOutputsFromControlMap` | bool | `true` | Legacy 4.x output reconciliation. Retained for configuration compatibility; native 5.0 actions ignore it and the six universal context inputs use fixed vanilla keys. |
 
 ---
 
@@ -168,7 +168,7 @@ the hardware axis, and pressing another command changes the target.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `bEnabled` | bool | `true` | Master switch for 5.0 native ship actions, the native boost/strafe modifier paths, and the first-person camera pose hook. A failed exact runtime gate disables the affected operation; there is no synthetic-input fallback. |
+| `bEnabled` | bool | `true` | Master switch for 5.0 native ship actions, native boost/strafe modifier paths, and the first-person camera pose hook. It does not disable the six universal context inputs. A failed exact runtime gate disables the affected native operation. |
 
 ---
 
@@ -209,9 +209,10 @@ OpenTrack and enable FreeTrack 2.0 output. Translation is not implemented.
 
 ## [ShipButtons]
 
-Map physical buttons to native ship actions. All use 1-indexed DirectInput button
-IDs with optional `DeviceName@` prefix. Set to `-1` to leave unbound. These named
-actions do not emit keyboard or mouse input in 5.0.
+Map physical buttons to ship actions and universal context inputs. All use
+1-indexed DirectInput button IDs with an optional `DeviceName@` prefix. Set to
+`-1` to leave unbound. Ship-specific rows use native paths; the six compatibility
+rows emit fixed vanilla E, Esc, and arrow keys.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -223,16 +224,16 @@ actions do not emit keyboard or mouse input in 5.0.
 | `iFireWeapon1Button` | `-1` | Fire secondary weapon |
 | `iFireWeapon2Button` | `-1` | Fire tertiary weapon |
 | `iShipAction1Button` | `-1` | Ship action 1 |
-| `iSelectTargetButton` | `-1` | Select target |
-| `iIncreaseSystemPowerButton` | `-1` | Increase system power |
-| `iDecreaseSystemPowerButton` | `-1` | Decrease system power |
-| `iPreviousSystemButton` | `-1` | Previous system |
-| `iNextSystemButton` | `-1` | Next system |
+| `iSelectTargetButton` | `-1` | Universal Select / Accept (`E`); Select Target in flight |
+| `iIncreaseSystemPowerButton` | `-1` | Universal Up; Increase System Power in flight |
+| `iDecreaseSystemPowerButton` | `-1` | Universal Down; Decrease System Power in flight |
+| `iPreviousSystemButton` | `-1` | Universal Left; Previous System in flight |
+| `iNextSystemButton` | `-1` | Universal Right; Next System in flight |
 | `iOpenScannerButton` | `-1` | Open scanner |
 | `iRepairButton` | `-1` | Repair |
 | `iShipAlternateControlHoldButton` | `-1` | Ship alternate control (hold) |
 | `iCruiseButton` | `-1` | Cruise |
-| `iCancelButton` | `-1` | Cancel |
+| `iCancelButton` | `-1` | Universal Back / Cancel (`Esc`) |
 | `iUndockTakeOffButton` | `-1` | Undock / take off |
 | `iGetUpButton` | `-1` | Get up from seat |
 | `iExitShipFromCockpitButton` | `-1` | Exit ship from cockpit |
@@ -242,12 +243,36 @@ actions do not emit keyboard or mouse input in 5.0.
 
 ---
 
+## [MenuControls]
+
+Optional, profile-aware reuse of existing flight controls while Starfield reports
+a suspended menu context. All options default off. On entry, an enabled axis must
+first return inside the release threshold and Primary Weapon must first be
+released. This neutral arming prevents a carried flight input from immediately
+moving or accepting a menu prompt.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bUsePitchAxisForNavigation` | bool | `false` | Reuse the current Pitch axis for Up/Down arrow navigation |
+| `bUseYawAxisForNavigation` | bool | `false` | Reuse the current Yaw axis for Left/Right in menus and Targeting Mode component selection |
+| `bUsePrimaryWeaponForSelect` | bool | `false` | Reuse the current `iFireWeapon0Button` binding as vanilla Select/Accept (`E`) |
+| `bInvertVerticalNavigation` | bool | `false` | Reverse the Pitch-to-Up/Down mapping without changing flight inversion |
+| `bInvertHorizontalNavigation` | bool | `false` | Reverse the Yaw-to-Left/Right mapping without changing flight inversion |
+| `fAxisEngageThreshold` | float | `0.55` | Normalized deflection needed to hold a direction, clamped to `0.35..0.95` |
+| `fAxisReleaseThreshold` | float | `0.35` | Return threshold that releases the direction, clamped below Engage |
+
+The outputs use the same ref-counted `SendInput` path as universal context inputs
+and explicit raw custom bindings. They are parked while the AbsoluteHOTAS
+workbench is open and when `PilotGateMode=Full` closes the output gate.
+
+---
+
 ## [ShipButtonOutputs] (legacy)
 
-Retained so 4.x user files continue to parse and round-trip safely. In 5.0 these
-values are not emitted by any of the 23 named `[ShipButtons]` actions. Use
-`[ButtonExpansion]` or an explicit `key:`/`mouse:` macro target when raw synthetic
-input is intentionally required for a non-ship operation.
+Retained so 4.x user files continue to parse and round-trip safely. Native actions
+ignore these values, and the six universal context inputs always use fixed vanilla
+E, Esc, and arrow keys. Use `[ButtonExpansion]` or an explicit `key:`/`mouse:` macro
+target for other synthetic input.
 
 **Format**: `key:0xNN` (DirectInput scancode), `mouse:1..4` (mouse button), or `none` (disabled).
 
@@ -271,7 +296,7 @@ See [key-output-reference.md](key-output-reference.md) for the full scancode tab
 | `sRepairOutput` | `key:0x18` | O |
 | `sShipAlternateControlHoldOutput` | `key:0x38` | Left Alt |
 | `sCruiseOutput` | `key:0x14` | T |
-| `sCancelOutput` | `none` | — |
+| `sCancelOutput` | `key:0x01` | Escape |
 | `sUndockTakeOffOutput` | `key:0x39` | Space |
 | `sGetUpOutput` | `key:0x12` | E |
 | `sExitShipFromCockpitOutput` | `key:0x2D` | X |

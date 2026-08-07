@@ -10,10 +10,10 @@ File location:
 
 ## 5.0 status
 
-This table documents the retired 4.x ship-function output path. In 5.0, all 23
-named ship actions and named macro targets use validated internal Starfield
-operations. They do not emit keyboard/mouse input, do not depend on the player's
-bindings, and never fall back to `SendInput`.
+This table documents the retired 4.x ship-function reconciliation path. In 5.0,
+17 ship-specific named actions use validated internal Starfield operations. The
+six profile-compatible Select, Back, and directional aliases deliberately emit
+fixed vanilla E, Esc, and arrow keys instead of consulting this table.
 
 The parser and fixtures remain useful as a reverse-engineering reference and for
 legacy configuration metadata. Explicit `[ButtonExpansion]` and `key:`/`mouse:`

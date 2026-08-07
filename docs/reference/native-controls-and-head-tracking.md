@@ -1,14 +1,15 @@
 # Native Controls and Head Tracking
 
-Status: **5.0.0-beta implementation baseline**
+Status: **5.0.1 experimental implementation baseline**
 Validated Starfield runtimes: **1.16.242 and 1.16.244**
 
 ## Control boundary
 
-5.0 separates two output classes:
+5.0 separates three output classes:
 
-- Named ship actions use Starfield's internal ship objects, action handlers, or
+- Seventeen ship-specific named actions use internal ship objects, action handlers, or
   content-keyed semantic event broadcaster.
+- Six profile-compatible context inputs emit fixed vanilla E, Esc, and arrow keys.
 - Explicit `key:` and `mouse:` targets remain raw Windows input for custom menu
   helpers and general-purpose macros.
 
@@ -32,9 +33,9 @@ both axes can remain active simultaneously.
 Operations are routed according to the narrowest validated seam:
 
 - weapon groups call exact-vtable per-weapon start/stop leaves on the ship thread;
-- target selection and repair call their no-argument engine entry points;
+- repair calls its no-argument engine entry point;
 - POV and zoom call the current camera state's lifecycle/handler;
-- HUD, power, scanner, seat, cruise, cancel, and autopilot commands publish fresh
+- HUD, scanner, seat, cruise, and autopilot commands publish fresh
   native `ButtonEvent` objects through the input manager's semantic broadcaster.
 
 No native operation resolves or emits a keyboard scancode. Function-specific
@@ -67,6 +68,10 @@ gate so starting on foot cannot prevent a later cockpit from being acquired.
 Native ship actions use the longer pilot-context latch even when automatic
 flight-axis parking is Off. A held action cannot queue while the native context is
 closed, so returning to the cockpit requires a genuine new button edge.
+
+The six universal context inputs are not native ship actions and remain available
+through menus, dialogue, and on-foot UI under `InjectionOnly`. `Full` mode still
+parks them with every plugin-owned output.
 
 ## Camera-look transport
 

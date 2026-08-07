@@ -59,6 +59,7 @@ Snapshot Update(bool autoSource, int pilotLatchMilliseconds)
     Observation observation;
     observation.selectedOutputAgeMilliseconds =
         NativeShipControl::SelectedHandlerOutputAgeMilliseconds();
+    observation.targetingModeActive = NativeShipControl::TargetingModeActive();
     if (const auto gameplay = ReadGameplayContext()) {
         observation.gameplayContextKnown = true;
         observation.gameplayContextActive = *gameplay;
@@ -66,6 +67,9 @@ Snapshot Update(bool autoSource, int pilotLatchMilliseconds)
 
     Snapshot snapshot;
     snapshot.headTrackingAllowed = EvaluateHeadTracking(observation);
+    snapshot.gameplayContextKnown = observation.gameplayContextKnown;
+    snapshot.gameplayContextActive = observation.gameplayContextActive;
+    snapshot.targetingModeActive = observation.targetingModeActive;
     if (!autoSource) {
         snapshot.state = s_manualPiloting.load(std::memory_order_relaxed)
             ? State::Piloting : State::OnFoot;
@@ -78,11 +82,12 @@ Snapshot Update(bool autoSource, int pilotLatchMilliseconds)
         snapshot.state, std::memory_order_acq_rel);
     if (previous != snapshot.state) {
         RuntimePaths::Log("[PilotState]", std::format(
-            "Auto context {} -> {} (selected-output age={} ms, gameplay={}).",
+            "Auto context {} -> {} (selected-output age={} ms, gameplay={}, targeting={}).",
             StateName(previous), StateName(snapshot.state),
             observation.selectedOutputAgeMilliseconds,
             !observation.gameplayContextKnown ? "unknown" :
-                (observation.gameplayContextActive ? "active" : "suspended")));
+                (observation.gameplayContextActive ? "active" : "suspended"),
+            observation.targetingModeActive ? "active" : "inactive"));
     }
     return snapshot;
 }

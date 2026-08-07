@@ -112,6 +112,16 @@ public:
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 
+        // [MenuControls] — optional reuse of already-bound flight controls while
+        // Starfield reports a suspended menu/loading context.
+        bool    bUsePitchAxisForMenu = false;
+        bool    bUseYawAxisForMenu = false;
+        bool    bUsePrimaryWeaponForMenuSelect = false;
+        bool    bInvertMenuVertical = false;
+        bool    bInvertMenuHorizontal = false;
+        float   fMenuAxisEngageThreshold = 0.55f;
+        float   fMenuAxisReleaseThreshold = 0.35f;
+
         // [Gate] pilot-state gate
         GateMode    pilotGateMode = GateMode::InjectionOnly;
         PilotSignal pilotSignal = PilotSignal::Auto;

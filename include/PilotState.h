@@ -21,11 +21,15 @@ struct Observation {
     std::int64_t selectedOutputAgeMilliseconds = -1;
     bool gameplayContextKnown = false;
     bool gameplayContextActive = false;
+    bool targetingModeActive = false;
 };
 
 struct Snapshot {
     State state = State::Suspended;
     bool headTrackingAllowed = false;
+    bool gameplayContextKnown = false;
+    bool gameplayContextActive = false;
+    bool targetingModeActive = false;
 };
 
 // Pure policy functions kept in the header so the latch and conservative camera
@@ -35,6 +39,8 @@ constexpr State EvaluateAutomatic(const Observation& observation,
 {
     if (observation.gameplayContextKnown && !observation.gameplayContextActive)
         return State::Suspended;
+    if (observation.targetingModeActive)
+        return State::Piloting;
     if (observation.selectedOutputAgeMilliseconds >= 0 &&
         observation.selectedOutputAgeMilliseconds <= pilotLatchMilliseconds)
         return State::Piloting;

@@ -11,6 +11,7 @@
 #include "UIHook.h"
 #include "NativeShipControl.h"
 #include "HeadTracking.h"
+#include "MenuControlReuse.h"
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -27,6 +28,9 @@ std::atomic<uint32_t> ThrottleController::s_configGeneration{ 0 };
 std::thread        ThrottleController::s_thread;
 
 static bool s_turnAssistRuntimeActive = false;
+static MenuControlReuse::AxisState s_menuVerticalState;
+static MenuControlReuse::AxisState s_menuHorizontalState;
+static MenuControlReuse::ButtonState s_menuSelectState;
 
 // ---- Profile switching (see docs/reference/profile-switching.md) ----
 // Each slot holds a fully-resolved snapshot of the three things a swap replaces:
@@ -76,6 +80,77 @@ static bool s_resetCruiseEdges = true;
 // All controller lines are gated by bEnableLog inside RuntimePaths::Log.
 static void CtrlLog(const std::string& msg) {
     RuntimePaths::Log("[Controller]", msg);
+}
+
+static void ResetMenuControlReuse() {
+    ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuUp);
+    ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuDown);
+    ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuLeft);
+    ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuRight);
+    ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuSelect);
+    s_menuVerticalState = {};
+    s_menuHorizontalState = {};
+    s_menuSelectState = {};
+}
+
+static float NormalizeMenuAxis(const BindingRef& ref, bool invert) {
+    if (!ref.IsValid() || ref.value <= 0) return 0.0f;
+
+    float minimum = 0.0f;
+    float maximum = 65535.0f;
+    if (ref.deviceIndex >= 0) {
+        const int calibrationKey = (ref.deviceIndex << 8) | ref.value;
+        const auto& calibration = ThrottleController::GetConfig().axisCalibration;
+        if (const auto it = calibration.find(calibrationKey); it != calibration.end()) {
+            minimum = static_cast<float>(it->second.first);
+            maximum = static_cast<float>(it->second.second);
+        }
+    }
+
+    const float center = (minimum + maximum) * 0.5f;
+    const float raw = std::clamp(
+        static_cast<float>(DeviceManager::GetRawAxis(ref)), minimum, maximum);
+    const float span = raw < center ? center - minimum : maximum - center;
+    float normalized = span > 0.0f ? (raw - center) / span : 0.0f;
+    if (invert) normalized = -normalized;
+    return std::clamp(normalized, -1.0f, 1.0f);
+}
+
+static void UpdateMenuControlReuse(bool menuContextAllowed,
+                                   bool targetingContextAllowed) {
+    const auto& cfg = ThrottleController::GetConfig();
+    const bool pitchValid = cfg.pitchAxis.IsValid() && cfg.pitchAxis.value > 0;
+    const bool yawValid = cfg.yawAxis.IsValid() && cfg.yawAxis.value > 0;
+
+    const int verticalDirection = MenuControlReuse::UpdateAxis(
+        s_menuVerticalState, menuContextAllowed, cfg.bUsePitchAxisForMenu, pitchValid,
+        NormalizeMenuAxis(cfg.pitchAxis, cfg.bInvertMenuVertical),
+        cfg.fMenuAxisEngageThreshold, cfg.fMenuAxisReleaseThreshold);
+    const int horizontalDirection = MenuControlReuse::UpdateAxis(
+        s_menuHorizontalState, menuContextAllowed || targetingContextAllowed,
+        cfg.bUseYawAxisForMenu, yawValid,
+        NormalizeMenuAxis(cfg.yawAxis, cfg.bInvertMenuHorizontal),
+        cfg.fMenuAxisEngageThreshold, cfg.fMenuAxisReleaseThreshold);
+
+    ShipOutputSystem::SetUniversalContextHeld(
+        "IncreaseSystemPower", OwnerMenuUp, verticalDirection < 0);
+    ShipOutputSystem::SetUniversalContextHeld(
+        "DecreaseSystemPower", OwnerMenuDown, verticalDirection > 0);
+    ShipOutputSystem::SetUniversalContextHeld(
+        "PreviousSystem", OwnerMenuLeft, horizontalDirection < 0);
+    ShipOutputSystem::SetUniversalContextHeld(
+        "NextSystem", OwnerMenuRight, horizontalDirection > 0);
+
+    const ShipButtonBinding* primary =
+        ShipOutputSystem::FindShipButtonBinding("FireWeapon0");
+    const bool primaryValid = primary && primary->buttonRef.IsValid();
+    const bool primaryPressed = primaryValid &&
+        DeviceManager::IsButtonPressed(primary->buttonRef);
+    const bool selectHeld = MenuControlReuse::UpdateButton(
+        s_menuSelectState, menuContextAllowed, cfg.bUsePrimaryWeaponForMenuSelect,
+        primaryValid, primaryPressed);
+    ShipOutputSystem::SetUniversalContextHeld(
+        "SelectTarget", OwnerMenuSelect, selectHeld);
 }
 
 // ---- Axis Normalization ----
@@ -319,6 +394,21 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.digitalStrafeValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalStrafeValue", 1.0);
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
+    s_config.bUsePitchAxisForMenu = ini.GetBoolValue(
+        "MenuControls", "bUsePitchAxisForNavigation", false);
+    s_config.bUseYawAxisForMenu = ini.GetBoolValue(
+        "MenuControls", "bUseYawAxisForNavigation", false);
+    s_config.bUsePrimaryWeaponForMenuSelect = ini.GetBoolValue(
+        "MenuControls", "bUsePrimaryWeaponForSelect", false);
+    s_config.bInvertMenuVertical = ini.GetBoolValue(
+        "MenuControls", "bInvertVerticalNavigation", false);
+    s_config.bInvertMenuHorizontal = ini.GetBoolValue(
+        "MenuControls", "bInvertHorizontalNavigation", false);
+    s_config.fMenuAxisEngageThreshold = std::clamp(static_cast<float>(ini.GetDoubleValue(
+        "MenuControls", "fAxisEngageThreshold", 0.55)), 0.35f, 0.95f);
+    s_config.fMenuAxisReleaseThreshold = std::clamp(static_cast<float>(ini.GetDoubleValue(
+        "MenuControls", "fAxisReleaseThreshold", 0.35)), 0.05f,
+        s_config.fMenuAxisEngageThreshold - 0.05f);
     ShipOutputSystem::LoadShipButtonBindings(ini);
     MacroEngine::LoadMacros(ini);  // after ship bindings: action-id targets resolve here
 
@@ -607,6 +697,7 @@ void ThrottleController::ActivateProfile(int slot) {
 
     // Release everything the outgoing profile was holding so no key sticks across
     // the swap, then copy the target snapshot into the live globals.
+    ResetMenuControlReuse();
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     MacroEngine::ReleaseAll();
     s_cruiseAssistMode = CruiseAssistMode::Off;
@@ -700,6 +791,7 @@ void ThrottleController::ControlLoop() {
             CtrlLog("=== CONFIG HOT-RELOAD ===");
             // Release anything the outgoing config was holding, then rebuild every
             // slot and return to base. (PreloadProfiles releases macro keys itself.)
+            ResetMenuControlReuse();
             ShipOutputSystem::ReleaseAllShipButtonOutputs();
             PreloadProfiles();
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
@@ -899,6 +991,12 @@ void ThrottleController::ControlLoop() {
         const bool piloting = !gateOn || contextPiloting;
         const bool fullClosed =
             s_config.pilotGateMode == ThrottleController::GateMode::Full && !piloting;
+        const bool menuContext = pilotSnapshot.gameplayContextKnown &&
+            !pilotSnapshot.gameplayContextActive;
+        const bool contextReuseAllowed = active && !fullClosed && !overlayOpen;
+        UpdateMenuControlReuse(
+            contextReuseAllowed && menuContext,
+            contextReuseAllowed && pilotSnapshot.targetingModeActive);
 
         // ---- Master active gate ----
         // While deactivated, suppress all plugin-owned outputs and axis injection.
@@ -1319,11 +1417,11 @@ std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActio
     static const char* labels[] = {
         "Fire Boosters", "Switch Flight Modes", "Toggle POV",
         "Fire Weapon 0", "Fire Weapon 1", "Fire Weapon 2",
-        "Ship Action 1", "Select Target",
-        "Increase System Power", "Decrease System Power",
-        "Previous System", "Next System",
+        "Ship Action 1", "Select / Accept (Select Target)",
+        "Navigation Up (Increase Power)", "Navigation Down (Decrease Power)",
+        "Navigation Left (Previous System)", "Navigation Right (Next System)",
         "Open Scanner", "Repair",
-        "Ship Alternate Control", "Cruise", "Cancel",
+        "Ship Alternate Control", "Cruise", "Back / Cancel",
         "Undock / Take-Off", "Get Up", "Exit Ship",
         "Zoom Camera In", "Zoom Camera Out", "Autopilot On/Off"
     };

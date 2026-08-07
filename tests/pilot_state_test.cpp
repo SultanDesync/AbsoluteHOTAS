@@ -23,8 +23,14 @@ static void CheckAutomaticContext()
     CHECK(PilotState::EvaluateAutomatic({ 5001, true, true }, 5000) == State::OnFoot);
     CHECK(PilotState::EvaluateAutomatic({ -1, true, true }, 5000) == State::OnFoot);
 
+    // Targeting Mode intentionally suspends the selected-handler output callback,
+    // but its exact camera state is a decisive cockpit-control exception.
+    CHECK(PilotState::EvaluateAutomatic({ 30000, true, true, true }, 5000) == State::Piloting);
+    CHECK(PilotState::EvaluateAutomatic({ -1, true, true, true }, 5000) == State::Piloting);
+
     // Menu/loading wins over a recently fresh hook and remains distinct from FPS.
     CHECK(PilotState::EvaluateAutomatic({ 8, true, false }, 5000) == State::Suspended);
+    CHECK(PilotState::EvaluateAutomatic({ 30000, true, false, true }, 5000) == State::Suspended);
     CHECK(PilotState::EvaluateAutomatic({ -1, false, false }, 5000) == State::Suspended);
 
     // A fresh selected-handler hit is decisive even before the auxiliary gameplay

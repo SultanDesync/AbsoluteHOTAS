@@ -35,14 +35,11 @@ struct SemanticAction {
 
 constexpr std::array kSemanticActions{
     SemanticAction{ Action::ShipAction1, "XButton", 82 },
-    SemanticAction{ Action::IncreaseSystemPower, "Up", 38 },
-    SemanticAction{ Action::DecreaseSystemPower, "Down", 40 },
-    SemanticAction{ Action::PreviousSystem, "Left", 37 },
-    SemanticAction{ Action::NextSystem, "Right", 39 },
+    SemanticAction{ Action::PreviousSystem, "SelectLeft", 37 },
+    SemanticAction{ Action::NextSystem, "SelectRight", 39 },
     SemanticAction{ Action::OpenScanner, "SHMonocle", 70 },
     SemanticAction{ Action::ShipAlternateControlHold, "AltHold", 164 },
     SemanticAction{ Action::Cruise, "Cruise", 0 },
-    SemanticAction{ Action::Cancel, "Cancel", 27 },
     SemanticAction{ Action::UndockTakeOff, "TakeOff", 0 },
     // The validated Get Up lifecycle is the SelectTarget semantic event.
     SemanticAction{ Action::GetUp, "SelectTarget", 69 },
@@ -77,6 +74,10 @@ std::atomic<bool> g_cameraHookInstalled{ false };
 std::atomic<std::int64_t> g_lastSelectedHandlerOutputMs{ 0 };
 
 constexpr std::int64_t kHeadPosePilotFreshMilliseconds = 400;
+constexpr std::uintptr_t kPlayerCameraSingletonRva = 0x61DD460;
+constexpr std::uintptr_t kShipTargetingCameraVtableRva = 0x4C28440;
+constexpr std::uintptr_t kShipTargetingCameraDtorRva = 0xFB2BD0;
+constexpr std::uintptr_t kShipTargetingCameraUpdateRva = 0x2B75F0;
 
 std::int64_t SteadyNowMilliseconds()
 {
@@ -153,6 +154,24 @@ bool SafeWrite(std::uintptr_t address, const T& value)
     }
 }
 #pragma warning(pop)
+
+bool TargetingCameraStateActive()
+{
+    const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uintptr_t playerCamera = 0;
+    std::uintptr_t currentState = 0;
+    std::uintptr_t vtable = 0;
+    std::uintptr_t destructor = 0;
+    std::uintptr_t update = 0;
+    return module &&
+        SafeRead(module + kPlayerCameraSingletonRva, playerCamera) && playerCamera &&
+        SafeRead(playerCamera + 0x10, currentState) && currentState &&
+        SafeRead(currentState, vtable) &&
+        vtable == module + kShipTargetingCameraVtableRva &&
+        SafeRead(vtable, destructor) && destructor == module + kShipTargetingCameraDtorRva &&
+        SafeRead(vtable + sizeof(void*), update) &&
+        update == module + kShipTargetingCameraUpdateRva;
+}
 
 template <std::size_t Size>
 bool BytesMatch(std::uintptr_t module, std::uintptr_t rva,
@@ -648,7 +667,7 @@ void HookedCameraRotation(void* state, float* quaternion)
     const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     std::uintptr_t playerCamera = 0;
     std::uintptr_t currentState = 0;
-    if (!module || !SafeRead(module + 0x61DD460, playerCamera) || !playerCamera ||
+    if (!module || !SafeRead(module + kPlayerCameraSingletonRva, playerCamera) || !playerCamera ||
         !SafeRead(playerCamera + 0x10, currentState) ||
         currentState != reinterpret_cast<std::uintptr_t>(state)) return;
 
@@ -786,6 +805,11 @@ bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds)
 {
     return SelectedHandlerOutputFreshAt(
         SteadyNowMilliseconds(), maximumAgeMilliseconds);
+}
+
+bool TargetingModeActive()
+{
+    return TargetingCameraStateActive();
 }
 
 Action ActionFromId(std::string_view actionId)

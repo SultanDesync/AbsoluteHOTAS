@@ -29,6 +29,11 @@ The Flight Axes (Core) page exposes `Injection enabled`, backed by
 `[Injection] bEnableInjection`. It is editable in base and profiles; the FPS starter
 overlay opens with it disabled while retaining button and macro output.
 
+The Ship Buttons page likewise serializes all `[MenuControls]` reuse switches,
+independent horizontal/vertical inversion, and engage/release thresholds. A
+selector can therefore expose a dedicated menu-oriented layer without imposing
+those choices on the base flight profile.
+
 ## Why this instead of shift layers
 
 A shift layer gives every button a second meaning by qualifying its binding lookup.
@@ -132,8 +137,8 @@ means; the engine only tracks the flag.
 (pitch/yaw/roll/throttle/strafe), source-object aim, head pose, and the native
 strafe/boost-zone movement requests. Discrete named ship buttons,
 `[ButtonExpansion]` custom keys, and macros/turbos remain available according to
-that profile. Named ship actions use internal Starfield operations; only explicit
-raw custom targets use keyboard/mouse synthesis.
+that profile. Ship-specific named actions use internal Starfield operations; the
+six universal context bindings and explicit raw targets use keyboard synthesis.
 
 This is the same memory-parking mechanism the pilot gate's `InjectionOnly` mode
 uses. The profile flag folds into the one `injectionAllowed` check, so landing on

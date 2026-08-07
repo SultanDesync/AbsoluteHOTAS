@@ -132,6 +132,13 @@ void LoadCurrentBindings() {
     for (auto& sa : shipActions) {
         s.shipActionSlots.push_back({ sa.label, sa.iniKey, FormatBindingRef(sa.binding, false) });
     }
+    s.usePitchAxisForMenu = cfg.bUsePitchAxisForMenu;
+    s.useYawAxisForMenu = cfg.bUseYawAxisForMenu;
+    s.usePrimaryWeaponForMenuSelect = cfg.bUsePrimaryWeaponForMenuSelect;
+    s.invertMenuVertical = cfg.bInvertMenuVertical;
+    s.invertMenuHorizontal = cfg.bInvertMenuHorizontal;
+    s.menuAxisEngageThreshold = cfg.fMenuAxisEngageThreshold;
+    s.menuAxisReleaseThreshold = cfg.fMenuAxisReleaseThreshold;
 
     // Digital axes
     const BindingRef* digRefs[] = {

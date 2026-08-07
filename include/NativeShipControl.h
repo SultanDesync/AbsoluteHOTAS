@@ -60,6 +60,11 @@ bool ShipHandlerReady();
 std::int64_t SelectedHandlerOutputAgeMilliseconds();
 bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds);
 
+// Targeting Mode replaces the normal cockpit flight update with a dedicated
+// camera state. This exact-vtable check remains live while the selected-handler
+// output hook is intentionally suspended.
+bool TargetingModeActive();
+
 Action ActionFromId(std::string_view actionId);
 std::string_view ActionId(Action action);
 

@@ -9,6 +9,7 @@
 #include "ThrottleHook.h"
 #include "UIHook.h"
 #include "DeviceManager.h"
+#include "Plugin.h"
 
 #include <imgui.h>
 
@@ -295,7 +296,9 @@ void BindingWizard::Draw() {
     const ImGuiWindowFlags shellFlags = ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     bool windowOpen = true;
-    const bool windowVisible = ImGui::Begin("AbsoluteHOTAS Binding Wizard", &windowOpen, shellFlags);
+    static const std::string workbenchTitle =
+        std::format("AbsoluteHOTAS {} Binding Workbench", Plugin::VersionString);
+    const bool windowVisible = ImGui::Begin(workbenchTitle.c_str(), &windowOpen, shellFlags);
     const bool titleBarCloseRequested = !windowOpen;
     if (!windowVisible) {
         ImGui::End();

@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("5.0.0-beta")
+set_version("5.0.1")
 set_languages("c++23")
 set_warnings("all")
 
@@ -43,8 +43,8 @@ target("AbsoluteHOTAS")
     add_defines(
         "PLUGIN_VERSION_MAJOR=5",
         "PLUGIN_VERSION_MINOR=0",
-        "PLUGIN_VERSION_PATCH=0",
-        "PLUGIN_VERSION_PRERELEASE=beta"
+        "PLUGIN_VERSION_PATCH=1",
+        "PLUGIN_VERSION_STABLE"
     )
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).
@@ -149,3 +149,22 @@ target("pilot_state_test")
 
     add_includedirs("include")
     add_files("tests/pilot_state_test.cpp")
+
+-- Header-only compatibility-map tests for the fixed vanilla context inputs.
+-- These protect profile-stable action IDs and their exact scan-code outputs.
+target("universal_context_input_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("compatibility_map")
+
+    add_includedirs("include")
+    add_files("tests/universal_context_input_test.cpp")
+
+-- Header-only safety-policy tests for optional axis/button reuse in menus.
+target("menu_control_reuse_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("neutral_arming")
+
+    add_includedirs("include")
+    add_files("tests/menu_control_reuse_test.cpp")

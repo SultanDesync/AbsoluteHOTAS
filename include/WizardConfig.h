@@ -30,6 +30,15 @@ struct WizardState {
     // Ship actions (runtime-populated)
     std::vector<ShipActionSlot> shipActionSlots;
 
+    // Optional menu reuse of existing flight-control bindings.
+    bool        usePitchAxisForMenu = false;
+    bool        useYawAxisForMenu = false;
+    bool        usePrimaryWeaponForMenuSelect = false;
+    bool        invertMenuVertical = false;
+    bool        invertMenuHorizontal = false;
+    float       menuAxisEngageThreshold = 0.55f;
+    float       menuAxisReleaseThreshold = 0.35f;
+
     // Digital axes
     std::string digitalAxisBindings[kNumDigitalAxisSlots];
     float       digitalRollValue = 1.0f;

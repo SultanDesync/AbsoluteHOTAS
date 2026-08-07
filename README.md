@@ -1,14 +1,15 @@
-# AbsoluteHOTAS v5.0.0-beta
+# AbsoluteHOTAS v5.0.1
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release Status
 
-**5.0.0-beta is the native-control test track.** Named ship functions, the boost
-zone, and the strafe modifier now enter Starfield through validated internal ship
-control seams instead of synthesized keyboard or mouse input. The beta also adds
-OpenTrack-compatible rotational camera look, validated with Tobii and NeuralNet
-webcam tracker sources.
+**5.0.1 is the experimental native-control track.** Seventeen named ship functions,
+the boost zone, and the strafe modifier enter Starfield through validated internal
+ship-control seams. Six profile-compatible context inputs use vanilla E, Esc, and
+arrow keys across menus, dialogue, power, and targeting. This experimental build
+also adds OpenTrack-compatible rotational camera look, validated with Tobii and
+NeuralNet webcam tracker sources.
 
 Version **4.0.2 remains the stable baseline** while 5.0 receives in-game coverage
 across ship states, cameras, and hardware. Renderer compatibility with third-party
@@ -18,20 +19,21 @@ graphics utility conflicts with the workbench.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
-[Reporting a 5.0 beta issue](#reporting-a-50-beta-issue) for the information that makes a
+[Reporting a 5.0 experimental issue](#reporting-a-50-experimental-issue) for the information that makes a
 report actionable.
 
 ## Changelog
 
-### v5.0.0-beta
+### v5.0.1 (experimental)
 
-- **Native Ship Functions:** All 23 named ship-action bindings and named macro targets now use exact-gated Starfield control paths. These paths do not call `SendInput` or depend on the player's keyboard/mouse binds.
+- **Native Ship Functions and Universal Context Inputs:** Seventeen named ship actions use exact-gated Starfield control paths. The existing Select Target, Cancel, and four power-navigation profile slots preserve one assignment across contexts with vanilla E, Esc, and arrows; Targeting Mode switches Left/Right to its exact `SelectLeft`/`SelectRight` selector events so ship power is not changed simultaneously.
+- **Optional Menu Control Reuse:** The Ship Buttons workbench can independently reuse Pitch for Up/Down, Yaw for Left/Right, and the current Primary Weapon button for Select/Accept. Per-profile inversion and actuation/release thresholds preserve the workbench approach, while neutral/release arming prevents carried flight input from acting as a menu opens.
 - **Native Boost and Strafe:** Boost-zone activation and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.
 - **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. POV and exterior zoom use the active camera-state handlers.
 - **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
 - **Automatic Pilot Context:** Fresh selected flight-handler output identifies active piloting even when Starfield keeps the old ship object cached after getting up. Flight controls park automatically on foot by default; menus/loading suspend output without being classified as FPS, and Camera Look uses its own conservative 400 ms gate.
 - **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
-- **Validated 4.x Migration:** One maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after the 5.0.0-beta deployment with no rebinding. This is a successful real-install smoke test, not a guarantee for every device or mod stack.
+- **Validated 4.x Migration:** One maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after the 5.0.1 deployment with no rebinding. This is a successful real-install smoke test, not a guarantee for every device or mod stack.
 
 ### v4.0.2
 
@@ -112,14 +114,15 @@ fThrottleAtEngineStart = 0.0314
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 * **Hot-Swappable Profiles** — Switch complete input layers during play, including bindings, axes, tuning, aim modes, and macros. Profiles support toggle, momentary, and selector-style activation.
-* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named ship-action targets use native Starfield control paths; explicit raw key/mouse targets remain available for general-purpose automation.
+* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named targets use native Starfield controls or the six universal context inputs as appropriate; explicit raw key/mouse targets remain available for general-purpose automation.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
 * **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. The opening **Flight Axes (Core)** page keeps every direct-flight binding, response control, calibration tool, and live input display together. Bind axes and buttons by moving/pressing them on your hardware in real-time.
 * **Frame Generation Support** — Supports Starfield's built-in FSR3 Frame Generation and reinitializes the overlay when the swap chain changes. Compatibility with third-party overlays, capture tools, and graphics injectors is best effort.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
-* **23 Native Ship Action Bindings** — Map physical buttons directly to boost, weapons, power management, scanner, target selection, camera controls, and other ship functions without synthetic keyboard/mouse input.
+* **17 Native Ship Actions + 6 Universal Context Inputs** — Keep direct native control for ship-specific functions while existing Select, Back, and directional bindings work across menus, dialogue, power management, and targeting without profile migration.
+* **Menu Control Reuse** — Optionally use Pitch/Yaw for menu navigation and Primary Weapon for Select/Accept, with independent per-profile switches, direction inversion, hysteresis, and safe neutral arming.
 * **OpenTrack-Compatible Camera Look** — Apply rotational pose directly to the first-person cockpit camera. Validated with OpenTrack's Tobii and NeuralNet webcam inputs; the Camera Look workbench adds live per-axis output graphs, enable switches, inversion/sensitivity/limits, joystick-axis overrides, toggle, and recenter bindings.
 * **Automatic Pilot/FPS Detection** — Uses the live selected flight-handler cadence rather than a cached ship pointer. Flight controls park automatically after leaving the seat, while menus/loading remain a separate suspended state.
 * **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
@@ -152,10 +155,10 @@ wizard. After the first save, user-owned settings live in
 `AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
 INI. Use full profile exports for backup, sharing, and migration going forward.
 
-When updating from 4.0.x to 5.0.0-beta, replace only `AbsoluteHOTAS.dll` and the
+When updating from 4.0.x to 5.0.1, replace only `AbsoluteHOTAS.dll` and the
 shipped `AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles`
 directory. A real 4.0.0 setup completed this migration without losing bindings or
-profile data; back up both user-owned locations because broader beta coverage is
+profile data; back up both user-owned locations because broader experimental coverage is
 still in progress.
 
 ## Quick Start
@@ -164,7 +167,7 @@ still in progress.
 2. Launch the game via SFSE.
 3. Open the Starfield main or pause menu, then press `Ctrl+Alt+B`.
 4. Under **Flight Controls → Flight Axes (Core)**, bind and tune each axis while watching its live input display.
-5. Under **Flight Controls → Ship Buttons**, bind the ship actions you want on your hardware.
+5. Under **Flight Controls → Ship Buttons**, bind the ship actions you want and optionally configure **Menu Control Reuse**.
 6. Click **Save & Close**. Bindings take effect without restarting.
 
 `Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
@@ -301,8 +304,9 @@ steps:
 - **Turbo** repeats the complete macro while its trigger remains held.
 
 Targets may be named Starfield ship actions such as `NextSystem`, or explicit
-keyboard and mouse outputs. Named actions follow the current Starfield ControlMap,
-so an in-game rebind also changes what the macro emits.
+keyboard and mouse outputs. `SelectTarget`, `Cancel`, `IncreaseSystemPower`,
+`DecreaseSystemPower`, `PreviousSystem`, and `NextSystem` are compatibility aliases
+for fixed vanilla E, Esc, and arrow inputs; other named targets use native paths.
 
 Macros are fire-and-forget after their trigger press unless turbo is enabled. They
 are cancelled and all held outputs are released when the plugin is stopped, the
@@ -377,9 +381,10 @@ iSelectTargetButton = VKB Gunfighter@2
 iIncreaseSystemPowerButton = -1
 ```
 
-Set an action to `-1` to disable it. In 5.0, named ship actions call validated
-Starfield ship functions directly; they do not reconcile `ControlMap_Custom.txt`
-and do not use `[ShipButtonOutputs]`.
+Set an action to `-1` to disable it. In 5.0, ship-specific named actions call
+validated Starfield functions directly. The existing Select Target, Cancel, and
+four power-navigation keys instead form a universal E/Esc/arrow context cluster.
+Neither path uses `[ShipButtonOutputs]` overrides.
 
 Raw keyboard/mouse passthroughs remain available under `[ButtonExpansion]` for
 menu helpers or other actions that are not native ship functions:
@@ -592,7 +597,7 @@ If you encounter hardware axis mapping or detection issues:
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
-### Reporting a 5.0 beta issue
+### Reporting a 5.0 experimental issue
 
 Open an issue in the
 [GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and

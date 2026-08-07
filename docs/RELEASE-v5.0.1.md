@@ -1,14 +1,15 @@
-# Release Plan — AbsoluteHOTAS v5.0.0-beta
+# Release Plan — AbsoluteHOTAS v5.0.1
 
-**Branch:** `5.0.0-beta`
-**Release track:** opt-in beta alongside the established 4.0.2 stable file
+**Source branch:** `5.0.0-beta`
+**Release track:** opt-in experimental Nexus file alongside the established 4.0.2 stable file
 
 ## Release position
 
-5.0.0-beta is the public validation build for native ship actions, native
-movement modifiers, simultaneous roll/strafe output, and rotational cockpit head
-tracking. Keep 4.0.2 available as the stable fallback while 5.0 gains broader
-hardware, ship-state, camera, and mod-stack coverage.
+5.0.1 is the experimental validation build for universal context controls,
+targeting-aware navigation, native ship actions, native movement modifiers,
+simultaneous roll/strafe output, and rotational cockpit head tracking. Keep 4.0.2
+available as the stable fallback while 5.0 gains broader hardware, ship-state,
+camera, context-routing, and mod-stack coverage.
 
 The release archive retains the 4.0 two-file configuration contract. It replaces
 only the plugin DLL and mod-owned default INI; it does not contain or overwrite
@@ -16,8 +17,14 @@ only the plugin DLL and mod-owned default INI; it does not contain or overwrite
 
 ## Implemented
 
-- [x] Route all 23 named ship-button actions and named macro targets through
-  validated internal Starfield control paths with no `SendInput` fallback.
+- [x] Route 17 ship-specific button actions and named macro targets through
+  validated internal Starfield control paths with no synthetic fallback.
+- [x] Preserve the six existing Select, Back, and directional profile slots as
+  universal vanilla E/Esc/arrow inputs across menus, dialogue, and power, with
+  exact-gated `SelectLeft`/`SelectRight` routing for Targeting Mode components.
+- [x] Add per-profile Menu Control Reuse options for Pitch-to-Up/Down,
+  Yaw-to-Left/Right, and Primary-Weapon-to-Select, with independent inversion,
+  adjustable hysteresis, and neutral/release arming on menu entry.
 - [x] Route boost-zone and strafe activation through Starfield's internal
   ship-control paths without requiring keyboard bindings.
 - [x] Keep roll and lateral/vertical strafe independent so they can be commanded
@@ -52,16 +59,17 @@ only the plugin DLL and mod-owned default INI; it does not contain or overwrite
   cached handler remains valid.
 - [x] Production Camera Look automatically deactivated when the maintainer exited
   the pilot seat.
-- [x] Release build completed and all four registered `xmake test` suites passed,
-  including the pilot-context freshness policy.
+- [x] Release build completed and all six registered `xmake test` suites passed,
+  including the universal-context map, menu-reuse policy, and pilot-context
+  freshness policy.
 - [x] Verify the final two-file archive through a clean extraction and record all
   release hashes.
 
 The upgrade result is a successful sample of one. It establishes that the 4.0
-configuration contract works on a real maintained setup, but beta users should
-still back up their custom INI and Profiles directory before installing.
+configuration contract works on a real maintained setup, but experimental users
+should still back up their custom INI and Profiles directory before installing.
 
-## Known beta boundaries
+## Known experimental boundaries
 
 - `Undock / Take-Off` and `Exit Ship From Cockpit` use native contextual routes but
   still need broader seated-state validation.
@@ -74,18 +82,18 @@ still back up their custom INI and Profiles directory before installing.
   signature or object validation does not match.
 - The production head-pose gate passed cockpit exit. Cockpit re-entry, the delayed
   general flight-control latch, long targeting sessions, pause/loading transitions,
-  and Full mode still need broader beta coverage.
+  and Full mode still need broader experimental coverage.
 
 ## Final artifacts
 
-- Archive: `releases/v5.0.0-beta/AbsoluteHOTAS-v5.0.0-beta-Release.zip`
-  - SHA-256: `827B32A195EA3809BE3DB59358661A71EBC0D099EBE140D3FD5D16F6BBCF3A17`
+- Archive: `releases/v5.0.1/AbsoluteHOTAS-v5.0.1-Release.zip`
+  - SHA-256: `97ADA6AF6D19B2557A52BBE01291302A953EB38D10A8481CC1145073FB60E3E0`
 - Packaged DLL:
-  - SHA-256: `532CC8C10EDDFEF94DB2D2C3508D798FEB5B0A17315AEB3D4E67940378378B8C`
+  - SHA-256: `5BB5EB45A8FED446231654558E87E9BB14DF9205FC3880032AF424C918BDA173`
 - Packaged INI:
-  - SHA-256: `C488591FB846B15BD45443599218E7C3A4A7E4D2692C1A257992F945541C1761`
+  - SHA-256: `260E11700D04A64CD9CF99FC1E1A4E1E3DAD93F1DF496A5A124633434EB83D72`
 
-The clean-extracted archive must contain exactly:
+The clean-extracted archive contains exactly:
 
 - `SFSE\Plugins\AbsoluteHOTAS.dll`
 - `SFSE\Plugins\AbsoluteHOTAS.ini`
@@ -93,14 +101,14 @@ The clean-extracted archive must contain exactly:
 ## Publication checklist
 
 - [x] Keep 4.0.2 available as the stable fallback.
-- [x] Describe 5.0.0-beta as opt-in rather than replacing the main stable file.
+- [x] Describe 5.0.1 as experimental and opt-in rather than replacing the main stable file.
 - [x] Document the tested 4.0.0 user-data migration without overstating its sample
   size.
 - [x] Include rollback, logging, and feedback instructions in package/Nexus copy.
-- [ ] Upload the archive as an optional beta file on Nexus.
+- [ ] Upload the archive to the Nexus experimental branch.
 - [ ] Publish the Nexus description and changelog.
 
-## Beta feedback priorities
+## Experimental feedback priorities
 
 Prioritize reports in this order:
 

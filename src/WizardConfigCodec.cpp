@@ -210,6 +210,13 @@ void ApplyProfileScalars(const CSimpleIniA& ini, WizardState& s) {
             kControlExtensionSlots[i].iniKey, s.controlExtensionBindings[i], false);
     for (auto& action : s.shipActionSlots)
         action.binding = IniBinding(ini, "ShipButtons", action.iniKey.c_str(), action.binding, false);
+    APPLY_BOOL("MenuControls", "bUsePitchAxisForNavigation", usePitchAxisForMenu);
+    APPLY_BOOL("MenuControls", "bUseYawAxisForNavigation", useYawAxisForMenu);
+    APPLY_BOOL("MenuControls", "bUsePrimaryWeaponForSelect", usePrimaryWeaponForMenuSelect);
+    APPLY_BOOL("MenuControls", "bInvertVerticalNavigation", invertMenuVertical);
+    APPLY_BOOL("MenuControls", "bInvertHorizontalNavigation", invertMenuHorizontal);
+    APPLY_FLOAT("MenuControls", "fAxisEngageThreshold", menuAxisEngageThreshold);
+    APPLY_FLOAT("MenuControls", "fAxisReleaseThreshold", menuAxisReleaseThreshold);
     for (int i = 0; i < kNumDigitalAxisSlots; ++i)
         s.digitalAxisBindings[i] = IniBinding(ini, "DigitalAxes", kDigitalAxisSlots[i].iniKey, s.digitalAxisBindings[i], false);
     APPLY_FLOAT("DigitalAxes", "fDigitalRollValue", digitalRollValue);
@@ -367,6 +374,17 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
         const char* val = (sa.binding != "(unbound)") ? sa.binding.c_str() : "-1";
         ini.SetValue("ShipButtons", sa.iniKey.c_str(), val);
     }
+
+    ini.SetBoolValue("MenuControls", "bUsePitchAxisForNavigation", s.usePitchAxisForMenu);
+    ini.SetBoolValue("MenuControls", "bUseYawAxisForNavigation", s.useYawAxisForMenu);
+    ini.SetBoolValue("MenuControls", "bUsePrimaryWeaponForSelect", s.usePrimaryWeaponForMenuSelect);
+    ini.SetBoolValue("MenuControls", "bInvertVerticalNavigation", s.invertMenuVertical);
+    ini.SetBoolValue("MenuControls", "bInvertHorizontalNavigation", s.invertMenuHorizontal);
+    SetIniFloat(ini, "MenuControls", "fAxisEngageThreshold",
+        std::clamp(s.menuAxisEngageThreshold, 0.35f, 0.95f));
+    SetIniFloat(ini, "MenuControls", "fAxisReleaseThreshold",
+        std::clamp(s.menuAxisReleaseThreshold, 0.05f,
+            std::clamp(s.menuAxisEngageThreshold, 0.35f, 0.95f) - 0.05f));
 
     // Digital axes
     for (int i = 0; i < kNumDigitalAxisSlots; i++) {

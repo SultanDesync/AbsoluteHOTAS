@@ -22,12 +22,14 @@ A **step**:
 Chord = a one-step macro with N targets. Turbo = repeat the whole macro while the
 button is held. Sequence = multiple steps. One engine, no special cases.
 
-## Targeting — native actions and explicit raw outputs
+## Targeting — native actions, context inputs, and explicit raw outputs
 
-Steps name **logical ship actions** (`NextSystem`, `IncreaseSystemPower`, …)
-wherever possible. In 5.0 those tokens resolve to the same native-control service
-as physical ship buttons, independent of keyboard/mouse binds. Raw keys
-(`key:0xNN`, `mouse:N`) remain available for deliberate non-ship output.
+Steps name **logical actions** (`NextSystem`, `IncreaseSystemPower`, …) wherever
+possible. Ship-specific tokens resolve to the same native-control service as
+physical ship buttons. The six compatibility tokens for Select, Back, and the four
+directions resolve to fixed vanilla E, Esc, and arrow inputs so Starfield's active
+context chooses their meaning. Raw keys (`key:0xNN`, `mouse:N`) remain available
+for deliberate custom output.
 
 ## Emission engine
 

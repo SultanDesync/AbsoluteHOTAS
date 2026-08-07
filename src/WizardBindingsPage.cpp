@@ -84,9 +84,9 @@ static void DrawCustomKeyBindings(WizardState& s) {
 }
 
 void DrawButtonsTab(WizardState& s) {
-    if (ImGui::CollapsingHeader("Core Ship Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Ship Actions & Context Navigation", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(12);
-        ImGui::TextWrapped("Bind physical controller buttons to native Starfield ship actions. These controls call the game's ship systems directly and do not synthesize keyboard or mouse input.");
+        ImGui::TextWrapped("Bind physical controller buttons to Starfield ship actions. Select, Back, and the four Navigation directions emit the vanilla E, Esc, and arrow keys so the same bindings work in menus, dialogue, power management, and targeting. Other rows use native ship-control paths.");
         ImGui::Spacing();
         for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
             ImGui::PushID(3000 + i);
@@ -100,6 +100,40 @@ void DrawButtonsTab(WizardState& s) {
             }
             ImGui::PopID();
         }
+        ImGui::Unindent(12);
+    }
+
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Menu Control Reuse", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(12);
+        ImGui::TextWrapped("Optionally reuse familiar flight controls for context navigation. Pitch and Primary Weapon act in menus; Yaw acts in menus and the Targeting Mode component selector. Each option is independent and saved with the current profile. Inputs must return to neutral or released after a context opens before they can act.");
+        ImGui::Spacing();
+        ImGui::Checkbox("Pitch axis navigates Up / Down", &s.usePitchAxisForMenu);
+        ImGui::Checkbox("Yaw axis navigates Left / Right (menus + targeting)", &s.useYawAxisForMenu);
+        ImGui::Checkbox("Primary Weapon button acts as Select / Accept", &s.usePrimaryWeaponForMenuSelect);
+
+        if (s.usePitchAxisForMenu || s.useYawAxisForMenu) {
+            ImGui::Spacing();
+            if (s.usePitchAxisForMenu)
+                ImGui::Checkbox("Invert vertical menu navigation", &s.invertMenuVertical);
+            if (s.useYawAxisForMenu)
+                ImGui::Checkbox("Invert horizontal menu navigation", &s.invertMenuHorizontal);
+
+            float engagePercent = s.menuAxisEngageThreshold * 100.0f;
+            float releasePercent = s.menuAxisReleaseThreshold * 100.0f;
+            if (ImGui::SliderFloat("Axis actuation", &engagePercent, 35.0f, 95.0f, "%.0f%%"))
+                s.menuAxisEngageThreshold = engagePercent / 100.0f;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Deflection required to begin holding a navigation direction.");
+            if (ImGui::SliderFloat("Axis release", &releasePercent, 5.0f, 80.0f, "%.0f%%"))
+                s.menuAxisReleaseThreshold = releasePercent / 100.0f;
+            s.menuAxisReleaseThreshold = std::clamp(
+                s.menuAxisReleaseThreshold, 0.05f, s.menuAxisEngageThreshold - 0.05f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Return inside this range to release the arrow key. Keeping it below actuation prevents chatter.");
+        }
+        ImGui::TextDisabled("Uses fixed vanilla arrows and E through the same ref-counted SendInput path as universal context and custom raw bindings.");
         ImGui::Unindent(12);
     }
 

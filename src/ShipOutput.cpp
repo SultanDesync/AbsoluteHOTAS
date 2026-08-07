@@ -4,6 +4,7 @@
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
 #include "StringUtils.h"
+#include "UniversalContextInput.h"
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <shlobj.h>
@@ -52,6 +53,13 @@ static ShipOutput ParseShipOutput(std::string_view value, ShipOutput fallback) {
     return fallback;
 }
 
+static ShipOutput UniversalContextOutput(std::string_view actionId) {
+    const auto* mapping = UniversalContextInput::Find(actionId);
+    return mapping
+        ? ShipOutput{ ShipOutputKind::Keyboard, mapping->scanCode, mapping->extended }
+        : NoOutput;
+}
+
 struct BindingDef {
     const char* actionId;
     const char* sourceIniKey;
@@ -78,7 +86,7 @@ static constexpr std::array<BindingDef, 23> kBindingDefs{ {
     { "Repair",                   "iRepairButton",                   "sRepairOutput",                   { ShipOutputKind::Keyboard, 0x18, false }, "ShipHUD",               "RepairShip" },
     { "ShipAlternateControlHold", "iShipAlternateControlHoldButton", "sShipAlternateControlHoldOutput", { ShipOutputKind::Keyboard, 0x38, false }, "ShipHUD",               "AltHold" },
     { "Cruise",                   "iCruiseButton",                   "sCruiseOutput",                   { ShipOutputKind::Keyboard, 0x14, false }, "ShipHUD",               "Cruise" },
-    { "Cancel",                   "iCancelButton",                   "sCancelOutput",                   NoOutput,                                     "ShipHUD_Cancel",        "Cancel" },
+    { "Cancel",                   "iCancelButton",                   "sCancelOutput",                   { ShipOutputKind::Keyboard, 0x01, false }, "ShipHUD_Cancel",        "Cancel" },
     { "UndockTakeOff",            "iUndockTakeOffButton",            "sUndockTakeOffOutput",            SpaceOutput,                                  "Spaceship_Interaction", "TakeOff" },
     { "GetUp",                    "iGetUpButton",                    "sGetUpOutput",                    { ShipOutputKind::Keyboard, 0x12, false }, "Spaceship_Interaction", "Cancel" },
     { "ExitShipFromCockpit",      "iExitShipFromCockpitButton",      "sExitShipFromCockpitOutput",      { ShipOutputKind::Keyboard, 0x2D, false }, "Spaceship_Interaction", "ExitShip" },
@@ -309,11 +317,43 @@ int GetShipButtonCount() {
     return static_cast<int>(s_shipButtonBindings.size());
 }
 
+void SetUniversalContextHeld(std::string_view actionId, uint32_t ownerId, bool held) {
+    const auto* mapping = UniversalContextInput::Find(actionId);
+    if (!mapping) return;
+
+    const auto route = UniversalContextInput::ResolveRoute(
+        actionId, NativeShipControl::TargetingModeActive());
+
+    SetOutputHeld(
+        { ShipOutputKind::Keyboard, mapping->scanCode, mapping->extended },
+        ownerId, held && route.vanillaKey);
+    if (mapping->targetingSelector) {
+        const auto nativeAction = NativeShipControl::ActionFromId(actionId);
+        if (nativeAction != NativeShipControl::Action::Invalid) {
+            NativeShipControl::SetActionHeld(nativeAction, ownerId,
+                held && route.targetingSelector);
+        }
+    }
+}
+
+const ShipButtonBinding* FindShipButtonBinding(std::string_view actionId) {
+    const auto it = std::find_if(s_shipButtonBindings.begin(), s_shipButtonBindings.end(),
+        [&](const ShipButtonBinding& binding) { return binding.actionId == actionId; });
+    return it == s_shipButtonBindings.end() ? nullptr : &*it;
+}
+
 ShipControlTarget ResolveControlTarget(std::string_view token) {
     const std::string lowered = TrimLower(token);
     // Raw key/mouse outputs (and "none") carry a ':' or are the literal "none".
     if (lowered == "none" || lowered.find(':') != std::string::npos)
         return { NativeShipControl::Action::Invalid, ParseShipOutput(token, NoOutput) };
+    // Preserve the historical action IDs used by profiles and macros, but emit
+    // one fixed vanilla keyboard input so Starfield's active context can route
+    // Select/Back and the four directions itself.
+    if (const ShipOutput universal = UniversalContextOutput(token);
+        universal.kind != ShipOutputKind::None) {
+        return { NativeShipControl::Action::Invalid, universal };
+    }
     // Otherwise treat the token as a native ship action id.
     return { NativeShipControl::ActionFromId(token), NoOutput };
 }
@@ -329,8 +369,9 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
     s_shipButtonBindings.clear();
     s_shipButtonBindings.reserve(kBindingDefs.size());
 
-    // Retained 4.x output metadata. Named 5.0 actions ignore this resolved output
-    // and dispatch through NativeShipControl; only ButtonExpansion is raw output.
+    // Retained 4.x output metadata. Most named 5.0 actions ignore this resolved
+    // output and dispatch through NativeShipControl. Six compatibility slots use
+    // fixed vanilla inputs so one profile binding works across game contexts.
     // Legacy precedence per action:
     //   vanilla default -> control-map-derived (in-game rebind) -> explicit [ShipButtonOutputs].
     const bool syncFromControlMap = ini.GetBoolValue("General", "bSyncShipOutputsFromControlMap", true);
@@ -344,7 +385,13 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
             cmDefault = ControlMapDefaultForAction(controlMapRecords, def);
 
         const char* outputValue = ini.GetValue("ShipButtonOutputs", def.outputIniKey, nullptr);
-        const ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
+        ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
+        if (const ShipOutput universal = UniversalContextOutput(def.actionId);
+            universal.kind != ShipOutputKind::None) {
+            // These aliases deliberately represent the vanilla keys, not the
+            // currently rebound ship-only action or legacy output override.
+            finalOut = universal;
+        }
 
         BindingRef bRef = ParseBindingRef(ini.GetValue("ShipButtons", def.sourceIniKey, ""), -1);
 
@@ -429,8 +476,30 @@ void UpdateShipButtonBindings() {
         bool pressed  = DeviceManager::IsButtonPressed(binding.buttonRef);
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
+        const auto* universalMapping = UniversalContextInput::Find(binding.actionId);
+        const ShipOutput universal = UniversalContextOutput(binding.actionId);
         const auto nativeAction = NativeShipControl::ActionFromId(binding.actionId);
-        if (nativeAction != NativeShipControl::Action::Invalid) {
+        if (universal.kind != ShipOutputKind::None) {
+            // Targeting Mode consumes dedicated SelectLeft/SelectRight semantic
+            // events rather than the ShipHUD arrow bindings. Switch lanes under
+            // the exact targeting camera gate so power management never receives
+            // the same press. Outside targeting, raw output remains edge-seeded:
+            // a button held while targeting closes cannot resume power control
+            // until it has been released and genuinely pressed again.
+            const bool targetingSelector = universalMapping &&
+                universalMapping->targetingSelector &&
+                NativeShipControl::TargetingModeActive();
+            if (targetingSelector) {
+                SetUniversalContextHeld(binding.actionId, ownerId, pressed);
+            } else {
+                if (universalMapping && universalMapping->targetingSelector &&
+                    nativeAction != NativeShipControl::Action::Invalid) {
+                    NativeShipControl::SetActionHeld(nativeAction, ownerId, false);
+                }
+                if (pressed != binding.previousPressed)
+                    SetOutputHeld(binding.output, ownerId, pressed);
+            }
+        } else if (nativeAction != NativeShipControl::Action::Invalid) {
             if (pressed != binding.previousPressed)
                 NativeShipControl::SetActionHeld(nativeAction, ownerId, pressed);
         } else if (binding.mode == ShipBindingMode::Hold) {
