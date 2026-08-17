@@ -2,11 +2,11 @@
 
 // ============================================================================
 // Minimal, self-contained SFSE plugin ABI — vendored so AbsoluteHOTAS carries no
-// CommonLibSF dependency. The plugin only ever needed the SFSE load/version
-// contract (it does its own HID input, signature scanning, and manual trampoline
-// hooks), never RE:: types, REL::ID, or the Address Library. Namespaces and macro
-// names mirror CommonLibSF exactly (SFSE::, REL::Version, SFSE_PLUGIN_LOAD/
-// _VERSION) so call sites are unchanged.
+// CommonLibSF dependency. The plugin uses only the SFSE load/version contract
+// and the documented lifecycle messaging boundary (it does its own HID input,
+// signature scanning, and manual trampoline hooks), never RE:: types, REL::ID,
+// or the Address Library. Namespaces and macro names mirror CommonLibSF exactly
+// (SFSE::, REL::Version, SFSE_PLUGIN_LOAD/_VERSION) so call sites are unchanged.
 //
 // The PluginVersionData layout is byte-exact against the SFSE ABI and locked by
 // static_asserts below — do not reorder or resize its members.
@@ -76,8 +76,91 @@ namespace REL
 
 namespace SFSE
 {
-    // Opaque — the load entry point never dereferences it.
-    struct LoadInterface;
+    using PluginHandle = std::uint32_t;
+
+    namespace Impl
+    {
+        struct SFSEInterface
+        {
+            std::uint32_t sfseVersion;
+            std::uint32_t runtimeVersion;
+            std::uint32_t interfaceVersion;
+            void* (*queryInterface)(std::uint32_t);
+            PluginHandle (*getPluginHandle)();
+            const void* (*getPluginInfo)(const char*);
+        };
+
+        struct SFSEMessagingInterface
+        {
+            std::uint32_t interfaceVersion;
+            bool (*registerListener)(PluginHandle, const char*, void*);
+            bool (*dispatch)(PluginHandle, std::uint32_t, void*, std::uint32_t,
+                             const char*);
+        };
+    }
+
+    class MessagingInterface
+    {
+    public:
+        enum MessageType : std::uint32_t
+        {
+            kPostLoad,
+            kPostPostLoad,
+            kPostDataLoad,
+            kPostPostDataLoad,
+        };
+
+        struct Message
+        {
+            const char* sender;
+            std::uint32_t type;
+            std::uint32_t dataLength;
+            void* data;
+        };
+
+        using EventCallback = void (*)(Message*);
+
+        [[nodiscard]] std::uint32_t Version() const noexcept
+        {
+            return GetProxy().interfaceVersion;
+        }
+
+        [[nodiscard]] bool RegisterListener(PluginHandle handle,
+                                            EventCallback callback) const noexcept
+        {
+            return callback && GetProxy().registerListener &&
+                   GetProxy().registerListener(
+                       handle, "SFSE", reinterpret_cast<void*>(callback));
+        }
+
+    private:
+        [[nodiscard]] const Impl::SFSEMessagingInterface& GetProxy() const noexcept
+        {
+            return reinterpret_cast<const Impl::SFSEMessagingInterface&>(*this);
+        }
+    };
+
+    class LoadInterface
+    {
+    public:
+        [[nodiscard]] PluginHandle GetPluginHandle() const noexcept
+        {
+            return GetProxy().getPluginHandle ? GetProxy().getPluginHandle() : 0;
+        }
+
+        [[nodiscard]] const MessagingInterface* GetMessagingInterface() const noexcept
+        {
+            return GetProxy().queryInterface ?
+                static_cast<const MessagingInterface*>(GetProxy().queryInterface(1)) :
+                nullptr;
+        }
+
+    private:
+        [[nodiscard]] const Impl::SFSEInterface& GetProxy() const noexcept
+        {
+            return reinterpret_cast<const Impl::SFSEInterface&>(*this);
+        }
+    };
 
     struct PluginVersionData
     {

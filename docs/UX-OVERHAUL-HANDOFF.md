@@ -18,6 +18,13 @@ workbench.
 - [Configuration Layout](reference/config-layout.md)
 - [Native Controls and Head Tracking](reference/native-controls-and-head-tracking.md)
 
+> **Suite ownership update (2026-08-16):** Camera Look/OpenTrack pose processing is moving to
+> Absolute Head Tracking, and idle mouse-centering policy is moving to AbsoluteZero. References to
+> those implementations below describe the current transitional HOTAS workbench, not target
+> `absolute.hotas` pages in Absolute Control. HOTAS retains HOSAM steering arbitration and
+> independent reticle/aim routing. The extraction follows a separately reviewed optional headless
+> runtime-coordinator contract and must preserve safe standalone operation.
+
 ## 1. Purpose
 
 AbsoluteHOTAS has a strong runtime and a large set of individually capable tools, but
@@ -232,7 +239,6 @@ Flight Controls
 Flight Modes
   Throttle Setup
   Aiming & Combat
-  Camera Look
 
 Advanced
   Profiles & Layers
@@ -245,6 +251,10 @@ Power (only when Absolute Power is available)
   Automation
   Diagnostics
 ```
+
+Absolute Head Tracking and AbsoluteZero appear as separate installed suite modules, not pages
+inside AbsoluteHOTAS. The embedded Camera Look and alignment-assist controls remain transition-only
+until their extraction and migration acceptance matrix passes.
 
 ### 6.1 Opening behavior
 

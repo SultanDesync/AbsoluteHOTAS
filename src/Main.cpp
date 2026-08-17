@@ -1,5 +1,6 @@
 #include "PCH.h"
 
+#include "AbsoluteControlSubscriber.h"
 #include "ThrottleHook.h"
 #include "ThrottleController.h"
 #include "RuntimePaths.h"
@@ -13,6 +14,38 @@
 
 static void MainLog(const std::string& msg) {
     RuntimePaths::Log("[Main]", msg);
+}
+
+static void OnSfseMessage(SFSE::MessagingInterface::Message* message) {
+    if (!message || AbsoluteControlSubscriber::IsHosted() ||
+        (message->type != SFSE::MessagingInterface::kPostDataLoad &&
+         message->type != SFSE::MessagingInterface::kPostPostDataLoad)) {
+        return;
+    }
+
+    const auto result = AbsoluteControlSubscriber::RegisterDiscoveredHost();
+    using AbsoluteControlPanelApi::Result;
+    if (result == Result::Ok || result == Result::Duplicate) {
+        MainLog("Registered read-only Setup Overview and Plugin & Compatibility pages with Absolute Control.");
+    } else if (result == Result::NotReady &&
+               message->type == SFSE::MessagingInterface::kPostDataLoad) {
+        MainLog("Absolute Control is not ready; registration will retry at post-post-data-load.");
+    } else if (result == Result::NotFound) {
+        if (message->type == SFSE::MessagingInterface::kPostPostDataLoad) {
+            MainLog("Absolute Control is not installed; standalone HOTAS operation continues.");
+        }
+    } else {
+        MainLog(std::format(
+            "WARNING: Absolute Control registration was rejected (result {}); standalone HOTAS operation continues.",
+            static_cast<std::uint32_t>(result)));
+    }
+}
+
+static bool RegisterSfseListener(const SFSE::LoadInterface* sfse) noexcept {
+    if (!sfse) return false;
+    const auto* messaging = sfse->GetMessagingInterface();
+    return messaging && messaging->Version() >= 1 &&
+           messaging->RegisterListener(sfse->GetPluginHandle(), &OnSfseMessage);
 }
 
 static LONG NTAPI CrashLogHandler(EXCEPTION_POINTERS* a_exceptionInfo) {
@@ -76,7 +109,7 @@ static void InstallCrashLogger() {
 }
 
 // SFSE plugin entry point
-SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
+SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 {
     // Read bEnableLog from the INI once and cache it. With logging off the plugin
     // writes nothing, so there is no crash handler to install either.
@@ -107,14 +140,17 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
         MainLog("The game may have updated; the .text signature scan found no match.");
     }
 
-    if (!NativeShipControl::Initialize()) {
+    const bool nativeControlsInitialized = NativeShipControl::Initialize();
+    if (!nativeControlsInitialized) {
         MainLog("WARNING: Native 5.0 control seams did not pass their exact runtime gates.");
     }
 
+    bool controllerStarted = false;
     if (hookOk) {
         MainLog("Hook layer ready. Initializing and starting standalone ThrottleController.");
         if (ThrottleController::Initialize()) {
             ThrottleController::Start();
+            controllerStarted = true;
             MainLog("ThrottleController started successfully.");
         } else {
             MainLog("WARNING: ThrottleController initialization failed or disabled in config.");
@@ -124,13 +160,30 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* /*a_sfse*/)
     // Phase 2: optional D3D12 ImGui workbench. This is intentionally independent
     // of the controller: users with an incompatible renderer stack can disable
     // every graphics hook and continue using their manual configuration.
-    if (!RuntimePaths::IsWorkbenchEnabled()) {
+    const bool workbenchConfigured = RuntimePaths::IsWorkbenchEnabled();
+    bool workbenchInstalled = false;
+    if (!workbenchConfigured) {
         MainLog("Workbench disabled by [UI] bEnableWorkbench=false; manual configuration and flight controls remain active.");
     } else if (UIHook::Install()) {
         BindingWizard::Initialize();
+        workbenchInstalled = true;
         MainLog("UIHook + BindingWizard armed. Press Ctrl+Alt+B in-game to initialize the renderer.");
     } else {
         MainLog("WARNING: UIHook installation failed. Workbench disabled; manual configuration and flight controls remain active.");
+    }
+
+    AbsoluteControlSubscriber::SetRuntimeStatus({
+        .throttleHookInstalled = hookOk,
+        .nativeControlsInitialized = nativeControlsInitialized,
+        .controllerStarted = controllerStarted,
+        .legacyWorkbenchConfigured = workbenchConfigured,
+        .legacyWorkbenchInstalled = workbenchInstalled,
+    });
+
+    if (!RegisterSfseListener(a_sfse)) {
+        MainLog("WARNING: SFSE lifecycle messaging is unavailable; Absolute Control discovery is disabled for this session, while standalone HOTAS operation continues.");
+    } else {
+        MainLog("Absolute Control discovery deferred to SFSE post-data-load.");
     }
 
     MainLog("Plugin load complete.");

@@ -147,6 +147,17 @@ target("absolute_power_api_test")
     add_includedirs("include")
     add_files("tests/absolute_power_api_test.cpp")
 
+-- Fail-optional Absolute Control subscriber contract. Compiles the adapter
+-- without the gameplay DLL so host absence/rejection and callback containment
+-- remain mechanically testable without Starfield or Absolute Control installed.
+target("absolute_control_subscriber_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("abi_descriptors_and_absence")
+    add_includedirs("include")
+    add_files("tests/absolute_control_subscriber_test.cpp")
+    add_files("src/AbsoluteControlSubscriber.cpp")
+
 -- Header-only pilot-context policy tests. These lock the distinction between
 -- piloting, on-foot, and suspended/menu states without loading the game runtime.
 target("pilot_state_test")

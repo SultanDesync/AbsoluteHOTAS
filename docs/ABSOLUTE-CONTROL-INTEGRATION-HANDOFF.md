@@ -1,6 +1,6 @@
 # AbsoluteHOTAS -> Absolute Control integration handoff
 
-> **Status:** Restart-safe implementation brief for a fresh coding task
+> **Status:** H0 release-verified; ready for checkpoint commit
 > **Date:** 2026-08-16
 > **Immediate objective:** Add fail-optional, provider-owned Absolute Control pages to
 > AbsoluteHOTAS without delaying or destabilizing its 5.0.1 gameplay update.
@@ -17,7 +17,8 @@ The first implementation slice is:
 
 1. introduce an `AbsoluteControlSubscriber` adapter inside AbsoluteHOTAS;
 2. dynamically discover the product or ResearchDev Control host without linking to it;
-3. register module `absolute.hotas` plus one read-only **Setup & Compatibility** page;
+3. register module `absolute.hotas` plus read-only **Setup Overview** and
+   **Plugin & Compatibility** pages;
 4. keep all flight controls, manual INI use, profiles, and the existing overlay functional when
    Control is absent or rejected; and
 5. add ABI/descriptor/absence tests before exposing an editable setting.
@@ -44,6 +45,47 @@ The early simultaneous release does **not** require:
 It does require truthful capability labels. An unavailable editor or capture path must say so; a
 partially exercised page is not “integrated” merely because it registered or rendered once.
 
+## Suite modularization and optional runtime coordination
+
+The Absolute product may ship an optional headless runtime coordinator alongside the Control menu,
+but menu hosting and gameplay arbitration remain separate binaries and lifecycles. The intended
+package boundary is:
+
+```text
+Absolute Control
+  AbsoluteControlPanel.dll       optional native menu host
+  AbsoluteControlPanelMenu.swf   menu presentation
+  AbsoluteFlightRuntime.dll      optional headless flight-lane coordinator
+```
+
+`AbsoluteFlightRuntime.dll` is specified direction, not part of H0. Control must continue to work
+without it, and HOTAS, Head Tracking, and AbsoluteZero must retain safe standalone behavior without
+the menu. When the coordinator is absent, incompatible combinations fail closed instead of
+installing competing hooks.
+
+The target feature ownership is:
+
+| Concern | Product owner |
+|---|---|
+| DirectInput devices, HOTAS/HOSAS axes, throttle, buttons, profiles, macros | AbsoluteHOTAS |
+| Bound pitch/yaw steering and independent reticle/aim routing | AbsoluteHOTAS |
+| HOSAM mode that releases pitch/yaw steering to Starfield's mouse path | AbsoluteHOTAS |
+| OpenTrack input, pose shaping, camera composition, recenter/toggle | Absolute Head Tracking |
+| Idle mouse-centering policy, radius, delay, decay, and suppression | AbsoluteZero |
+| Shared lane arbitration when several flight modules are installed | Optional Absolute Flight Runtime |
+| Module pages, transactions, capture presentation, and diagnostics | Absolute Control |
+
+AbsoluteZero is a conditional modifier, not the owner of mouse input. It may center the source only
+when runtime arbitration declares native mouse steering active, normally HOSAM or mouse-only flight.
+Bound HOTAS pitch/yaw claims steering; independent aiming remains a separate HOTAS-managed lane.
+Menu/capture suspension parks affected lanes. No raw Starfield pointer crosses a suite ABI.
+
+Until extraction lands, the embedded HOTAS workbench and runtime still contain transitional Head
+Tracking and alignment-assist code. H0 must not expose those as `absolute.hotas` Control settings.
+Before H1 inventories editable settings, specify the coordinator ABI and a reviewed extraction/
+migration path. Absolute Head Tracking and AbsoluteZero register their own modules and retain their
+own configuration owners.
+
 ## Current repository truth
 
 ### AbsoluteHOTAS
@@ -56,9 +98,12 @@ partially exercised page is not “integrated” merely because it registered or
   Throttle Setup, and Profiles & Layers.
 - `AbsoluteHOTAS_QueryApi(1)` is the existing suite command-binding/capture contract used by
   other mods. It is not a Control provider API.
-- No Absolute Control subscriber adapter exists yet.
+- `AbsoluteControlSubscriber` now discovers either Control product DLL name at SFSE
+  post-data-load, registers copied read-only descriptors, retries a `NotReady` host once at
+  post-post-data-load, and leaves standalone gameplay unchanged when the host is absent or rejects
+  the provider.
 - `xmake` builds and optionally deploys the DLL/default INI. `xmake test` currently exercises
-  eight standalone test targets.
+  nine standalone test targets, including the Control ABI/subscriber contract suite.
 
 ### Absolute Control
 
@@ -183,11 +228,14 @@ accepted HOTAS UX handoff, but implementation is sliced by risk.
 | Ship Buttons | `hotas-ship-buttons` | Core editing target after provider capture exists |
 | Throttle Setup | `hotas-throttle` | Behavior-first core target |
 | Aiming & Combat | `hotas-aiming` | Later editable slice |
-| Camera Look | `hotas-camera-look` | Later editable/live slice |
 | Profiles & Layers | `hotas-profiles` | Selected-record transaction slice |
 | Macros | `hotas-macros` | Advanced selected-record slice |
 | Devices | `hotas-devices` | Read-only inventory first; calibration later |
 | Plugin & Compatibility | `hotas-diagnostics` | Read-only first slice |
+
+Camera Look is a transitional legacy-workbench route, not a target `absolute.hotas` Control page.
+Absolute Head Tracking owns its replacement module/pages. Likewise, AbsoluteZero owns mouse-
+centering settings; HOTAS retains only HOSAM routing and independent aiming behavior.
 
 Do not make the sidebar contain Flight Controls, Flight Modes, and Advanced as if they were
 separate installed mods. The sidebar entry is AbsoluteHOTAS; its pages/tabs express local tasks.
@@ -274,6 +322,16 @@ integration until its public status is decided.
 
 ### H0 — Contract and adapter skeleton
 
+Implementation checkpoint: code, ABI/descriptor tests, full automated test suite, a no-live-deploy
+release build, and Absolute Control's maintained cross-repository product validator passed on
+2026-08-16. A supervised Starfield smoke test then loaded the ResearchDev Control host and
+AbsoluteHOTAS without problems, enumerated the `absolute.hotas` module/pages, and exercised their
+current read-only behavior as expected. A second run with Absolute Power installed enumerated and
+operated both providers without a module-list or registration conflict. A final Control-absent run
+then loaded AbsoluteHOTAS normally and exercised real binding changes and flight injection without
+regression. H0 is release-verified on the automated and supervised runtime evidence required by this
+slice.
+
 - Copy the current Control ABI header into HOTAS under its existing dependency policy.
 - Add `AbsoluteControlSubscriber.{h,cpp}` with dynamic discovery and copied descriptors.
 - Register `absolute.hotas`, Setup Overview, and Plugin & Compatibility as read-only pages.
@@ -282,6 +340,9 @@ integration until its public status is decided.
 - Verify HOTAS builds/tests and operates with Control absent.
 
 Exit: module registration and host absence are mechanically proven; no gameplay behavior changes.
+
+Exit satisfied on 2026-08-16. Control-present, Control-plus-Power, and Control-absent Starfield smoke
+tests passed; binding edits and flight injection continued to operate as expected.
 
 ### H1 — Provider-owned scalar transaction
 
@@ -319,9 +380,11 @@ Exit: a DirectInput binding captures, drafts, applies, reloads, and executes wit
 
 Exit: bind -> observe -> tune -> save -> fly works without the legacy overlay.
 
-### H5 — Remaining pages and legacy arbitration
+### H5 — Remaining HOTAS pages and legacy arbitration
 
-- Port Aiming & Combat, Camera Look, Macros, Devices/calibration, and advanced profile workflows.
+- Port Aiming & Combat, Macros, Devices/calibration, and advanced profile workflows.
+- Require separately installed Head Tracking and AbsoluteZero modules to coexist through the
+  reviewed runtime-coordinator contract; do not port their settings into `absolute.hotas`.
 - Add the deep-link/open capability and route the HOTAS menu binding when available.
 - Ensure only one frontend owns an editable session; keep the overlay as a Control-absent fallback
   until parity is explicitly accepted.
@@ -401,8 +464,10 @@ the loaded binaries have not changed.
 - Keyboard, mouse, controller navigation, and DirectInput capture as separately evidenced paths.
 - Pause-origin Back, direct-open Close, ultrawide restoration, alt-tab, and repeated reopen.
 - Unsupported runtime/native seam failures remain visible and fail closed.
-- Existing runtime actions, macros, camera look, reverse, strafe, and profile activation show no
-  regression with the menu closed.
+- Existing HOTAS runtime actions, macros, independent aiming, reverse, strafe, and profile
+  activation show no regression with the menu closed.
+- After the extraction slice, Absolute Head Tracking and AbsoluteZero separately prove their
+  camera-pose and HOSAM-centering paths with and without the optional runtime coordinator.
 
 ## Definition of done
 
@@ -415,6 +480,8 @@ The integration is not complete until:
 - no second authoritative profile/config model exists;
 - the frontend arbitration rule prevents concurrent editable sessions;
 - live graphs cannot stall device/gameplay threads;
+- optional Head Tracking and mouse-centering policies are not reintroduced as HOTAS-owned Control
+  settings;
 - the supervised installation matrix has retained semantic evidence and human UX review; and
 - documentation distinguishes implemented, automated verified, runtime verified, observed, and
   deferred work.
