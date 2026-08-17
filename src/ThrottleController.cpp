@@ -1,5 +1,6 @@
 #include "PCH.h"
 
+#include "AbsoluteControlSubscriber.h"
 #include "SuiteCommandBindings.h"
 #include "ThrottleController.h"
 #include "ThrottleHook.h"
@@ -782,7 +783,7 @@ void ThrottleController::ControlLoop() {
     bool active = s_config.alwaysOn;
     bool wasActive = false;
     bool injectionWasAllowed = true;  // pilot gate (InjectionOnly): tracks memory-injection arm state
-    bool overlayWasOpen = false;
+    bool editorWasOpen = false;
     bool fullGateWasClosed = false;
     bool resetOverlayEdges = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
@@ -871,6 +872,8 @@ void ThrottleController::ControlLoop() {
         prevToggleWizard = curToggleWizard;
         prevWizardChord  = curWizardChord;
         const bool overlayOpen = UIHook::IsUIOpen();
+        const bool controlMenuOpen = AbsoluteControlSubscriber::IsHostOpen();
+        const bool editorOpen = overlayOpen || controlMenuOpen;
         if (overlayOpen) HeadTracking::PollPreview(s_config.headTracking);
 
         // ---- Profile switch triggers ----
@@ -881,7 +884,7 @@ void ThrottleController::ControlLoop() {
         // without acting, so a release under suppression can't strand the user and
         // resuming can't fire a spurious swap; the selector re-syncs on resume.
         {
-            const bool swapEnabled = active && !overlayOpen;
+            const bool swapEnabled = active && !editorOpen;
             auto IsKeyTriggerDown = [](int key, int mods) {
                 if (key <= 0 || !(GetAsyncKeyState(key) & 0x8000)) return false;
                 if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
@@ -979,7 +982,7 @@ void ThrottleController::ControlLoop() {
             lastInjectedHardwareValue = -999.0f;
             wasActive = true;
         }
-        if (active && !overlayOpen) {
+        if (active && !editorOpen) {
             const int candidateCount = ThrottleHook::GetCandidateCount();
             SignalHunter::Tick(candidateCount, iter);
         }
@@ -1004,7 +1007,7 @@ void ThrottleController::ControlLoop() {
             s_config.pilotGateMode == ThrottleController::GateMode::Full && !piloting;
         const bool menuContext = pilotSnapshot.gameplayContextKnown &&
             !pilotSnapshot.gameplayContextActive;
-        const bool contextReuseAllowed = active && !fullClosed && !overlayOpen;
+        const bool contextReuseAllowed = active && !fullClosed && !editorOpen;
         UpdateMenuControlReuse(
             contextReuseAllowed && menuContext,
             contextReuseAllowed && pilotSnapshot.targetingModeActive);
@@ -1059,12 +1062,13 @@ void ThrottleController::ControlLoop() {
             CtrlLog("[PilotState] Piloting resumed; full gate reopened.");
         }
 
-        // The workbench is a capture/editing context, not a second flight-input
-        // surface. Park every plugin-owned output before rendering it and keep
-        // polling DirectInput only so capture and the close binding remain live.
-        if (overlayOpen) {
-            if (!overlayWasOpen) {
-                CtrlLog("[Wizard] Parking gameplay injection and plugin-owned outputs.");
+        // Both frontends are editing contexts, not second flight-input surfaces.
+        // Park every plugin-owned output while either one owns the user's input.
+        if (editorOpen) {
+            if (!editorWasOpen) {
+                CtrlLog(controlMenuOpen ?
+                    "[AbsoluteControl] Parking gameplay injection and plugin-owned outputs." :
+                    "[Wizard] Parking gameplay injection and plugin-owned outputs.");
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 NativeShipControl::SetEnabled(false);
@@ -1073,18 +1077,18 @@ void ThrottleController::ControlLoop() {
                 injectionWasAllowed = false;
                 s_resetCruiseEdges = true;
             }
-            overlayWasOpen = true;
+            editorWasOpen = true;
             std::this_thread::sleep_for(sleepDuration);
             continue;
         }
-        if (overlayWasOpen) {
-            overlayWasOpen = false;
+        if (editorWasOpen) {
+            editorWasOpen = false;
             resetOverlayEdges = true;
             s_resetCruiseEdges = true;
             ShipOutputSystem::SeedDownButtonsConsumed();
             MacroEngine::SeedDownButtonsConsumed();
             lastInjectedHardwareValue = -999.0f;
-            CtrlLog("[Wizard] Gameplay input resumed; held edge controls reseeded.");
+            CtrlLog("[Editor] Gameplay input resumed; held edge controls reseeded.");
         }
 
         // Native ship actions use the longer automatic latch even when the flight
@@ -1193,7 +1197,7 @@ void ThrottleController::ControlLoop() {
         if (s_resetCruiseEdges) {
             for (int i = 0; i < 4; ++i) prevCruise[i] = cruiseDown[i];
             s_resetCruiseEdges = false;
-        } else if (!overlayOpen) {
+        } else if (!editorOpen) {
             const CruiseAssistMode modes[] = {
                 CruiseAssistMode::HoldCurrent, CruiseAssistMode::Stop,
                 CruiseAssistMode::Half, CruiseAssistMode::Max

@@ -1,3 +1,4 @@
+#include "AbsoluteControlSettings.h"
 #include "AbsoluteControlSubscriber.h"
 #include "SFSEInterface.h"
 
@@ -8,6 +9,58 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace TestSettings {
+AbsoluteControlSettings::ScalarState stored{};
+AbsoluteControlSettings::Revision revision{1, 11};
+bool canEdit{true};
+bool failLoad{};
+bool failApply{};
+} // namespace TestSettings
+
+namespace AbsoluteControlSettings {
+bool Load(ScalarState& state, Revision& revision, std::string& error) noexcept
+{
+    if (TestSettings::failLoad) {
+        error = "test load failure";
+        return false;
+    }
+    state = TestSettings::stored;
+    revision = TestSettings::revision;
+    error.clear();
+    return true;
+}
+
+bool Apply(const ScalarState& state, const Revision& expected,
+           ScalarState& readBack, Revision& revision,
+           std::string& error) noexcept
+{
+    if (!TestSettings::canEdit || TestSettings::failApply ||
+        expected != TestSettings::revision) {
+        error = "test apply failure";
+        return false;
+    }
+    TestSettings::stored = state;
+    ++TestSettings::revision.sourceFingerprint;
+    readBack = TestSettings::stored;
+    revision = TestSettings::revision;
+    error.clear();
+    return true;
+}
+
+Revision CurrentRevision() noexcept
+{
+    return TestSettings::revision;
+}
+
+bool CanEdit() noexcept
+{
+    return TestSettings::canEdit;
+}
+} // namespace AbsoluteControlSettings
 
 namespace {
 using namespace AbsoluteControlPanelApi;
@@ -18,10 +71,13 @@ HostBehavior g_behavior{HostBehavior::Accept};
 const ApiV1* g_resolvedApi{};
 std::uint32_t g_moduleCalls{};
 std::uint32_t g_pageCalls{};
+bool g_hostOpen{};
+bool g_hostCapture{};
 ModuleDescriptorV1 g_copiedModule{};
-std::array<PageDescriptorV1, 2> g_copiedPages{};
+std::array<PageDescriptorV1, 3> g_copiedPages{};
 
-Result __cdecl RegisterModule(const ModuleDescriptorV1* module) noexcept {
+Result __cdecl RegisterModule(const ModuleDescriptorV1* module) noexcept
+{
     ++g_moduleCalls;
     if (g_behavior == HostBehavior::NotReady) return Result::NotReady;
     if (g_behavior == HostBehavior::Reject) return Result::Rejected;
@@ -31,7 +87,8 @@ Result __cdecl RegisterModule(const ModuleDescriptorV1* module) noexcept {
     return Result::Ok;
 }
 
-Result __cdecl RegisterPage(const PageDescriptorV1* page) noexcept {
+Result __cdecl RegisterPage(const PageDescriptorV1* page) noexcept
+{
     if (g_behavior == HostBehavior::NotReady) return Result::NotReady;
     if (g_behavior == HostBehavior::Reject) return Result::Rejected;
     if (!page || g_pageCalls >= g_copiedPages.size()) return Result::InvalidArgument;
@@ -41,8 +98,8 @@ Result __cdecl RegisterPage(const PageDescriptorV1* page) noexcept {
 
 Result __cdecl UnregisterModule(const char*) noexcept { return Result::Ok; }
 Result __cdecl RequestRefresh(const char*, const char*) noexcept { return Result::Ok; }
-std::uint8_t __cdecl IsOpen() noexcept { return 0; }
-std::uint8_t __cdecl IsInputCaptureActive() noexcept { return 0; }
+std::uint8_t __cdecl IsOpen() noexcept { return g_hostOpen ? 1 : 0; }
+std::uint8_t __cdecl IsInputCaptureActive() noexcept { return g_hostCapture ? 1 : 0; }
 
 ApiV1 g_api{
     .structSize = sizeof(ApiV1),
@@ -56,25 +113,45 @@ ApiV1 g_api{
     .registerModule = &RegisterModule,
     .isOpen = &IsOpen,
     .isInputCaptureActive = &IsInputCaptureActive,
+    .capabilities = kCapabilityLabeledChoices,
 };
 
-const ApiV1* __cdecl ResolveHost(const wchar_t* moduleName) noexcept {
+const ApiV1* __cdecl ResolveHost(const wchar_t* moduleName) noexcept
+{
     return moduleName && std::wcscmp(moduleName, L"AbsoluteControlPanel.dll") == 0 ?
         g_resolvedApi : nullptr;
 }
 
-void ResetFakeHost() {
+void ResetFakeHost()
+{
     g_behavior = HostBehavior::Accept;
     g_resolvedApi = &g_api;
     g_moduleCalls = 0;
     g_pageCalls = 0;
+    g_hostOpen = false;
+    g_hostCapture = false;
     g_copiedModule = {};
     g_copiedPages = {};
+    TestSettings::stored = {};
+    TestSettings::revision = {1, 11};
+    TestSettings::canEdit = true;
+    TestSettings::failLoad = false;
+    TestSettings::failApply = false;
     AbsoluteControlSubscriber::Testing::Reset();
+}
+
+const ControlDescriptorV1* FindControl(const PageDescriptorV1& page,
+                                       std::string_view id)
+{
+    for (std::uint32_t index = 0; index < page.controlCount; ++index) {
+        if (page.controls[index].controlId == id) return &page.controls[index];
+    }
+    return nullptr;
 }
 } // namespace
 
-int main() {
+int main()
+{
     static_assert(sizeof(void*) == 8);
     static_assert(sizeof(ValueV1) == 288);
     static_assert(sizeof(ControlDescriptorV1) == 392);
@@ -95,27 +172,27 @@ int main() {
 
     std::size_t pageCount{};
     const auto* pages = AbsoluteControlSubscriber::Testing::Pages(pageCount);
-    assert(pageCount == 2);
+    assert(pageCount == 3);
     assert(std::strcmp(AbsoluteControlSubscriber::Testing::Module().moduleId,
                        "absolute.hotas") == 0);
     assert(std::strcmp(pages[0].pageId, "hotas-setup") == 0);
-    assert(std::strcmp(pages[1].pageId, "hotas-diagnostics") == 0);
+    assert(std::strcmp(pages[1].pageId, "hotas-flight-axes") == 0);
+    assert(std::strcmp(pages[2].pageId, "hotas-diagnostics") == 0);
     assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(pages, pageCount) ==
            Result::Ok);
 
-    std::array<PageDescriptorV1, 2> invalidPages{pages[0], pages[1]};
-    std::array<ControlDescriptorV1, 5> setupControls{};
-    std::array<ControlDescriptorV1, 5> diagnosticControls{};
-    std::copy_n(pages[0].controls, setupControls.size(), setupControls.begin());
-    std::copy_n(pages[1].controls, diagnosticControls.size(), diagnosticControls.begin());
-    invalidPages[0].controls = setupControls.data();
-    invalidPages[1].controls = diagnosticControls.data();
-
-    strcpy_s(diagnosticControls[0].controlId, setupControls[0].controlId);
+    std::array<PageDescriptorV1, 3> invalidPages{pages[0], pages[1], pages[2]};
+    std::array<std::vector<ControlDescriptorV1>, 3> copiedControls;
+    for (std::size_t index = 0; index < invalidPages.size(); ++index) {
+        copiedControls[index].assign(
+            pages[index].controls, pages[index].controls + pages[index].controlCount);
+        invalidPages[index].controls = copiedControls[index].data();
+    }
+    strcpy_s(copiedControls[2][3].controlId, copiedControls[0][0].controlId);
     assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
                invalidPages.data(), invalidPages.size()) == Result::Duplicate);
-    diagnosticControls[0] = pages[1].controls[0];
-    diagnosticControls[0].kind = static_cast<ControlKind>(99);
+    copiedControls[2][3] = pages[2].controls[3];
+    copiedControls[0][0].kind = static_cast<ControlKind>(99);
     assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
                invalidPages.data(), invalidPages.size()) == Result::InvalidArgument);
 
@@ -152,16 +229,100 @@ int main() {
            Result::Ok);
     assert(AbsoluteControlSubscriber::IsHosted());
     assert(g_moduleCalls == 2);
-    assert(g_pageCalls == 2);
+    assert(g_pageCalls == 3);
     assert(std::strcmp(g_copiedModule.moduleId, "absolute.hotas") == 0);
     assert(std::strcmp(g_copiedPages[0].pageId, "hotas-setup") == 0);
-    assert(std::strcmp(g_copiedPages[1].pageId, "hotas-diagnostics") == 0);
+    assert(std::strcmp(g_copiedPages[1].pageId, "hotas-flight-axes") == 0);
+    assert(std::strcmp(g_copiedPages[2].pageId, "hotas-diagnostics") == 0);
+
+    g_hostOpen = true;
+    g_hostCapture = true;
+    assert(AbsoluteControlSubscriber::IsHostOpen());
+    assert(AbsoluteControlSubscriber::IsHostInputCaptureActive());
+    g_hostOpen = false;
+    g_hostCapture = false;
 
     ValueV1 value{};
     assert(g_copiedPages[0].readValue(
                nullptr, g_copiedPages[0].controls[0].controlId, &value) == Result::Ok);
     assert(value.kind == ValueKind::String);
     assert(value.stringValue[0] != '\0');
+
+    const auto& axesPage = g_copiedPages[1];
+    assert(FindControl(axesPage, "flight-controls-enabled"));
+    value = {};
+    assert(axesPage.readValue(nullptr, "flight-controls-enabled", &value) == Result::Ok);
+    assert(value.kind == ValueKind::Boolean && value.booleanValue == 1);
+
+    ValueV1 edit = {};
+    edit.kind = ValueKind::Boolean;
+    edit.booleanValue = 0;
+    assert(axesPage.writeDraft(nullptr, "flight-controls-enabled", &edit) == Result::Ok);
+    value = {};
+    assert(axesPage.readValue(nullptr, "flight-controls-enabled", &value) == Result::Ok);
+    assert(value.booleanValue == 0);
+    assert(TestSettings::stored.flightControlsEnabled);
+    assert(axesPage.apply(nullptr) == Result::Ok);
+    assert(!TestSettings::stored.flightControlsEnabled);
+
+    edit = {};
+    edit.kind = ValueKind::Float;
+    edit.floatValue = 2.0;
+    assert(axesPage.writeDraft(nullptr, "pitch-sensitivity", &edit) == Result::Ok);
+    axesPage.cancel(nullptr);
+    value = {};
+    assert(axesPage.readValue(nullptr, "pitch-sensitivity", &value) == Result::Ok);
+    assert(value.kind == ValueKind::Float && value.floatValue == 1.0);
+
+    edit = {};
+    edit.kind = ValueKind::Integer;
+    edit.integerValue = 2;
+    assert(axesPage.writeDraft(nullptr, "pitch-sensitivity", &edit) ==
+           Result::InvalidArgument);
+    edit.kind = ValueKind::Float;
+    edit.floatValue = 3.1;
+    assert(axesPage.writeDraft(nullptr, "pitch-sensitivity", &edit) ==
+           Result::InvalidArgument);
+
+    const auto& diagnosticsPage = g_copiedPages[2];
+    std::array<ChoiceOptionV1, 3> options{};
+    std::uint32_t optionCount{};
+    assert(diagnosticsPage.readChoiceOptions(
+               nullptr, "pilot-context-mode", options.data(),
+               static_cast<std::uint32_t>(options.size()),
+               &optionCount) == Result::Ok);
+    assert(optionCount == 3);
+    assert(options[1].value == 1);
+    assert(std::strcmp(options[1].label, "Park flight controls") == 0);
+    assert(diagnosticsPage.readChoiceOptions(
+               nullptr, "pilot-context-mode", options.data(), 2, &optionCount) ==
+           Result::CapacityExceeded);
+    assert(optionCount == 3);
+
+    TestSettings::canEdit = false;
+    edit = {};
+    edit.kind = ValueKind::Boolean;
+    edit.booleanValue = 1;
+    assert(axesPage.writeDraft(nullptr, "pitch-inverted", &edit) == Result::Rejected);
+    TestSettings::canEdit = true;
+
+    assert(axesPage.writeDraft(nullptr, "pitch-inverted", &edit) == Result::Ok);
+    ++TestSettings::revision.sourceFingerprint;
+    assert(axesPage.apply(nullptr) == Result::Rejected);
+    axesPage.cancel(nullptr);
+    value = {};
+    assert(axesPage.readValue(nullptr, "pitch-inverted", &value) == Result::Ok);
+    assert(value.booleanValue == 0);
+
+    assert(axesPage.writeDraft(nullptr, "pitch-inverted", &edit) == Result::Ok);
+    TestSettings::failApply = true;
+    assert(axesPage.apply(nullptr) == Result::WriteFailure);
+    TestSettings::failApply = false;
+    value = {};
+    assert(axesPage.readValue(nullptr, "pitch-inverted", &value) == Result::Ok);
+    assert(value.booleanValue == 1);
+    assert(axesPage.apply(nullptr) == Result::Ok);
+    assert(TestSettings::stored.pitchInverted);
 
     AbsoluteControlSubscriber::Testing::ForceReadException(true);
     value = {};

@@ -1,5 +1,6 @@
 #include "PCH.h"
 
+#include "AbsoluteControlSubscriber.h"
 #include "UIHook.h"
 #include "UIHookInternal.h"
 
@@ -313,6 +314,10 @@ void ToggleUI() {
     }
 
     bool wasOpen = g_isOpen.load();
+    if (!wasOpen && AbsoluteControlSubscriber::IsHostOpen()) {
+        UILog("Workbench open ignored while Absolute Control owns the editing frontend.");
+        return;
+    }
     if (wasOpen && g_closeGuardCallback && !g_closeGuardCallback()) return;
     bool nowOpen = !wasOpen;
     g_isOpen.store(nowOpen);

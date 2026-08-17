@@ -1,9 +1,9 @@
 # AbsoluteHOTAS -> Absolute Control integration handoff
 
-> **Status:** H0 release-verified; ready for checkpoint commit
-> **Date:** 2026-08-16
-> **Immediate objective:** Add fail-optional, provider-owned Absolute Control pages to
-> AbsoluteHOTAS without delaying or destabilizing its 5.0.1 gameplay update.
+> **Status:** H1 implemented, mechanically verified, and runtime-validated
+> **Date:** 2026-08-17
+> **Immediate objective:** Begin H2 selected profiles/layers, then H3 provider-owned DirectInput
+> capture, without regressing the qualified H1 scalar path.
 > **Release posture:** Absolute Power Presets and Diagnostics may ship alongside this work;
 > its unfinished Automation / Cheats route is an explicitly unavailable **Coming Soon** preview.
 
@@ -99,9 +99,14 @@ own configuration owners.
 - `AbsoluteHOTAS_QueryApi(1)` is the existing suite command-binding/capture contract used by
   other mods. It is not a Control provider API.
 - `AbsoluteControlSubscriber` now discovers either Control product DLL name at SFSE
-  post-data-load, registers copied read-only descriptors, retries a `NotReady` host once at
-  post-post-data-load, and leaves standalone gameplay unchanged when the host is absent or rejects
-  the provider.
+  post-data-load, registers copied Setup, Flight Axes, and Plugin & Compatibility descriptors,
+  retries a `NotReady` host once at post-post-data-load, and leaves standalone gameplay unchanged
+  when the host is absent or rejects the provider.
+- The H1 scalar adapter owns a revisioned draft for Main controls, atomically updates only its six
+  keys in `AbsoluteHOTAS_Custom.ini`, requests the normal controller reload, and performs semantic
+  read-back. The legacy workbench and Control cannot write simultaneously.
+- Opening either editing frontend parks HOTAS gameplay output. The embedded workbench refuses to
+  open while Control owns the frontend; held input edges are reseeded when editing ends.
 - `xmake` builds and optionally deploys the DLL/default INI. `xmake test` currently exercises
   nine standalone test targets, including the Control ABI/subscriber contract suite.
 
@@ -113,8 +118,9 @@ own configuration owners.
   experimental live-component channel exist.
 - Mouse/controller/HOTAS binding capture is not currently implemented.
 - There is no public host command that opens Control directly at a requested module/page.
-- Dirty page/module navigation is safely rejected today; the accepted Apply / Discard / Stay
-  modal is still pending.
+- Dirty page/module navigation and Close now use the host-owned Apply / Discard / Stay modal.
+  Provider Apply failure retains the draft and lease; abnormal Hide/destruction still performs
+  fail-safe Cancel.
 - The public SDK and live-component contract are not release-frozen.
 
 ### Working-tree caution
@@ -127,6 +133,7 @@ commit unrelated changes as part of this handoff.
 
 Read these as authoritative/current unless the file itself says it is historical:
 
+- [Full HOTAS legacy-menu feature inventory for Control and UX](ABSOLUTE-CONTROL-HOTAS-FEATURE-INVENTORY.md)
 - [HOTAS UX overhaul](UX-OVERHAUL-HANDOFF.md)
 - [HOTAS workbench architecture](reference/wizard-workbench-architecture.md)
 - [HOTAS configuration layout](reference/config-layout.md)
@@ -346,12 +353,25 @@ tests passed; binding edits and flight injection continued to operate as expecte
 
 ### H1 — Provider-owned scalar transaction
 
+Implementation checkpoint: completed on 2026-08-17. The first native editing slice exposes
+Main-controls flight enable, pitch inversion, pitch sensitivity, outside-pilot-seat behavior,
+automatic pilot detection, and pilot latch duration. Automated coverage proves typed validation,
+labeled choices, draft read-back, Apply, Cancel, stale-source rejection, failed-Apply retention,
+host absence/rejection, and host-open arbitration. The complete nine-test HOTAS suite and nine-test
+Control suite pass; both rebuilt artifacts are staged in the Starfield Testing Baseline. A
+supervised Starfield run on 2026-08-17 then exercised every exposed function, including draft
+editing, Apply/Cancel, persistence/reload, guarded navigation/Close, and frontend transitions. The
+tester reported clean behavior with no visible seams.
+
 - Extract renderer-neutral load/draft/apply/cancel services from `WizardConfig`/`WizardSession`.
 - Start with Plugin Controls and a small Flight Axes scalar subset.
 - Apply through current persistence and live reload; verify semantic read-back.
 - Add stale edit-target/profile protection and write/reload failure results.
 
 Exit: one real setting round-trips in Control and the legacy overlay sees the same value afterward.
+
+Exit satisfied on 2026-08-17. Applied values survived reopening and the normal HOTAS reload path;
+all exposed H1 functions passed the supervised smoke test.
 
 ### H2 — Selected profiles and layers
 

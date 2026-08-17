@@ -623,5 +623,6 @@ useful, but safety and core-flight regressions take priority during maintenance.
 
 Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bEnableLog = true`).
 
-Development planning lives in the [workbench UX overhaul](docs/UX-OVERHAUL-HANDOFF.md) and the
+Development planning lives in the [full Control feature inventory](docs/ABSOLUTE-CONTROL-HOTAS-FEATURE-INVENTORY.md),
+the [workbench UX overhaul](docs/UX-OVERHAUL-HANDOFF.md), and the
 [Absolute Control integration handoff](docs/ABSOLUTE-CONTROL-INTEGRATION-HANDOFF.md).

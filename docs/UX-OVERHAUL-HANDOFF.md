@@ -11,6 +11,7 @@ workbench.
 
 **Related references:**
 
+- [Full Absolute Control feature inventory](ABSOLUTE-CONTROL-HOTAS-FEATURE-INVENTORY.md)
 - [Absolute Control integration handoff](ABSOLUTE-CONTROL-INTEGRATION-HANDOFF.md)
 - [Binding Wizard Workbench Architecture](reference/wizard-workbench-architecture.md)
 - [Profiles and Runtime Input Layers](reference/profile-switching.md)

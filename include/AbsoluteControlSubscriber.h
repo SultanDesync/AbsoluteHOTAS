@@ -23,6 +23,10 @@ void SetRuntimeStatus(const RuntimeStatus& status) noexcept;
 // absence and rejection never prevent AbsoluteHOTAS gameplay initialization.
 [[nodiscard]] AbsoluteControlPanelApi::Result RegisterDiscoveredHost() noexcept;
 [[nodiscard]] bool IsHosted() noexcept;
+// Frontend/runtime arbitration remains provider-owned. When the suite menu is
+// open, HOTAS parks gameplay output even if the user is viewing another module.
+[[nodiscard]] bool IsHostOpen() noexcept;
+[[nodiscard]] bool IsHostInputCaptureActive() noexcept;
 
 namespace Testing {
 
