@@ -60,13 +60,15 @@ void Update(const ThrottleController::Config& cfg,
             bool hasSeparateAimInput,
             bool hasSeparateAimAxes,
             bool hasDigitalAimButtons,
+            bool sourceObjectAimAllowed,
             float dt)
 {
     // ---- HOSAM Alignment Assist ----
     // Observes the game's native mouse accumulator. When the mouse has been
     // idle for the configured duration and within the alignment radius, apply
     // exponential decay toward (0,0).
-    if (cfg.bHOSAMMode && cfg.bAlignmentAssist && ThrottleHook::IsSourcePtrValid()) {
+    if (!ThrottleHook::ExternalMouseSteeringOwnerActive() &&
+        cfg.bHOSAMMode && cfg.bAlignmentAssist && ThrottleHook::IsSourcePtrValid()) {
         static float s_prevAccumYaw   = 0.0f;
         static float s_prevAccumPitch = 0.0f;
         static int   s_alignIdleFrames = 0;
@@ -102,9 +104,10 @@ void Update(const ThrottleController::Config& cfg,
     }
 
     // ---- Source-object reticle injection ----
-    if (!cfg.bSourceObjectAim || cfg.bHOSAMMode) {
+    if (!sourceObjectAimAllowed || !cfg.bSourceObjectAim || cfg.bHOSAMMode) {
         // HOSAM: mouse owns steering — disable the aim system entirely so the
-        // chase blender doesn't fight the native mouse accumulator.
+        // chase blender doesn't fight the native mouse accumulator. The same
+        // release applies to the automatic all-unbound vanilla-mouse fallback.
         ThrottleHook::SetSourceObjectAim(0.0f, 0.0f, false);
         return;
     }

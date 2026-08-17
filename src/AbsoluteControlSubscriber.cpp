@@ -31,6 +31,7 @@ std::mutex g_registrationMutex;
 
 std::atomic_bool g_throttleHookInstalled{};
 std::atomic_bool g_nativeControlsInitialized{};
+std::atomic_bool g_externalMouseSteeringOwner{};
 std::atomic_bool g_controllerStarted{};
 std::atomic_bool g_legacyWorkbenchConfigured{};
 std::atomic_bool g_legacyWorkbenchInstalled{};
@@ -338,8 +339,9 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
             g_legacyWorkbenchInstalled.load(std::memory_order_acquire) ?
                 "available" : "unavailable or disabled"));
     } else if (id == "diagnostics-coordination") {
-        output = StringValue(
-            "Standalone HOTAS seam ownership; optional Absolute Flight Runtime is deferred.");
+        output = StringValue(g_externalMouseSteeringOwner.load(std::memory_order_acquire) ?
+            "AbsoluteZero compatibility active: native mouse owns pitch/yaw; HOTAS retains roll, strafe, and the shared writer hook." :
+            "Standalone HOTAS steering ownership; optional Absolute Flight Runtime is deferred.");
     } else {
         return Result::NotFound;
     }
@@ -624,6 +626,11 @@ void SetRuntimeStatus(const RuntimeStatus& status) noexcept
         status.legacyWorkbenchInstalled, std::memory_order_release);
 }
 
+void SetExternalMouseSteeringOwner(bool active) noexcept
+{
+    g_externalMouseSteeringOwner.store(active, std::memory_order_release);
+}
+
 AbsoluteControlPanelApi::Result RegisterDiscoveredHost() noexcept
 {
     return Testing::RegisterWithResolver(&ResolveLoadedHost);
@@ -785,6 +792,7 @@ void Reset() noexcept
         g_terminalRejection.store(false, std::memory_order_release);
         g_forceReadException.store(false, std::memory_order_release);
         SetRuntimeStatus({});
+        SetExternalMouseSteeringOwner(false);
     }
     {
         std::scoped_lock lock(g_settingsMutex);

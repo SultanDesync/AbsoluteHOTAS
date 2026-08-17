@@ -15,12 +15,15 @@ namespace AimController {
 // hasSeparateAimInput  — true if independent analog or digital aim axes are bound
 // hasSeparateAimAxes   — true if analog aim axes specifically are bound
 // hasDigitalAimButtons — true if any directional digital aim button is bound
+// sourceObjectAimAllowed — false when binding policy gives vanilla mouse
+//                          steering exclusive ownership of the accumulator
 // dt         — actual frame delta time in seconds
 void Update(const ThrottleController::Config& cfg,
             float yaw, float pitch,
             bool hasSeparateAimInput,
             bool hasSeparateAimAxes,
             bool hasDigitalAimButtons,
+            bool sourceObjectAimAllowed,
             float dt);
 
 } // namespace AimController

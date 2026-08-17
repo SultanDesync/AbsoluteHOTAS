@@ -18,6 +18,13 @@ public:
     // handler object gates before treating it as live.
     static uintptr_t GetWriterClusterPtr();
 
+    // AbsoluteZero compatibility: HOTAS remains the sole patch owner for the
+    // shared rotational writer, but permanently releases the pitch/yaw lanes
+    // and exposes bounded accumulator operations to AbsoluteZero.
+    static void SetExternalMouseSteeringOwner(bool active);
+    static bool ExternalMouseSteeringOwnerActive();
+    static bool RotationalWriterHookInstalled();
+
     // Get all captured candidate pointers
     static constexpr int MAX_CANDIDATES = 2048;
     static uintptr_t GetCandidate(int index);

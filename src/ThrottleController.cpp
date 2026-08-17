@@ -6,6 +6,7 @@
 #include "ThrottleHook.h"
 #include "ShipOutput.h"
 #include "MacroEngine.h"
+#include "MouseSteeringPolicy.h"
 #include "SignalHunter.h"
 #include "AimController.h"
 #include "PilotState.h"
@@ -1328,9 +1329,14 @@ void ThrottleController::ControlLoop() {
             bool hasSeparateAimInput = hasSeparateAimAxes || hasDigitalAimButtons;
             if (s_aimModeOverride) hasSeparateAimInput = false;
 
-            bool suppressForHOSAM      = s_config.bHOSAMMode;
-            bool suppressClusterForAim = suppressForHOSAM ||
-                (s_config.bSourceObjectAim && !hasSeparateAimInput);
+            const bool pitchBound = s_config.pitchAxis.IsValid() &&
+                s_config.pitchAxis.value > 0;
+            const bool yawBound = s_config.yawAxis.IsValid() &&
+                s_config.yawAxis.value > 0;
+            const auto mousePolicy = MouseSteeringPolicy::Decide(
+                pitchBound, yawBound, hasSeparateAimInput,
+                s_config.bSourceObjectAim, s_config.bHOSAMMode,
+                ThrottleHook::ExternalMouseSteeringOwnerActive());
 
             // ---- Turn Assist Button State ----
             // Compute whether turn assist is active this frame.
@@ -1369,10 +1375,12 @@ void ThrottleController::ControlLoop() {
             // the pilot gate — no separate release logic. See profile-switching.md.
             if (flightInjectionAllowed) {
                 injectionWasAllowed = true;
-                SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt, reverseHeld, suppressClusterForAim,
+                SignalHunter::Inject(throttle, pitch, yaw, roll, strafeX, strafeY, dt,
+                                     reverseHeld, mousePolicy.releasePitchYawGates,
                                      strafeLatActive, strafeVertActive, cruiseOverride, s_cruiseAssistTarget);
                 AimController::Update(s_config, yaw, pitch,
-                    hasSeparateAimInput, hasSeparateAimAxes, hasDigitalAimButtons, dt);
+                    hasSeparateAimInput, hasSeparateAimAxes, hasDigitalAimButtons,
+                    mousePolicy.allowSourceObjectAim, dt);
             } else if (injectionWasAllowed) {
                 // Transition to parked: stop axis/head injection, keep discrete bindings live.
                 SignalHunter::SuspendInjection();

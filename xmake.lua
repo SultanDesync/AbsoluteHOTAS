@@ -197,3 +197,13 @@ target("menu_control_reuse_test")
 
     add_includedirs("include")
     add_files("tests/menu_control_reuse_test.cpp")
+
+-- Header-only ownership regression for the all-unbound vanilla-mouse fallback.
+-- Mixed HOSAM/manual-aim arbitration is intentionally outside this policy.
+target("mouse_steering_policy_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("all_unbound_fallback")
+
+    add_includedirs("include")
+    add_files("tests/mouse_steering_policy_test.cpp")

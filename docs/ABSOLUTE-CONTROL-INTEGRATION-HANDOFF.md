@@ -68,16 +68,17 @@ The target feature ownership is:
 | Concern | Product owner |
 |---|---|
 | DirectInput devices, HOTAS/HOSAS axes, throttle, buttons, profiles, macros | AbsoluteHOTAS |
-| Bound pitch/yaw steering and independent reticle/aim routing | AbsoluteHOTAS |
-| HOSAM mode that releases pitch/yaw steering to Starfield's mouse path | AbsoluteHOTAS |
+| Bound pitch/yaw steering and independent reticle/aim routing when AbsoluteZero is absent | AbsoluteHOTAS |
+| Installed-suite declaration that native mouse owns pitch/yaw, plus idle centering policy | AbsoluteZero |
 | OpenTrack input, pose shaping, camera composition, recenter/toggle | Absolute Head Tracking |
 | Idle mouse-centering policy, radius, delay, decay, and suppression | AbsoluteZero |
 | Shared lane arbitration when several flight modules are installed | Optional Absolute Flight Runtime |
 | Module pages, transactions, capture presentation, and diagnostics | Absolute Control |
 
-AbsoluteZero is a conditional modifier, not the owner of mouse input. It may center the source only
-when runtime arbitration declares native mouse steering active, normally HOSAM or mouse-only flight.
-Bound HOTAS pitch/yaw claims steering; independent aiming remains a separate HOTAS-managed lane.
+AbsoluteZero is a conditional modifier, not the owner of raw mouse input. Its installed presence is
+the suite declaration that native mouse steering owns pitch/yaw: HOTAS releases both writer gates,
+its source-aim path, and its embedded alignment assist. HOTAS retains roll/strafe and the remaining
+flight lanes. Standalone HOTAS pitch/yaw and independent aiming behavior remain unchanged.
 Menu/capture suspension parks affected lanes. No raw Starfield pointer crosses a suite ABI.
 
 Until extraction lands, the embedded HOTAS workbench and runtime still contain transitional Head
@@ -372,6 +373,25 @@ Exit: one real setting round-trips in Control and the legacy overlay sees the sa
 
 Exit satisfied on 2026-08-17. Applied values survived reopening and the normal HOTAS reload path;
 all exposed H1 functions passed the supervised smoke test.
+
+### Daughter-module extraction checkpoint
+
+Implementation checkpoint: completed on 2026-08-17 for the frontend/configuration side. The
+standalone Absolute Head Tracking and AbsoluteZero DLLs both register through the current product
+ABI and render as isolated suite modules in Absolute Control. Head Tracking's General, Axes, and
+Bindings pages passed change, discard, save, stale-setting, and binding smoke tests. AbsoluteZero's
+Mouse Alignment page passed its supervised menu/runtime smoke test with product keyboard capture,
+provider-owned editing, and the current ResearchDev lifecycle. A combined run enumerated Head
+Tracking, Absolute Power, and AbsoluteZero without module-list conflicts.
+
+The current compatibility slice now gates HOTAS's legacy alignment implementation whenever
+AbsoluteZero is installed. HOTAS remains the single rotational-writer patch owner, releases its
+pitch/yaw and source-aim claims, and exposes size-versioned bounded accumulator operations;
+AbsoluteZero installs no second trampoline and retains its own centering policy/configuration.
+Build and contract tests pass, and the paired runtime smoke confirmed that AbsoluteZero owns mouse
+auto-centering while HOTAS retains the shared hook and releases its mouse pitch/yaw claims.
+Absolute Head Tracking remains a separate extraction/coexistence task because HOTAS still embeds
+its legacy head-tracking implementation. This is not an Absolute Control registration defect.
 
 ### H2 — Selected profiles and layers
 

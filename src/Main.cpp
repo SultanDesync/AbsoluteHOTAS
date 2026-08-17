@@ -11,6 +11,14 @@
 #include "SFSEInterface.h"
 #include <windows.h>
 #include <format>
+#include <filesystem>
+
+static bool AbsoluteZeroPresent() {
+    std::error_code error;
+    return GetModuleHandleW(L"AbsoluteZero.dll") != nullptr ||
+           std::filesystem::exists(
+               RuntimePaths::PluginDirectory() / L"AbsoluteZero.dll", error);
+}
 
 static void MainLog(const std::string& msg) {
     RuntimePaths::Log("[Main]", msg);
@@ -134,6 +142,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
     }
 
     // Phase 1: AOB scan + trampoline hook to capture ThrottleInterface pointer
+    const bool absoluteZeroPresent = AbsoluteZeroPresent();
+    ThrottleHook::SetExternalMouseSteeringOwner(absoluteZeroPresent);
+    AbsoluteControlSubscriber::SetExternalMouseSteeringOwner(absoluteZeroPresent);
+    if (absoluteZeroPresent) {
+        MainLog("AbsoluteZero detected: it owns mouse pitch/yaw; HOTAS source aim, "
+                "alignment assist, and pitch/yaw writer gates are released.");
+    }
     bool hookOk = ThrottleHook::Install();
     if (!hookOk) {
         MainLog("WARNING: Hook installation failed. Throttle injection disabled.");

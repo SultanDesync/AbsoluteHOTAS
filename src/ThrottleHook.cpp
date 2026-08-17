@@ -32,6 +32,8 @@ static volatile uint32_t g_rollBits = 0;
 static volatile uint32_t g_vertStrafeBits = 0;
 static volatile uint32_t g_yawBits = 0;
 static volatile uint32_t g_pitchBits = 0;
+static std::atomic<bool> g_externalMouseSteeringOwner{false};
+static std::atomic<bool> g_rotationalWriterHookInstalled{false};
 
 
 
@@ -489,6 +491,23 @@ uintptr_t ThrottleHook::GetWriterClusterPtr() {
     return (uintptr_t)g_capturedWriterCluster;
 }
 
+void ThrottleHook::SetExternalMouseSteeringOwner(bool active) {
+    g_externalMouseSteeringOwner.store(active, std::memory_order_release);
+    if (active) {
+        g_yawOverrideEnabled = 0;
+        g_pitchOverrideEnabled = 0;
+        g_sourceAimEnabled = 0;
+    }
+}
+
+bool ThrottleHook::ExternalMouseSteeringOwnerActive() {
+    return g_externalMouseSteeringOwner.load(std::memory_order_acquire);
+}
+
+bool ThrottleHook::RotationalWriterHookInstalled() {
+    return g_rotationalWriterHookInstalled.load(std::memory_order_acquire);
+}
+
 void ThrottleHook::Uninstall() {
     if (g_hookRegistry.empty()) return;
 
@@ -541,8 +560,9 @@ void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, 
     g_pitchBits = FloatToBits(pitch);
     g_rotOverrideEnabled = enabled ? 1 : 0;
     g_rollOverrideEnabled = (enabled && lateralEnabled) ? 1 : 0;
-    g_yawOverrideEnabled = (enabled && yawEnabled) ? 1 : 0;
-    g_pitchOverrideEnabled = (enabled && pitchEnabled) ? 1 : 0;
+    const bool externalMouseOwner = ExternalMouseSteeringOwnerActive();
+    g_yawOverrideEnabled = (enabled && yawEnabled && !externalMouseOwner) ? 1 : 0;
+    g_pitchOverrideEnabled = (enabled && pitchEnabled && !externalMouseOwner) ? 1 : 0;
 
     // Vertical strafe lane: skip if reverse override owns it.
     if (!g_reverseOwnsVertStrafe) {
@@ -553,6 +573,9 @@ void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, 
 
 // ---- Source-object aim injection ----
 void ThrottleHook::SetSourceObjectAim(float yaw, float pitch, bool enabled) {
+    if (ExternalMouseSteeringOwnerActive()) {
+        enabled = false;
+    }
     g_sourceAimYawBits   = FloatToBits(yaw);
     g_sourceAimPitchBits = FloatToBits(pitch);
     g_sourceAimEnabled   = enabled ? 1 : 0;
@@ -669,7 +692,9 @@ bool ThrottleHook::Install() {
         return false;
     }
 
-    InstallRotationalGates(textStart, textSize, moduleBase);
+    g_rotationalWriterHookInstalled.store(
+        InstallRotationalGates(textStart, textSize, moduleBase),
+        std::memory_order_release);
 
 
     // ======================================================
