@@ -99,12 +99,30 @@ static void TestForeignSectionsSurvive() {
     CHECK(std::strcmp(Val(out, "Macro:OnFoot", "iButton"), "Stick@9") == 0);  // untouched section survives
 }
 
+static void TestInstallationMethodsNeverEnterOverlay() {
+    std::printf("InstallationMethodsNeverEnterOverlay\n");
+    CSimpleIniA base; base.SetUnicode(false); MakeBase(base);
+    CSimpleIniA eff;  eff.SetUnicode(false);  MakeBase(eff);
+    eff.SetValue("ShipControlMethods", "FireBoosters", "keyboard");
+
+    CSimpleIniA out; out.SetUnicode(false);
+    out.SetValue("ShipControlMethods", "GetUp", "keyboard");
+    out.SetValue("Injection", "bEnableInjection", "false");
+
+    ProfileOverlay::ComputeDiff(eff, base, out);
+
+    CHECK(!Has(out, "ShipControlMethods", "FireBoosters"));
+    CHECK(!Has(out, "ShipControlMethods", "GetUp"));
+    CHECK(!Has(out, "Injection", "bEnableInjection"));
+}
+
 int main() {
     std::printf("ProfileOverlay tests\n");
     TestOnlyDifferencesWritten();
     TestIdenticalProducesEmptyOverlay();
     TestRevertRemovesStaleOverride();
     TestForeignSectionsSurvive();
+    TestInstallationMethodsNeverEnterOverlay();
 
     if (g_failures == 0) { std::printf("ALL PASS\n"); return 0; }
     std::printf("%d FAILURE(S)\n", g_failures);

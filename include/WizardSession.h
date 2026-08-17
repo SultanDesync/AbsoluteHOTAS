@@ -8,7 +8,7 @@
 
 namespace WizardSession {
 
-enum class Page { Bind, Tune, Advanced };
+enum class Page { Bind, Tune, Advanced, Power };
 enum class BindPage { FlightAxes, ShipButtons };
 enum class TunePage { Aiming, CameraLook, GamepadThrottle };
 enum class AdvancedPage { Macros, PluginControls, Devices };
@@ -60,6 +60,7 @@ bool HasPendingProfileSwitch();
 const std::string& PendingProfile();
 bool ResolveProfileSwitch(ProfileSwitchChoice choice);
 bool RequestClose();
+void RequireCloseResolution(std::string message);
 bool HasPendingClose();
 void CancelPendingClose();
 bool DiscardChanges();

@@ -485,6 +485,10 @@ uintptr_t ThrottleHook::GetSourceBasePtr() {
     return (uintptr_t)g_capturedSourceR13;
 }
 
+uintptr_t ThrottleHook::GetWriterClusterPtr() {
+    return (uintptr_t)g_capturedWriterCluster;
+}
+
 void ThrottleHook::Uninstall() {
     if (g_hookRegistry.empty()) return;
 

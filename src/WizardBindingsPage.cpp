@@ -5,6 +5,8 @@
 #include "WizardConfig.h"
 #include "WizardDefs.h"
 #include "WizardSession.h"
+#include "ShipActionCatalog.h"
+#include "ShipOutput.h"
 
 #include <imgui.h>
 
@@ -12,10 +14,10 @@ namespace WizardUI {
 
 
 static void DrawCustomKeyBindings(WizardState& s) {
-    if (!ImGui::CollapsingHeader("Custom Key Bindings", ImGuiTreeNodeFlags_None)) return;
+    if (!ImGui::CollapsingHeader("Keyboard & Mouse Shortcuts", ImGuiTreeNodeFlags_None)) return;
 
     ImGui::Indent(12);
-    ImGui::TextWrapped("Bind controller buttons to raw keyboard/mouse outputs for menus or actions outside the named Ship Actions list. Raw custom outputs are not reconciled automatically; bind the same key or mouse button to the desired action in Starfield's Controls menu. For chords or sequences, use Advanced > Macros.");
+    ImGui::TextWrapped("Send a keyboard key or mouse button from a controller button. Use these for commands that do not have a named control above. For chords or sequences, use Advanced > Macros.");
     if (ImGui::SmallButton("Build a chord or sequence..."))
         WizardSession::Navigate(WizardSession::Route::AdvancedMacros);
     ImGui::Spacing();
@@ -83,71 +85,150 @@ static void DrawCustomKeyBindings(WizardState& s) {
     ImGui::Unindent(12);
 }
 
-void DrawButtonsTab(WizardState& s) {
-    if (ImGui::CollapsingHeader("Ship Actions & Context Navigation", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(12);
-        ImGui::TextWrapped("Bind physical controller buttons to Starfield ship actions. Select, Back, and the four Navigation directions emit the vanilla E, Esc, and arrow keys so the same bindings work in menus, dialogue, power management, and targeting. Other rows use native ship-control paths.");
-        ImGui::Spacing();
-        for (int i = 0; i < (int)s.shipActionSlots.size(); i++) {
-            ImGui::PushID(3000 + i);
-            DrawBindingRow(s.shipActionSlots[i].label.c_str(), s.shipActionSlots[i].binding, CaptureSlot::kShipActionBase + i, false);
-            if (i == 0) {
+static std::string OutputDisplay(const ShipOutput& output) {
+    if (output.kind == ShipOutputKind::Mouse) {
+        switch (output.code) {
+            case 1: return "Left Mouse";
+            case 2: return "Right Mouse";
+            case 3: return "Middle Mouse";
+            case 4: return "Mouse Button 4";
+            default: return "Mouse";
+        }
+    }
+    if (output.kind != ShipOutputKind::Keyboard || output.code == 0) return "Unbound";
+    char name[64]{};
+    LONG keyData = static_cast<LONG>(output.code) << 16;
+    if (output.extended) keyData |= 1 << 24;
+    if (GetKeyNameTextA(keyData, name, static_cast<int>(std::size(name))) > 0)
+        return name;
+    char fallback[16]{};
+    std::snprintf(fallback, sizeof(fallback), "Key 0x%02X", output.code);
+    return fallback;
+}
+
+static const char* ResolutionSourceLabel(KeyboardResolutionSource source) {
+    switch (source) {
+        case KeyboardResolutionSource::FixedContext: return "fixed context input";
+        case KeyboardResolutionSource::ControlMapCustom: return "Starfield Controls binding";
+        case KeyboardResolutionSource::LegacyManualOverride: return "manual compatibility override";
+        case KeyboardResolutionSource::VanillaFallback: return "vanilla binding";
+        case KeyboardResolutionSource::NotApplicable: return "";
+    }
+    return "";
+}
+
+static void DrawRouteSummary(const ShipActionRouteInfo& route) {
+    ImGui::Indent(12.0f);
+    switch (route.method) {
+        case ShipControlMethod::Direct:
+            ImGui::TextColored(ImVec4(0.45f, 0.8f, 1.0f, 1.0f), "Direct");
+            if (route.availability == ShipActionAvailability::UnavailableForBuild) {
                 ImGui::SameLine();
-                ImGui::Checkbox("Hold for Boost", &s.holdForBoost);
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Pause throttle injection while boost is held.\nOn release: set throttle to max and cancel boost.");
-                }
+                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
+                                   "Unavailable for this Starfield build");
+            } else if (route.availability == ShipActionAvailability::SupportedWaitingForContext) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Waiting for a live ship context");
+            } else if (route.availability == ShipActionAvailability::UnavailableInContext) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Inactive in the current context");
             }
-            ImGui::PopID();
-        }
-        ImGui::Unindent(12);
+            break;
+        case ShipControlMethod::Context:
+            ImGui::TextColored(ImVec4(0.7f, 0.75f, 1.0f, 1.0f), "Context");
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", OutputDisplay(route.resolvedKeyboardOutput).c_str());
+            break;
+        case ShipControlMethod::KeyboardCompatibility:
+            ImGui::TextColored(ImVec4(0.8f, 0.7f, 1.0f, 1.0f), "Keyboard compatibility");
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s · %s",
+                OutputDisplay(route.resolvedKeyboardOutput).c_str(),
+                ResolutionSourceLabel(route.keyboardSource));
+            break;
     }
+    ImGui::Unindent(12.0f);
+}
+
+static void DrawShipActionRow(WizardState& s, int index) {
+    if (index < 0 || index >= static_cast<int>(s.shipActionSlots.size()) ||
+        index >= static_cast<int>(kShipActionCatalog.size())) return;
+    const auto& definition = kShipActionCatalog[index];
+    auto& slot = s.shipActionSlots[index];
+    ImGui::PushID(3000 + index);
+    DrawBindingRow(definition.displayLabel.data(), slot.binding,
+                   CaptureSlot::kShipActionBase + index, false);
+    DrawRouteSummary(ShipOutputSystem::GetShipActionRouteInfo(definition.actionId));
+    if (definition.actionId == "FireBoosters") {
+        ImGui::Indent(12.0f);
+        ImGui::Checkbox("Let boost temporarily take throttle authority", &s.holdForBoost);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Pause throttle injection while boost is held, then resume at maximum throttle.");
+        ImGui::Unindent(12.0f);
+    }
+    ImGui::PopID();
+}
+
+static void DrawActionGroup(WizardState& s, ShipActionGroup group,
+                            const char* label = nullptr) {
+    if (label) ImGui::TextDisabled("%s", label);
+    for (int index = 0; index < static_cast<int>(kShipActionCatalog.size()); ++index)
+        if (kShipActionCatalog[index].group == group) DrawShipActionRow(s, index);
+}
+
+static void DrawMenuControlReuse(WizardState& s) {
+    if (!ImGui::TreeNodeEx("Reuse flight controls for menus and targeting",
+                          ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::TextWrapped("Optionally reuse familiar flight controls for navigation. Inputs must return to neutral after a context opens before they can act.");
+    ImGui::Checkbox("Pitch axis navigates Up / Down", &s.usePitchAxisForMenu);
+    ImGui::Checkbox("Yaw axis navigates Left / Right", &s.useYawAxisForMenu);
+    ImGui::Checkbox("Primary Weapon acts as Select / Accept", &s.usePrimaryWeaponForMenuSelect);
+
+    if (s.usePitchAxisForMenu || s.useYawAxisForMenu) {
+        if (s.usePitchAxisForMenu)
+            ImGui::Checkbox("Invert vertical menu navigation", &s.invertMenuVertical);
+        if (s.useYawAxisForMenu)
+            ImGui::Checkbox("Invert horizontal menu navigation", &s.invertMenuHorizontal);
+        float engagePercent = s.menuAxisEngageThreshold * 100.0f;
+        float releasePercent = s.menuAxisReleaseThreshold * 100.0f;
+        if (ImGui::SliderFloat("Axis actuation", &engagePercent, 35.0f, 95.0f, "%.0f%%"))
+            s.menuAxisEngageThreshold = engagePercent / 100.0f;
+        if (ImGui::SliderFloat("Axis release", &releasePercent, 5.0f, 80.0f, "%.0f%%"))
+            s.menuAxisReleaseThreshold = releasePercent / 100.0f;
+        s.menuAxisReleaseThreshold = std::clamp(
+            s.menuAxisReleaseThreshold, 0.05f, s.menuAxisEngageThreshold - 0.05f);
+    }
+    ImGui::TreePop();
+}
+
+void DrawButtonsTab(WizardState& s) {
+    ImGui::SeparatorText("Direct Ship Controls");
+    ImGui::TextWrapped("These controls call Starfield's ship functions directly and are active only in the appropriate ship context.");
+    DrawActionGroup(s, ShipActionGroup::WeaponsCombat, "Weapons & Combat");
+    ImGui::Spacing();
+    DrawActionGroup(s, ShipActionGroup::FlightSystems, "Flight Systems");
+    ImGui::Spacing();
+    DrawActionGroup(s, ShipActionGroup::Camera, "Camera");
 
     ImGui::Spacing();
-
-    if (ImGui::CollapsingHeader("Menu Control Reuse", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(12);
-        ImGui::TextWrapped("Optionally reuse familiar flight controls for context navigation. Pitch and Primary Weapon act in menus; Yaw acts in menus and the Targeting Mode component selector. Each option is independent and saved with the current profile. Inputs must return to neutral or released after a context opens before they can act.");
-        ImGui::Spacing();
-        ImGui::Checkbox("Pitch axis navigates Up / Down", &s.usePitchAxisForMenu);
-        ImGui::Checkbox("Yaw axis navigates Left / Right (menus + targeting)", &s.useYawAxisForMenu);
-        ImGui::Checkbox("Primary Weapon button acts as Select / Accept", &s.usePrimaryWeaponForMenuSelect);
-
-        if (s.usePitchAxisForMenu || s.useYawAxisForMenu) {
-            ImGui::Spacing();
-            if (s.usePitchAxisForMenu)
-                ImGui::Checkbox("Invert vertical menu navigation", &s.invertMenuVertical);
-            if (s.useYawAxisForMenu)
-                ImGui::Checkbox("Invert horizontal menu navigation", &s.invertMenuHorizontal);
-
-            float engagePercent = s.menuAxisEngageThreshold * 100.0f;
-            float releasePercent = s.menuAxisReleaseThreshold * 100.0f;
-            if (ImGui::SliderFloat("Axis actuation", &engagePercent, 35.0f, 95.0f, "%.0f%%"))
-                s.menuAxisEngageThreshold = engagePercent / 100.0f;
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Deflection required to begin holding a navigation direction.");
-            if (ImGui::SliderFloat("Axis release", &releasePercent, 5.0f, 80.0f, "%.0f%%"))
-                s.menuAxisReleaseThreshold = releasePercent / 100.0f;
-            s.menuAxisReleaseThreshold = std::clamp(
-                s.menuAxisReleaseThreshold, 0.05f, s.menuAxisEngageThreshold - 0.05f);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Return inside this range to release the arrow key. Keeping it below actuation prevents chatter.");
-        }
-        ImGui::TextDisabled("Uses fixed vanilla arrows and E through the same ref-counted SendInput path as universal context and custom raw bindings.");
-        ImGui::Unindent(12);
-    }
+    ImGui::SeparatorText("Navigation & Context Controls");
+    ImGui::TextWrapped("These controls work across flight, targeting, menus, and dialogue using Starfield's standard Select, Back, and navigation inputs.");
+    DrawActionGroup(s, ShipActionGroup::NavigationContext);
+    DrawMenuControlReuse(s);
 
     ImGui::Spacing();
+    ImGui::SeparatorText("Cockpit & Docking Shortcuts");
+    ImGui::TextWrapped("These shortcuts use the most reliable route for the corresponding cockpit action. Keyboard compatibility follows your current Starfield Controls binding.");
+    DrawActionGroup(s, ShipActionGroup::CockpitDocking);
 
-    if (ImGui::CollapsingHeader("Flight Assist", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(12);
-        for (int i = 0; i < kNumControlExtensionSlots; ++i) {
-            ImGui::PushID(6000 + i);
-            DrawBindingRow(kControlExtensionSlots[i].label, s.controlExtensionBindings[i],
-                           CaptureSlot::kControlExtensionBase + i, false);
-            ImGui::PopID();
-        }
-        ImGui::Unindent(12);
+    ImGui::Spacing();
+    ImGui::SeparatorText("Flight Assist");
+    ImGui::TextWrapped("These commands control AbsoluteHOTAS throttle authority rather than sending a Starfield key.");
+    for (int i = 0; i < kNumControlExtensionSlots; ++i) {
+        ImGui::PushID(6000 + i);
+        DrawBindingRow(kControlExtensionSlots[i].label, s.controlExtensionBindings[i],
+                       CaptureSlot::kControlExtensionBase + i, false);
+        ImGui::PopID();
     }
 
     ImGui::Spacing();

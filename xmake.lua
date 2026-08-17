@@ -140,6 +140,13 @@ target("binding_ref_test")
     add_includedirs("include")
     add_files("tests/binding_ref_test.cpp")
 
+target("absolute_power_api_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("power_abi_tail")
+    add_includedirs("include")
+    add_files("tests/absolute_power_api_test.cpp")
+
 -- Header-only pilot-context policy tests. These lock the distinction between
 -- piloting, on-foot, and suspended/menu states without loading the game runtime.
 target("pilot_state_test")
@@ -159,6 +166,17 @@ target("universal_context_input_test")
 
     add_includedirs("include")
     add_files("tests/universal_context_input_test.cpp")
+
+-- Header-only ship-control catalog and routing-policy tests. These lock the
+-- reviewed defaults, override eligibility, no-silent-fallback rule, and
+-- diagnostic precedence without loading the game runtime.
+target("ship_action_catalog_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("routing_policy")
+
+    add_includedirs("include")
+    add_files("tests/ship_action_catalog_test.cpp")
 
 -- Header-only safety-policy tests for optional axis/button reuse in menus.
 target("menu_control_reuse_test")

@@ -203,7 +203,7 @@ void DrawProfileContextBar(bool dirty) {
     const auto& profiles = WizardSession::Profiles();
     DrawPendingProfileSwitchModal(visibleName);
 
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing:");
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Editing bindings for:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(std::min(280.0f, ImGui::GetContentRegionAvail().x * 0.45f));
     if (ImGui::BeginCombo("##editprofile", visibleName.c_str())) {
@@ -215,10 +215,64 @@ void DrawProfileContextBar(bool dirty) {
         ImGui::EndCombo();
     }
     ImGui::SameLine();
+    ImGui::BeginDisabled(dirty);
+    if (ImGui::Button("+ Add Binding Layer")) ImGui::OpenPopup("Add Binding Layer");
+    ImGui::EndDisabled();
+    if (dirty && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Save or discard the current edits before adding a layer.");
+    ImGui::SameLine();
     if (dirty)
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Unsaved changes");
     else
         ImGui::TextDisabled("All changes saved");
+
+    static char newLayerName[64] = "";
+    static int activationMode = 0;
+    if (ImGui::BeginPopupModal("Add Binding Layer", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Create an alternate set of bindings, then choose the button that activates it.");
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(300.0f);
+        ImGui::InputTextWithHint("Layer name", "Pinky Shift", newLayerName,
+                                 sizeof(newLayerName));
+        const char* modes[] = { "While the modifier is held", "Press to toggle" };
+        ImGui::SetNextItemWidth(300.0f);
+        ImGui::Combo("Activation", &activationMode, modes, 2);
+        ImGui::Spacing();
+
+        const bool hasName = newLayerName[0] != '\0';
+        ImGui::BeginDisabled(!hasName);
+        if (ImGui::Button("Create and bind modifier", ImVec2(190.0f, 0.0f))) {
+            const std::string name = newLayerName;
+            std::string err;
+            if (WizardConfig::CreateOverlayProfile(name, err)) {
+                WizardSession::RefreshProfiles();
+                if (LoadEditorProfile(name)) {
+                    s_profileCaptureName = name;
+                    s_profileCaptureMode = activationMode == 0 ? "momentary" : "toggle";
+                    s_profileCapturePending = true;
+                    WizardSession::BeginButtonCapture(
+                        0, CaptureSlot::kProfileTrigger, "Binding-layer modifier");
+                    newLayerName[0] = '\0';
+                    activationMode = 0;
+                    SetStatus("Layer created. Press the modifier button now.");
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    SetStatus("Layer was created but could not be opened for editing.", true);
+                }
+            } else {
+                SetStatus(err, true);
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f))) {
+            newLayerName[0] = '\0';
+            activationMode = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void DrawProfileManagementPanel(bool dirty) {

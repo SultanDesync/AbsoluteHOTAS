@@ -34,9 +34,9 @@ struct Macro {
 
 namespace MacroEngine {
 
-// Parse every [Macro:<name>] section. Named action ids resolve to native ship
-// controls or the six universal context inputs; explicit key:/mouse: targets
-// resolve to raw outputs.
+// Parse every [Macro:<name>] section. Named action ids consume the same selected
+// Direct, Context, or Keyboard compatibility method as physical bindings;
+// explicit key:/mouse: targets remain raw outputs.
 void LoadMacros(CSimpleIniA& ini);
 
 // Mutable access to the loaded macros so the control loop can resolve each macro's

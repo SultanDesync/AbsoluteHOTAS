@@ -153,6 +153,7 @@ bool SaveProfileOverlay(const std::string& name, std::string& err) {
         SerializeUserOwnedState(State(), prof);
         SerializeMacros(State(), prof);
         prof.Delete("Profiles", nullptr);
+        prof.Delete("ShipControlMethods", nullptr);
         prof.SetValue("Profile", "sName", name.c_str());
         prof.SetValue("Profile", "sKind", "full");
         prof.SetLongValue("Profile", "iSequence", sequence);
@@ -461,6 +462,7 @@ bool ExportProfile(const std::string& name, std::string& err) {
     prof.LoadFile(customPath.string().c_str());
     prof.Delete("Profiles", nullptr);
     prof.Delete("Meta", nullptr);
+    prof.Delete("ShipControlMethods", nullptr);
 
     prof.SetValue("Profile", "sName", clean.c_str());
     prof.SetValue("Profile", "sKind", "full");
@@ -530,6 +532,7 @@ bool ImportProfile(const std::string& name, std::string& err) {
         const char* secName = sec.pItem;
         if (_stricmp(secName, "Profile") == 0) continue;
         if (_stricmp(secName, "Profiles") == 0) continue;
+        if (_stricmp(secName, "ShipControlMethods") == 0) continue;
         CSimpleIniA::TNamesDepend keys;
         prof.GetAllKeys(secName, keys);
         for (const auto& k : keys) {
@@ -543,6 +546,12 @@ bool ImportProfile(const std::string& name, std::string& err) {
     for (const auto& key : routeKeys) {
         const char* value = current.GetValue("Profiles", key.pItem, nullptr);
         if (value) custom.SetValue("Profiles", key.pItem, value);
+    }
+    CSimpleIniA::TNamesDepend methodKeys;
+    current.GetAllKeys("ShipControlMethods", methodKeys);
+    for (const auto& key : methodKeys) {
+        const char* value = current.GetValue("ShipControlMethods", key.pItem, nullptr);
+        if (value) custom.SetValue("ShipControlMethods", key.pItem, value);
     }
 
     // Full replace so no stale key or macro survives the swap. SaveFile overwrites

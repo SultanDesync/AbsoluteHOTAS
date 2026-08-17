@@ -159,6 +159,32 @@ void ArmForReacquire() {
 void Tick(int candCount, uint64_t iter) {
     const auto& cfg = ThrottleController::GetConfig();
 
+    // The validated rotational writer gives us the flight-control cluster in
+    // RAX directly. Prefer it over the historical broad RDI scan, but only
+    // accept it after NativeShipControl proves the selected flight-handler
+    // layout and exact method table. This is also evaluated after a heuristic
+    // lock so a newly observed ship cluster can replace a stale one.
+    const uintptr_t writerCluster = ThrottleHook::GetWriterClusterPtr();
+    if (writerCluster && writerCluster != s_activeThrottlePtr) {
+        NativeShipControl::UpdateCluster(writerCluster);
+        if (NativeShipControl::ShipHandlerReady()) {
+            char buf[160];
+            sprintf_s(buf,
+                "Control cluster located via validated rotational writer at 0x%llX",
+                (unsigned long long)writerCluster);
+            SHLog(buf);
+            s_activeCandidateIndex     = -1;
+            s_activeThrottlePtr        = writerCluster;
+            s_discoveryLocked          = true;
+            s_discoveryArmed           = false;
+            s_reacquireWatchdogEnabled = true;
+            s_plausibilityFailCount    = 0;
+            ThrottleHook::SetCaptureEnabled(false);
+            ThrottleHook::SetSilenceEnabled(false);
+            ThrottleHook::SetSilence6CEnabled(false);
+        }
+    }
+
     // SIGNAL HUNTER: Magic Number Pulse detection
     if (s_discoveryArmed && !s_discoveryLocked && candCount > 0) {
         // Periodic candidate-buffer flush for noise reduction.

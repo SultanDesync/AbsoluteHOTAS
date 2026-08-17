@@ -1,16 +1,20 @@
 #pragma once
 #include "BindingRef.h"
 #include "NativeShipControl.h"
+#include "ShipActionCatalog.h"
 #include <SimpleIni.h>
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 // ============================================================================
 // ShipOutput — native action ownership plus explicit raw-output management
 //
-// Most named ship actions resolve to NativeShipControl. The six profile-stable
-// context inputs (Select, Back, Up, Down, Left, Right) emit fixed vanilla keys;
-// explicit ButtonExpansion and key:/mouse: macro targets remain raw as well.
+// Named ship actions resolve through the shared Direct/Context/Keyboard
+// compatibility catalog. The six profile-stable context inputs (Select, Back,
+// Up, Down, Left, Right) retain fixed vanilla navigation behavior; explicit
+// ButtonExpansion and key:/mouse: macro targets remain raw as well.
 // Every path uses ownership so one owner cannot release another's hold.
 // ============================================================================
 
@@ -37,6 +41,9 @@ struct ShipButtonBinding {
     const char*  outputIniKey;
     BindingRef   buttonRef;
     ShipOutput   output;
+    ShipControlMethod method;
+    KeyboardResolutionSource resolutionSource;
+    bool         methodOverridden;
     ShipBindingMode mode;
     bool         previousPressed;
 };
@@ -45,11 +52,33 @@ struct ShipButtonBinding {
 inline constexpr ShipOutput NoOutput    { ShipOutputKind::None,     0,    false };
 inline constexpr ShipOutput SpaceOutput { ShipOutputKind::Keyboard, 0x39, false };
 
+enum class ShipControlTargetKind : std::uint8_t {
+    None,
+    Native,
+    Context,
+    RawOutput,
+};
+
 struct ShipControlTarget {
+    ShipControlTargetKind kind = ShipControlTargetKind::None;
     NativeShipControl::Action nativeAction = NativeShipControl::Action::Invalid;
     ShipOutput output = NoOutput;
+    std::string_view actionId;
 
-    bool IsNative() const { return nativeAction != NativeShipControl::Action::Invalid; }
+    bool IsNative() const { return kind == ShipControlTargetKind::Native; }
+    bool IsContext() const { return kind == ShipControlTargetKind::Context; }
+    bool IsValid() const { return kind != ShipControlTargetKind::None; }
+};
+
+struct ShipActionRouteInfo {
+    std::string_view actionId;
+    std::string_view displayLabel;
+    ShipActionGroup group{};
+    ShipControlMethod method{};
+    bool methodOverridden{};
+    ShipOutput resolvedKeyboardOutput{ NoOutput };
+    KeyboardResolutionSource keyboardSource{ KeyboardResolutionSource::NotApplicable };
+    ShipActionAvailability availability{ ShipActionAvailability::UnavailableForBuild };
 };
 
 // Owner-ID constants for SetOutputHeld
@@ -66,6 +95,11 @@ inline constexpr uint32_t OwnerMacroBase      = 0x00002000u;  // + macro index
 // ---- Public API ----
 
 namespace ShipOutputSystem {
+
+// Refresh installation-wide method preferences and the cached Starfield
+// ControlMap resolution. Called at startup/config reload, never from rendering
+// or a profile swap.
+void RefreshRoutingInputs();
 
 // Load ship action bindings from INI (called by ThrottleController::LoadConfig).
 void LoadShipButtonBindings(CSimpleIniA& ini);
@@ -109,10 +143,11 @@ bool IsBoostRequested();
 ShipButtonBinding* GetShipButtonBindings();
 int                GetShipButtonCount();
 const ShipButtonBinding* FindShipButtonBinding(std::string_view actionId);
+ShipActionRouteInfo GetShipActionRouteInfo(std::string_view actionId);
+std::vector<ShipActionRouteInfo> GetShipActionRouteInfos();
 
-// Named ship actions resolve to native operations except the six compatibility
-// aliases, which resolve to fixed vanilla context inputs. Explicit key:/mouse:
-// tokens remain raw SendInput targets for general-purpose macros.
+// Named ship actions resolve through their currently selected catalog method.
+// Explicit key:/mouse: tokens remain raw targets for general-purpose macros.
 ShipControlTarget ResolveControlTarget(std::string_view token);
 void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held);
 

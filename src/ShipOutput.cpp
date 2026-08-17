@@ -60,40 +60,17 @@ static ShipOutput UniversalContextOutput(std::string_view actionId) {
         : NoOutput;
 }
 
-struct BindingDef {
-    const char* actionId;
-    const char* sourceIniKey;
-    const char* outputIniKey;
-    ShipOutput  defaultOutput;
-    const char* context;
-    const char* controlMapAction;
-};
-
-static constexpr std::array<BindingDef, 23> kBindingDefs{ {
-    { "FireBoosters",             "iFireBoostersButton",             "sFireBoostersOutput",             { ShipOutputKind::Keyboard, 0x2A, false }, "ShipHUD",               "Boosters" },
-    { "SwitchFlightModes",        "iSwitchFlightModesButton",        "sSwitchFlightModesOutput",        SpaceOutput,                                  "ShipHUD",               "SwitchFlightModes" },
-    { "TogglePov",                "iTogglePovButton",                "sTogglePovOutput",                { ShipOutputKind::Keyboard, 0x10, false }, "ShipHUD",               "TogglePOV" },
-    { "FireWeapon0",              "iFireWeapon0Button",              "sFireWeapon0Output",              { ShipOutputKind::Mouse,    1,    false }, "ShipHUD",               "WeaponGroup1" },
-    { "FireWeapon1",              "iFireWeapon1Button",              "sFireWeapon1Output",              { ShipOutputKind::Mouse,    2,    false }, "ShipHUD",               "WeaponGroup2" },
-    { "FireWeapon2",              "iFireWeapon2Button",              "sFireWeapon2Output",              { ShipOutputKind::Keyboard, 0x22, false }, "ShipHUD",               "WeaponGroup3" },
-    { "ShipAction1",              "iShipAction1Button",              "sShipAction1Output",              { ShipOutputKind::Keyboard, 0x13, false }, "ShipHUD",               "XButton" },
-    { "SelectTarget",             "iSelectTargetButton",             "sSelectTargetOutput",             { ShipOutputKind::Keyboard, 0x12, false }, "ShipHUD",               "SelectTarget" },
-    { "IncreaseSystemPower",      "iIncreaseSystemPowerButton",      "sIncreaseSystemPowerOutput",      { ShipOutputKind::Keyboard, 0x48, true  }, "ShipHUD",               "Up" },
-    { "DecreaseSystemPower",      "iDecreaseSystemPowerButton",      "sDecreaseSystemPowerOutput",      { ShipOutputKind::Keyboard, 0x50, true  }, "ShipHUD",               "Down" },
-    { "PreviousSystem",           "iPreviousSystemButton",           "sPreviousSystemOutput",           { ShipOutputKind::Keyboard, 0x4B, true  }, "ShipHUD",               "Left" },
-    { "NextSystem",               "iNextSystemButton",               "sNextSystemOutput",               { ShipOutputKind::Keyboard, 0x4D, true  }, "ShipHUD",               "Right" },
-    { "OpenScanner",              "iOpenScannerButton",              "sOpenScannerOutput",              { ShipOutputKind::Keyboard, 0x21, false }, "ShipHUD",               "SHMonocle" },
-    { "Repair",                   "iRepairButton",                   "sRepairOutput",                   { ShipOutputKind::Keyboard, 0x18, false }, "ShipHUD",               "RepairShip" },
-    { "ShipAlternateControlHold", "iShipAlternateControlHoldButton", "sShipAlternateControlHoldOutput", { ShipOutputKind::Keyboard, 0x38, false }, "ShipHUD",               "AltHold" },
-    { "Cruise",                   "iCruiseButton",                   "sCruiseOutput",                   { ShipOutputKind::Keyboard, 0x14, false }, "ShipHUD",               "Cruise" },
-    { "Cancel",                   "iCancelButton",                   "sCancelOutput",                   { ShipOutputKind::Keyboard, 0x01, false }, "ShipHUD_Cancel",        "Cancel" },
-    { "UndockTakeOff",            "iUndockTakeOffButton",            "sUndockTakeOffOutput",            SpaceOutput,                                  "Spaceship_Interaction", "TakeOff" },
-    { "GetUp",                    "iGetUpButton",                    "sGetUpOutput",                    { ShipOutputKind::Keyboard, 0x12, false }, "Spaceship_Interaction", "Cancel" },
-    { "ExitShipFromCockpit",      "iExitShipFromCockpitButton",      "sExitShipFromCockpitOutput",      { ShipOutputKind::Keyboard, 0x2D, false }, "Spaceship_Interaction", "ExitShip" },
-    { "ZoomCameraIn",             "iZoomCameraInButton",             "sZoomCameraInOutput",             { ShipOutputKind::Mouse,    1,    false }, "ShipFlightCam_FreeRot", "FOVZoomIn" },
-    { "ZoomCameraOut",            "iZoomCameraOutButton",            "sZoomCameraOutOutput",            { ShipOutputKind::Mouse,    2,    false }, "ShipFlightCam_FreeRot", "FOVZoomOut" },
-    { "AutopilotOnOff",           "iAutopilotOnOffButton",           "sAutopilotOnOffOutput",           SpaceOutput,                                  "ShipHUD_CruiseMode",    "LockCourse" },
-} };
+static ShipOutput ShipOutputFromSpec(const ShipActionOutputSpec& spec) {
+    switch (spec.kind) {
+        case ShipActionOutputKind::Keyboard:
+            return { ShipOutputKind::Keyboard, spec.code, spec.extended };
+        case ShipActionOutputKind::Mouse:
+            return { ShipOutputKind::Mouse, spec.code, false };
+        case ShipActionOutputKind::None:
+            return NoOutput;
+    }
+    return NoOutput;
+}
 
 static int ParseExpansionButtonKey(std::string_view key) {
     const std::string normalized = TrimLower(key);
@@ -120,6 +97,10 @@ struct HeldShipOutput {
 
 static std::vector<ShipButtonBinding> s_shipButtonBindings;
 static std::vector<HeldShipOutput>    s_heldShipOutputs;
+static std::vector<ControlMap::Record> s_controlMapRecords;
+static std::array<ShipControlMethodResolution, kShipActionCatalog.size()>
+    s_methodResolutions{};
+static bool s_routingInputsReady = false;
 
 static bool SameOutput(const ShipOutput& lhs, const ShipOutput& rhs) {
     return lhs.kind == rhs.kind && lhs.code == rhs.code && lhs.extended == rhs.extended;
@@ -177,10 +158,19 @@ static ControlMap::ControlMapFile LoadControlMapOverrides() {
 // Resolve the effective default for one action: the player's in-game binding if
 // they remapped it, otherwise the vanilla default passed in.
 static ShipOutput ControlMapDefaultForAction(const std::vector<ControlMap::Record>& records,
-                                             const BindingDef& def) {
+                                             const ShipActionDefinition& def) {
     const ControlMap::Output resolved = ControlMap::ResolveBinding(
-        records, def.context, def.controlMapAction, ControlMapFromShipOutput(def.defaultOutput));
+        records, def.controlMapContext, def.controlMapAction,
+        ControlMapFromShipOutput(ShipOutputFromSpec(def.vanillaOutput)));
     return ShipOutputFromControlMap(resolved);
+}
+
+static bool HasControlMapPrimary(const std::vector<ControlMap::Record>& records,
+                                 const ShipActionDefinition& def) {
+    return std::any_of(records.begin(), records.end(), [&](const auto& record) {
+        return record.context == def.controlMapContext &&
+            record.action == def.controlMapAction && record.IsPrimary();
+    });
 }
 
 // ============================================================================
@@ -231,6 +221,36 @@ static void PulseOutput(const ShipOutput& output) {
 // ============================================================================
 
 namespace ShipOutputSystem {
+
+void RefreshRoutingInputs() {
+    const ControlMap::ControlMapFile controlMap = LoadControlMapOverrides();
+    s_controlMapRecords = controlMap.DeviceRecords();
+
+    CSimpleIniA preferences;
+    preferences.SetUnicode(false);
+    const bool preferencesLoaded =
+        preferences.LoadFile(RuntimePaths::CustomIniPath().string().c_str()) == SI_OK &&
+        preferences.GetLongValue("Meta", "iConfigVersion", -1) >= 1;
+
+    for (std::size_t index = 0; index < kShipActionCatalog.size(); ++index) {
+        const auto& definition = kShipActionCatalog[index];
+        std::string normalized;
+        if (preferencesLoaded) {
+            if (const char* value = preferences.GetValue(
+                    "ShipControlMethods", definition.actionId.data(), nullptr)) {
+                normalized = TrimLower(value);
+            }
+        }
+        s_methodResolutions[index] = ResolveShipControlMethod(definition, normalized);
+        if (s_methodResolutions[index].overridePresent &&
+            !s_methodResolutions[index].overrideAccepted) {
+            ShipLog(("Ignored unsupported [ShipControlMethods] " +
+                std::string(definition.actionId) + "=" + normalized +
+                "; using the catalog recommendation.").c_str());
+        }
+    }
+    s_routingInputsReady = true;
+}
 
 void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held) {
     if (output.kind == ShipOutputKind::None) return;
@@ -342,65 +362,150 @@ const ShipButtonBinding* FindShipButtonBinding(std::string_view actionId) {
     return it == s_shipButtonBindings.end() ? nullptr : &*it;
 }
 
+static ShipControlTarget MakeControlTarget(ShipControlMethod method,
+                                           std::string_view actionId,
+                                           const ShipOutput& output) {
+    switch (method) {
+        case ShipControlMethod::Direct: {
+            const auto action = NativeShipControl::ActionFromId(actionId);
+            if (action == NativeShipControl::Action::Invalid) return {};
+            return { ShipControlTargetKind::Native, action, NoOutput, actionId };
+        }
+        case ShipControlMethod::Context:
+            if (!UniversalContextInput::Find(actionId)) return {};
+            return { ShipControlTargetKind::Context,
+                NativeShipControl::Action::Invalid, NoOutput, actionId };
+        case ShipControlMethod::KeyboardCompatibility:
+            if (output.kind == ShipOutputKind::None) return {};
+            return { ShipControlTargetKind::RawOutput,
+                NativeShipControl::Action::Invalid, output, actionId };
+    }
+    return {};
+}
+
 ShipControlTarget ResolveControlTarget(std::string_view token) {
     const std::string lowered = TrimLower(token);
     // Raw key/mouse outputs (and "none") carry a ':' or are the literal "none".
-    if (lowered == "none" || lowered.find(':') != std::string::npos)
-        return { NativeShipControl::Action::Invalid, ParseShipOutput(token, NoOutput) };
-    // Preserve the historical action IDs used by profiles and macros, but emit
-    // one fixed vanilla keyboard input so Starfield's active context can route
-    // Select/Back and the four directions itself.
-    if (const ShipOutput universal = UniversalContextOutput(token);
-        universal.kind != ShipOutputKind::None) {
-        return { NativeShipControl::Action::Invalid, universal };
+    if (lowered == "none") return {};
+    if (lowered.find(':') != std::string::npos) {
+        const ShipOutput output = ParseShipOutput(token, NoOutput);
+        return output.kind == ShipOutputKind::None ? ShipControlTarget{}
+            : ShipControlTarget{ ShipControlTargetKind::RawOutput,
+                NativeShipControl::Action::Invalid, output, {} };
     }
-    // Otherwise treat the token as a native ship action id.
-    return { NativeShipControl::ActionFromId(token), NoOutput };
+
+    if (const auto* binding = FindShipButtonBinding(token))
+        return MakeControlTarget(binding->method, binding->actionId, binding->output);
+
+    // This fallback is used only before the binding snapshots have been loaded.
+    // It still consumes the catalog recommendation; an unknown action fails closed.
+    const auto* definition = FindShipAction(token);
+    if (!definition) return {};
+    return MakeControlTarget(definition->recommendedMethod, definition->actionId,
+                             ShipOutputFromSpec(definition->vanillaOutput));
 }
 
 void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held) {
-    if (target.IsNative())
-        NativeShipControl::SetActionHeld(target.nativeAction, ownerId, held);
-    else
-        SetOutputHeld(target.output, ownerId, held);
+    switch (target.kind) {
+        case ShipControlTargetKind::Native:
+            NativeShipControl::SetActionHeld(target.nativeAction, ownerId, held);
+            break;
+        case ShipControlTargetKind::Context:
+            SetUniversalContextHeld(target.actionId, ownerId, held);
+            break;
+        case ShipControlTargetKind::RawOutput:
+            SetOutputHeld(target.output, ownerId, held);
+            break;
+        case ShipControlTargetKind::None:
+            break;
+    }
+}
+
+ShipActionRouteInfo GetShipActionRouteInfo(std::string_view actionId) {
+    const auto* definition = FindShipAction(actionId);
+    if (!definition) return {};
+
+    const auto* binding = FindShipButtonBinding(actionId);
+    const ShipControlMethod method = binding
+        ? binding->method : definition->recommendedMethod;
+    const ShipOutput keyboardOutput = binding
+        ? binding->output : ShipOutputFromSpec(definition->vanillaOutput);
+
+    ShipActionAvailability availability = ShipActionAvailability::AvailableNow;
+    if (method == ShipControlMethod::Direct) {
+        availability = NativeShipControl::GetActionAvailability(
+            NativeShipControl::ActionFromId(actionId));
+    } else if (method == ShipControlMethod::KeyboardCompatibility &&
+               keyboardOutput.kind == ShipOutputKind::None) {
+        availability = ShipActionAvailability::UnavailableInContext;
+    }
+
+    return {
+        definition->actionId,
+        definition->displayLabel,
+        definition->group,
+        method,
+        binding && binding->methodOverridden,
+        keyboardOutput,
+        binding ? binding->resolutionSource : KeyboardResolutionSource::VanillaFallback,
+        availability,
+    };
+}
+
+std::vector<ShipActionRouteInfo> GetShipActionRouteInfos() {
+    std::vector<ShipActionRouteInfo> result;
+    result.reserve(kShipActionCatalog.size());
+    for (const auto& definition : kShipActionCatalog)
+        result.push_back(GetShipActionRouteInfo(definition.actionId));
+    return result;
 }
 
 void LoadShipButtonBindings(CSimpleIniA& ini) {
+    if (!s_routingInputsReady) RefreshRoutingInputs();
     s_shipButtonBindings.clear();
-    s_shipButtonBindings.reserve(kBindingDefs.size());
+    s_shipButtonBindings.reserve(kShipActionCatalog.size());
 
-    // Retained 4.x output metadata. Most named 5.0 actions ignore this resolved
-    // output and dispatch through NativeShipControl. Six compatibility slots use
-    // fixed vanilla inputs so one profile binding works across game contexts.
-    // Legacy precedence per action:
+    // Resolve and retain the keyboard-compatible route even when Direct is the
+    // selected method. This keeps method changes a dispatch decision, not a
+    // second binding model. Compatibility precedence per action:
     //   vanilla default -> control-map-derived (in-game rebind) -> explicit [ShipButtonOutputs].
     const bool syncFromControlMap = ini.GetBoolValue("General", "bSyncShipOutputsFromControlMap", true);
-    const ControlMap::ControlMapFile controlMap =
-        syncFromControlMap ? LoadControlMapOverrides() : ControlMap::ControlMapFile{};
-    const auto controlMapRecords = controlMap.DeviceRecords();
 
-    for (const auto& def : kBindingDefs) {
-        ShipOutput cmDefault = def.defaultOutput;
+    for (std::size_t index = 0; index < kShipActionCatalog.size(); ++index) {
+        const auto& def = kShipActionCatalog[index];
+        ShipOutput cmDefault = ShipOutputFromSpec(def.vanillaOutput);
+        const bool controlMapPrimary = syncFromControlMap &&
+            HasControlMapPrimary(s_controlMapRecords, def);
         if (syncFromControlMap)
-            cmDefault = ControlMapDefaultForAction(controlMapRecords, def);
+            cmDefault = ControlMapDefaultForAction(s_controlMapRecords, def);
 
-        const char* outputValue = ini.GetValue("ShipButtonOutputs", def.outputIniKey, nullptr);
+        const char* outputValue = ini.GetValue(
+            "ShipButtonOutputs", def.legacyOutputIniKey.data(), nullptr);
         ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
-        if (const ShipOutput universal = UniversalContextOutput(def.actionId);
-            universal.kind != ShipOutputKind::None) {
-            // These aliases deliberately represent the vanilla keys, not the
-            // currently rebound ship-only action or legacy output override.
+        KeyboardResolutionSource resolutionSource = ResolveKeyboardResolutionSource(
+            controlMapPrimary, outputValue != nullptr);
+        if (def.recommendedMethod == ShipControlMethod::Context) {
+            const ShipOutput universal = UniversalContextOutput(def.actionId);
+            // Context actions deliberately represent fixed vanilla navigation,
+            // not the rebound ship-only action or a legacy output override.
             finalOut = universal;
+            resolutionSource = KeyboardResolutionSource::FixedContext;
         }
 
-        BindingRef bRef = ParseBindingRef(ini.GetValue("ShipButtons", def.sourceIniKey, ""), -1);
+        BindingRef bRef = ParseBindingRef(
+            ini.GetValue("ShipButtons", def.sourceIniKey.data(), ""), -1);
+        const auto methodResolution = s_methodResolutions[index];
 
         ShipButtonBinding binding{
-            def.actionId,
-            def.sourceIniKey,
-            def.outputIniKey,
+            def.actionId.data(),
+            def.sourceIniKey.data(),
+            def.legacyOutputIniKey.data(),
             bRef,
             finalOut,
+            methodResolution.method,
+            resolutionSource,
+            methodResolution.overrideAccepted &&
+                methodResolution.method != def.recommendedMethod,
             ShipBindingMode::Hold,  // All actions default to Hold; future: per-action overrides
             false
         };
@@ -464,6 +569,9 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
             key.pItem,
             finalRef,
             output,
+            ShipControlMethod::KeyboardCompatibility,
+            KeyboardResolutionSource::LegacyManualOverride,
+            false,
             ShipBindingMode::Hold,
             false
         });
@@ -476,10 +584,9 @@ void UpdateShipButtonBindings() {
         bool pressed  = DeviceManager::IsButtonPressed(binding.buttonRef);
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
-        const auto* universalMapping = UniversalContextInput::Find(binding.actionId);
-        const ShipOutput universal = UniversalContextOutput(binding.actionId);
         const auto nativeAction = NativeShipControl::ActionFromId(binding.actionId);
-        if (universal.kind != ShipOutputKind::None) {
+        if (binding.method == ShipControlMethod::Context) {
+            const auto* universalMapping = UniversalContextInput::Find(binding.actionId);
             // Targeting Mode consumes dedicated SelectLeft/SelectRight semantic
             // events rather than the ShipHUD arrow bindings. Switch lanes under
             // the exact targeting camera gate so power management never receives
@@ -499,13 +606,16 @@ void UpdateShipButtonBindings() {
                 if (pressed != binding.previousPressed)
                     SetOutputHeld(binding.output, ownerId, pressed);
             }
-        } else if (nativeAction != NativeShipControl::Action::Invalid) {
+        } else if (binding.method == ShipControlMethod::Direct &&
+                   nativeAction != NativeShipControl::Action::Invalid) {
             if (pressed != binding.previousPressed)
                 NativeShipControl::SetActionHeld(nativeAction, ownerId, pressed);
-        } else if (binding.mode == ShipBindingMode::Hold) {
+        } else if (binding.method == ShipControlMethod::KeyboardCompatibility &&
+                   binding.mode == ShipBindingMode::Hold) {
             if (pressed != binding.previousPressed)
                 SetOutputHeld(binding.output, ownerId, pressed);
-        } else if (pressed && !binding.previousPressed) {
+        } else if (binding.method == ShipControlMethod::KeyboardCompatibility &&
+                   pressed && !binding.previousPressed) {
             PulseOutput(binding.output);
         }
 

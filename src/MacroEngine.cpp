@@ -101,7 +101,7 @@ static bool ParseStep(std::string_view line, MacroStep& out) {
 
     for (const std::string& t : Split(tok[0], '+')) {
         const ShipControlTarget target = ShipOutputSystem::ResolveControlTarget(t);
-        if (target.IsNative() || target.output.kind != ShipOutputKind::None)
+        if (target.IsValid())
             out.targets.push_back(target);
     }
     if (out.targets.empty()) return false;

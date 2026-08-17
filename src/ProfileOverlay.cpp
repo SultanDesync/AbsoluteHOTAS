@@ -9,9 +9,15 @@ namespace ProfileOverlay {
 int ComputeDiff(const CSimpleIniA& eff, const CSimpleIniA& base, CSimpleIniA& out) {
     int overrides = 0;
 
+    // Installation compatibility preferences are never profile-owned. This is
+    // unconditional so resaving also cleans an older overlay that already
+    // contains the section even though the managed effective state does not.
+    out.Delete("ShipControlMethods", nullptr);
+
     CSimpleIniA::TNamesDepend sections;
     eff.GetAllSections(sections);
     for (const auto& sec : sections) {
+        if (_stricmp(sec.pItem, "ShipControlMethods") == 0) continue;
         CSimpleIniA::TNamesDepend keys;
         eff.GetAllKeys(sec.pItem, keys);
         for (const auto& k : keys) {

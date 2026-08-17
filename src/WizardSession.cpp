@@ -112,6 +112,10 @@ Route GetRoute() {
                 case AdvancedPage::Devices: return Route::AdvancedDevices;
             }
             break;
+        case Page::Power:
+            // Power owns its own nested routes; the return value is used only by
+            // legacy HOTAS capture context bookkeeping while this page is active.
+            break;
     }
     return Route::BindFlightAxes;
 }
@@ -260,6 +264,12 @@ bool RequestClose() {
     SetStatus("Unsaved changes must be saved or discarded before closing.",
               StatusKind::Warning);
     return false;
+}
+
+void RequireCloseResolution(std::string message) {
+    CancelTransientInteractions();
+    s_pendingClose = true;
+    SetStatus(std::move(message), StatusKind::Warning);
 }
 
 bool HasPendingClose() { return s_pendingClose; }

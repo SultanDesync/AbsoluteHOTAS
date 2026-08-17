@@ -482,6 +482,95 @@ static ImVec4 CoreAxisAccent(int axisIndex) {
     return ImVec4(0.66f, 0.50f, 1.0f, 1.0f);
 }
 
+static int s_axisJumpTarget = -1;
+
+static void DrawAxisArrowHead(ImDrawList* dl, ImVec2 tip, ImVec2 direction,
+        float size, ImU32 color, float thickness) {
+    const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+    if (length <= 0.001f) return;
+    const ImVec2 unit(direction.x / length, direction.y / length);
+    const ImVec2 normal(-unit.y, unit.x);
+    const ImVec2 base(tip.x - unit.x * size, tip.y - unit.y * size);
+    dl->AddLine(tip,
+        ImVec2(base.x + normal.x * size * 0.55f,
+            base.y + normal.y * size * 0.55f), color, thickness);
+    dl->AddLine(tip,
+        ImVec2(base.x - normal.x * size * 0.55f,
+            base.y - normal.y * size * 0.55f), color, thickness);
+}
+
+static void DrawAxisArcArrow(ImDrawList* dl, ImVec2 center, float radius,
+        float startAngle, float endAngle, ImU32 color, float thickness) {
+    constexpr int samples = 16;
+    ImVec2 points[samples];
+    for (int i = 0; i < samples; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(samples - 1);
+        const float angle = startAngle + (endAngle - startAngle) * t;
+        points[i] = ImVec2(center.x + std::cos(angle) * radius,
+            center.y + std::sin(angle) * radius);
+    }
+    dl->AddPolyline(points, samples, color, 0, thickness);
+    DrawAxisArrowHead(dl, points[samples - 1],
+        ImVec2(points[samples - 1].x - points[samples - 2].x,
+            points[samples - 1].y - points[samples - 2].y),
+        4.0f, color, thickness);
+}
+
+static void DrawAxisIcon(int axisIndex, ImVec2 center, float size, ImU32 color) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float radius = size * 0.38f;
+    constexpr float thickness = 1.8f;
+
+    if (axisIndex == 0) {
+        const float left = center.x - radius * 0.55f;
+        const float right = center.x + radius * 0.55f;
+        const float top = center.y - radius;
+        const float bottom = center.y + radius;
+        dl->AddLine(ImVec2(left, top), ImVec2(left, bottom), color, thickness);
+        dl->AddLine(ImVec2(right, top), ImVec2(right, bottom), color, thickness);
+        dl->AddLine(ImVec2(left, center.y - radius * 0.50f),
+            ImVec2(left + radius * 0.28f, center.y - radius * 0.50f), color, thickness);
+        dl->AddLine(ImVec2(right - radius * 0.28f, center.y + radius * 0.45f),
+            ImVec2(right, center.y + radius * 0.45f), color, thickness);
+        dl->AddLine(ImVec2(center.x - radius * 0.72f, center.y + radius * 0.32f),
+            ImVec2(center.x + radius * 0.42f, center.y - radius * 0.36f), color, 2.4f);
+        dl->AddCircleFilled(ImVec2(center.x + radius * 0.52f,
+            center.y - radius * 0.42f), 2.8f, color);
+        return;
+    }
+
+    dl->AddCircleFilled(center, 2.2f, color);
+    if (axisIndex == 1) {
+        dl->AddLine(ImVec2(center.x - radius * 0.55f, center.y),
+            ImVec2(center.x + radius * 0.55f, center.y), color, thickness);
+        DrawAxisArcArrow(dl, center, radius, 2.15f, -0.95f, color, thickness);
+    } else if (axisIndex == 2) {
+        dl->AddLine(ImVec2(center.x, center.y - radius * 0.55f),
+            ImVec2(center.x, center.y + radius * 0.55f), color, thickness);
+        DrawAxisArcArrow(dl, center, radius, 2.75f, 6.00f, color, thickness);
+    } else if (axisIndex == 3) {
+        dl->AddTriangleFilled(ImVec2(center.x, center.y - radius * 0.45f),
+            ImVec2(center.x - radius * 0.32f, center.y + radius * 0.38f),
+            ImVec2(center.x + radius * 0.32f, center.y + radius * 0.38f), color);
+        DrawAxisArcArrow(dl, center, radius, -0.10f, 5.25f, color, thickness);
+    } else {
+        const bool vertical = axisIndex == 5;
+        const ImVec2 low = vertical
+            ? ImVec2(center.x, center.y + radius)
+            : ImVec2(center.x - radius, center.y);
+        const ImVec2 high = vertical
+            ? ImVec2(center.x, center.y - radius)
+            : ImVec2(center.x + radius, center.y);
+        dl->AddRect(ImVec2(center.x - 3.0f, center.y - 3.0f),
+            ImVec2(center.x + 3.0f, center.y + 3.0f), color, 1.0f, 0, thickness);
+        dl->AddLine(low, high, color, thickness);
+        DrawAxisArrowHead(dl, high,
+            ImVec2(high.x - center.x, high.y - center.y), 4.0f, color, thickness);
+        DrawAxisArrowHead(dl, low,
+            ImVec2(low.x - center.x, low.y - center.y), 4.0f, color, thickness);
+    }
+}
+
 static bool HasSeparateAimInput(const WizardState& s) {
     for (int i = 0; i < kNumAimAxisSlots; ++i) {
         if (s.aimAxisBindings[i] != "(unbound)") return true;
@@ -554,38 +643,45 @@ static void DrawCoreAxisInjection(const WizardState& s, int axisIndex) {
     }
 }
 
-static void DrawInjectionSafetyNotice(const WizardState& s) {
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(14.0f, 10.0f));
-    if (ImGui::BeginTable("InjectionSafetyNotice", 1,
-            ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingStretchSame |
-            ImGuiTableFlags_NoSavedSettings)) {
-        ImGui::TableNextColumn();
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-            ImGui::GetColorU32(ImVec4(0.06f, 0.15f, 0.18f, 0.97f)));
+static void DrawAxisNavigator(const WizardState& s) {
+    static constexpr const char* shortLabels[] = {
+        "Throttle", "Pitch", "Yaw", "Roll", "Lateral", "Vertical"
+    };
 
-        ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
-            "5.0 DIRECT FLIGHT CONTROL");
-        ImGui::TextWrapped(
-            "Pitch, yaw, roll, throttle, lateral strafe, and vertical strafe are "
-            "independent flight controls. Roll and strafe may be commanded simultaneously.");
+    ImGui::TextDisabled("AXES ON THIS PAGE  /  Select one to jump");
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(3.0f, 3.0f));
+    if (ImGui::BeginTable("AxisNavigator", 6,
+            ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
+        for (int i = 0; i < 6; ++i) {
+            ImGui::TableNextColumn();
+            ImGui::PushID(15000 + i);
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const float width = std::max(70.0f, ImGui::GetContentRegionAvail().x);
+            constexpr float height = 45.0f;
+            ImGui::InvisibleButton("##AxisJump", ImVec2(width, height));
+            if (ImGui::IsItemClicked()) s_axisJumpTarget = i;
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::TextColored(ImVec4(0.38f, 0.82f, 0.96f, 1.0f),
-            "NATIVE BOOST + STRAFE");
-        ImGui::TextWrapped(
-            "Boost-zone and strafe activation use Starfield's internal ship-control "
-            "paths. No keyboard bindings are required for these flight functions.");
-        DrawWrappedColored(ImVec4(0.55f, 0.75f, 0.82f, 1.0f),
-            "Flight controls enabled is the profile-level switch for flight axes, "
-            "head pose, boost-zone, and strafe output.");
-        if (!s.axisInjectionEnabled) {
-            DrawWrappedColored(ImVec4(1.0f, 0.72f, 0.28f, 1.0f),
-                "THIS PROFILE'S FLIGHT CONTROLS ARE PARKED");
+            const bool hovered = ImGui::IsItemHovered();
+            const ImVec4 accent = CoreAxisAccent(i);
+            const ImU32 accentColor = ImGui::GetColorU32(accent);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height),
+                hovered ? IM_COL32(38, 55, 70, 245) : IM_COL32(25, 34, 43, 235), 4.0f);
+            dl->AddRect(pos, ImVec2(pos.x + width, pos.y + height),
+                hovered ? accentColor : IM_COL32(65, 79, 92, 220), 4.0f, 0,
+                hovered ? 1.5f : 1.0f);
+            DrawAxisIcon(i, ImVec2(pos.x + 18.0f, pos.y + height * 0.5f),
+                24.0f, accentColor);
+            dl->AddText(ImVec2(pos.x + 34.0f, pos.y + 8.0f), accentColor,
+                shortLabels[i]);
+            const bool bound = s.axisBindings[i] != "(unbound)";
+            dl->AddCircleFilled(ImVec2(pos.x + 38.0f, pos.y + 31.0f), 2.5f,
+                bound ? IM_COL32(80, 225, 130, 255) : IM_COL32(230, 118, 72, 255));
+            dl->AddText(ImVec2(pos.x + 45.0f, pos.y + 23.0f),
+                IM_COL32(155, 166, 176, 255), bound ? "bound" : "unbound");
+            if (hovered) ImGui::SetTooltip("Jump to %s", kAxisSlots[i].label);
+            ImGui::PopID();
         }
-
         ImGui::EndTable();
     }
     ImGui::PopStyleVar();
@@ -601,42 +697,34 @@ static void DrawFlightCoreHero(WizardState& s) {
         if (s.axisBindings[i] != "(unbound)") ++ready;
     }
 
-    const ImVec2 pos = ImGui::GetCursorScreenPos();
-    const float width = std::max(300.0f, ImGui::GetContentRegionAvail().x);
-    constexpr float height = 116.0f;
-    ImGui::Dummy(ImVec2(width, height));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(14.0f, 9.0f));
+    if (ImGui::BeginTable("FlightAxesSummary", 2,
+            ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("Identity", ImGuiTableColumnFlags_WidthStretch, 0.63f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.37f);
+        ImGui::TableNextColumn();
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+            ImGui::GetColorU32(ImVec4(0.06f, 0.12f, 0.16f, 0.97f)));
+        ImGui::TextColored(ImVec4(0.38f, 0.87f, 1.0f, 1.0f), "FLIGHT AXES");
+        ImGui::TextDisabled("Bind, tune, and verify each flight direction below.");
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height),
-        IM_COL32(20, 34, 46, 245), 7.0f);
-    dl->AddRect(pos, ImVec2(pos.x + width, pos.y + height),
-        IM_COL32(55, 125, 165, 230), 7.0f, 0, 1.5f);
-    dl->AddRectFilled(pos, ImVec2(pos.x + 7.0f, pos.y + height),
-        IM_COL32(45, 180, 235, 255), 7.0f);
-
-    ImGui::SetCursorScreenPos(ImVec2(pos.x + 20.0f, pos.y + 13.0f));
-    ImGui::TextColored(ImVec4(0.38f, 0.87f, 1.0f, 1.0f),
-        "DIRECT FLIGHT CONTROL");
-    ImGui::TextUnformatted("Bind the ship, then shape how every axis responds.");
-    ImGui::TextDisabled("These bindings drive Starfield's ship controls directly.");
-
-    ImGui::SetCursorScreenPos(ImVec2(pos.x + 20.0f, pos.y + 75.0f));
-    const float progress = required > 0 ? static_cast<float>(ready) / required : 0.0f;
-    ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
-        ready == required ? ImVec4(0.25f, 0.82f, 0.48f, 1.0f)
-                          : ImVec4(0.25f, 0.65f, 0.90f, 1.0f));
-    ImGui::ProgressBar(progress, ImVec2(std::max(120.0f, width - 330.0f), 18.0f), "");
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::Text("%d / %d active axes bound", ready, required);
-    ImGui::SameLine();
-    ImGui::Checkbox("Flight controls enabled", &s.axisInjectionEnabled);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(
-            "Profile-level switch for flight axes, aim, head pose, boost zone,\n"
-            "and strafe output.");
-
-    ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + height + ImGui::GetStyle().ItemSpacing.y));
+        ImGui::TableNextColumn();
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+            ImGui::GetColorU32(ImVec4(0.06f, 0.12f, 0.16f, 0.97f)));
+        ImGui::TextColored(ready == required
+                ? ImVec4(0.32f, 0.92f, 0.54f, 1.0f)
+                : ImVec4(0.35f, 0.72f, 0.96f, 1.0f),
+            "%d / %d active axes bound", ready, required);
+        ImGui::Checkbox("Flight controls enabled", &s.axisInjectionEnabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Profile-level switch for flight axes, aim, head pose, boost zone,\n"
+                "and strafe output.");
+        ImGui::EndTable();
+    }
+    ImGui::PopStyleVar();
+    ImGui::Spacing();
 }
 
 static void DrawCoreAxisBinding(WizardState& s, int axisIndex) {
@@ -725,6 +813,10 @@ static void DrawCoreAxisTuning(WizardState& s, int axisIndex) {
 }
 
 static void DrawCoreAxisCard(WizardState& s, int axisIndex, bool inactive) {
+    if (s_axisJumpTarget == axisIndex) {
+        ImGui::SetScrollHereY(0.0f);
+        s_axisJumpTarget = -1;
+    }
     ImGui::PushID(10000 + axisIndex);
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(14.0f, 10.0f));
     if (ImGui::BeginTable("CoreAxisCard", 1,
@@ -736,10 +828,16 @@ static void DrawCoreAxisCard(WizardState& s, int axisIndex, bool inactive) {
             ImGui::GetColorU32(ImVec4(0.075f, 0.095f, 0.115f, 0.96f)));
 
         const ImVec4 accent = CoreAxisAccent(axisIndex);
-        if (ImGui::BeginTable("CoreAxisHeader", 2,
+        if (ImGui::BeginTable("CoreAxisHeader", 3,
                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
-            ImGui::TableSetupColumn("Identity", ImGuiTableColumnFlags_WidthStretch, 0.75f);
+            ImGui::TableSetupColumn("Icon", ImGuiTableColumnFlags_WidthFixed, 34.0f);
+            ImGui::TableSetupColumn("Identity", ImGuiTableColumnFlags_WidthStretch, 0.68f);
             ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+            ImGui::TableNextColumn();
+            const ImVec2 iconPos = ImGui::GetCursorScreenPos();
+            DrawAxisIcon(axisIndex, ImVec2(iconPos.x + 13.0f, iconPos.y + 15.0f),
+                28.0f, ImGui::GetColorU32(accent));
+            ImGui::Dummy(ImVec2(28.0f, 30.0f));
             ImGui::TableNextColumn();
             ImGui::TextColored(accent, "%s", kAxisSlots[axisIndex].label);
             ImGui::TextDisabled("%s", CoreAxisDescription(axisIndex));
@@ -775,8 +873,7 @@ static void DrawCoreAxisCard(WizardState& s, int axisIndex, bool inactive) {
                 : "Positional throttle: hardware position directly commands thrust.");
 
             ImGui::Spacing();
-            if (ImGui::CollapsingHeader("THROTTLE RANGE, DETENTS, REVERSE & BOOST",
-                    ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::CollapsingHeader("THROTTLE RANGE, DETENTS, REVERSE & BOOST")) {
                 ImGui::Indent(10.0f);
                 DrawThrottleCalibrationPanel(s);
                 ImGui::Unindent(10.0f);
@@ -821,7 +918,7 @@ static void DrawMouseSteeringCard(WizardState& s) {
 
 static void DrawFlightControlsLanding(WizardState& s) {
     DrawFlightCoreHero(s);
-    DrawInjectionSafetyNotice(s);
+    DrawAxisNavigator(s);
 
     ImGui::SeparatorText("THRUST");
     DrawCoreAxisCard(s, 0, false);

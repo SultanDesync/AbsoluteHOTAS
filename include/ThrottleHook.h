@@ -12,6 +12,12 @@ public:
     static void Uninstall();
     static uintptr_t GetSourceBasePtr();
 
+    // Exact flight-control cluster observed at the validated rotational writer
+    // block. Unlike the broad RDI candidate hooks, this capture already comes
+    // from the ship-axis writer; callers must still apply the native selected-
+    // handler object gates before treating it as live.
+    static uintptr_t GetWriterClusterPtr();
+
     // Get all captured candidate pointers
     static constexpr int MAX_CANDIDATES = 2048;
     static uintptr_t GetCandidate(int index);

@@ -38,6 +38,13 @@ Operations are routed according to the narrowest validated seam:
 - HUD, scanner, seat, cruise, and autopilot commands publish fresh
   native `ButtonEvent` objects through the input manager's semantic broadcaster.
 
+Because direct weapon leaves bypass the higher native WeaponGroup listener observed by
+standalone Absolute Power, a successful start also reports its zero-based group through
+Power API v1's optional size-gated `recordWeaponFire` tail when present. HOTAS checks the
+published struct size and callback pointer, never requires Power to load, and never reports
+a failed start or stop edge. Power remains the sole owner of automation policy, allocation,
+settlement, and base-preset restoration.
+
 No native operation resolves or emits a keyboard scancode. Function-specific
 validation failures leave the action unapplied so a later valid frame can retry.
 

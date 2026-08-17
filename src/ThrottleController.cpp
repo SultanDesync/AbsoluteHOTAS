@@ -1,4 +1,6 @@
 #include "PCH.h"
+
+#include "SuiteCommandBindings.h"
 #include "ThrottleController.h"
 #include "ThrottleHook.h"
 #include "ShipOutput.h"
@@ -635,6 +637,9 @@ static std::vector<ProfileSlotDef> ParseProfileSlots() {
 
 // Build, resolve, and snapshot every slot; leave the base profile active.
 void ThrottleController::PreloadProfiles() {
+    // Installation-wide route methods and ControlMap bindings are resolved once
+    // before building snapshots. Individual profile files cannot alter them.
+    ShipOutputSystem::RefreshRoutingInputs();
     const std::vector<ProfileSlotDef> defs = ParseProfileSlots();
 
     s_profiles.clear();
@@ -725,6 +730,10 @@ void ThrottleController::ControlLoop() {
 
     // Base + every switch profile: build, resolve, snapshot; base becomes active.
     PreloadProfiles();
+    // AbsoluteHOTAS owns joystick capture and button edges for suite commands.
+    // This remains optional: if no compatible daughter API is loaded, its saved
+    // bindings simply stay dormant until that module becomes available.
+    SuiteCommandBindings::Initialize();
 
     // Detect hardware range for the primary throttle axis
     long axisMin = 0, axisMax = 65535;
@@ -794,6 +803,7 @@ void ThrottleController::ControlLoop() {
             ResetMenuControlReuse();
             ShipOutputSystem::ReleaseAllShipButtonOutputs();
             PreloadProfiles();
+            SuiteCommandBindings::Reload();
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
             // Publish AFTER the new config is fully applied so a wizard reading a
             // bumped generation is guaranteed to see the reloaded values, not a
@@ -803,6 +813,7 @@ void ThrottleController::ControlLoop() {
         }
 
         DeviceManager::PollAll();
+        SuiteCommandBindings::Poll();
 
         // ---- Control buttons (always processed, even while deactivated, so the
         //      activate binding and wizard overlay can always be reached) ----
@@ -1375,6 +1386,7 @@ void ThrottleController::ControlLoop() {
     MacroEngine::ReleaseAll();
     NativeShipControl::SetEnabled(false);
     HeadTracking::Shutdown();
+    SuiteCommandBindings::Shutdown();
     DeviceManager::Shutdown();
 }
 
@@ -1414,22 +1426,12 @@ ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }
 bool ThrottleController::IsTurnAssistActive() { return s_turnAssistRuntimeActive; }
 
 std::vector<ThrottleController::ShipActionInfo> ThrottleController::GetShipActionBindings() {
-    static const char* labels[] = {
-        "Fire Boosters", "Switch Flight Modes", "Toggle POV",
-        "Fire Weapon 0", "Fire Weapon 1", "Fire Weapon 2",
-        "Ship Action 1", "Select / Accept (Select Target)",
-        "Navigation Up (Increase Power)", "Navigation Down (Decrease Power)",
-        "Navigation Left (Previous System)", "Navigation Right (Next System)",
-        "Open Scanner", "Repair",
-        "Ship Alternate Control", "Cruise", "Back / Cancel",
-        "Undock / Take-Off", "Get Up", "Exit Ship",
-        "Zoom Camera In", "Zoom Camera Out", "Autopilot On/Off"
-    };
     std::vector<ShipActionInfo> result;
     int count = ShipOutputSystem::GetShipButtonCount();
-    for (int i = 0; i < count && i < 23; i++) {
+    for (int i = 0; i < count && i < static_cast<int>(kShipActionCatalog.size()); i++) {
         const auto& b = ShipOutputSystem::GetShipButtonBindings()[i];
-        result.push_back({ labels[i], b.sourceIniKey, b.buttonRef });
+        result.push_back({ kShipActionCatalog[i].displayLabel.data(),
+            b.sourceIniKey, b.buttonRef });
     }
     return result;
 }

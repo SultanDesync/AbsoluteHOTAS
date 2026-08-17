@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShipActionCatalog.h"
+
 #include <cstdint>
 #include <string_view>
 
@@ -67,6 +69,11 @@ bool TargetingModeActive();
 
 Action ActionFromId(std::string_view actionId);
 std::string_view ActionId(Action action);
+
+// Structured route status for the workbench and diagnostics. A failed Direct
+// route remains failed closed; this status never causes an automatic keyboard
+// fallback.
+ShipActionAvailability GetActionAvailability(Action action);
 
 // Reference-counted logical ownership. Multiple bindings/macros can own the
 // same native operation without generating duplicate press/release edges.

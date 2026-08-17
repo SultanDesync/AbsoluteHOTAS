@@ -29,7 +29,7 @@ report actionable.
 - **Native Ship Functions and Universal Context Inputs:** Seventeen named ship actions use exact-gated Starfield control paths. The existing Select Target, Cancel, and four power-navigation profile slots preserve one assignment across contexts with vanilla E, Esc, and arrows; Targeting Mode switches Left/Right to its exact `SelectLeft`/`SelectRight` selector events so ship power is not changed simultaneously.
 - **Optional Menu Control Reuse:** The Ship Buttons workbench can independently reuse Pitch for Up/Down, Yaw for Left/Right, and the current Primary Weapon button for Select/Accept. Per-profile inversion and actuation/release thresholds preserve the workbench approach, while neutral/release arming prevents carried flight input from acting as a menu opens.
 - **Native Boost and Strafe:** Boost-zone activation and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.
-- **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. POV and exterior zoom use the active camera-state handlers.
+- **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. After a successful start, a compatible Absolute Power build is optionally notified through its size-gated API so weapon-fire automation sees the direct HOTAS path; Power remains entirely optional. POV and exterior zoom use the active camera-state handlers.
 - **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
 - **Automatic Pilot Context:** Fresh selected flight-handler output identifies active piloting even when Starfield keeps the old ship object cached after getting up. Flight controls park automatically on foot by default; menus/loading suspend output without being classified as FPS, and Camera Look uses its own conservative 400 ms gate.
 - **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
@@ -176,13 +176,15 @@ still in progress.
 
 Press `Ctrl+Alt+B` to toggle the workbench. Use the Starfield main or pause menu for full mouse interaction. If opened during active gameplay, Starfield keeps the mouse locked for camera control; the wizard displays a warning and remains usable with `Tab`, arrow keys, `Enter`, and other standard keyboard-navigation keys.
 
-The workbench uses three top-level task groups with visibly subordinate pages:
+The workbench uses three built-in task groups and registers an optional fourth
+group when a compatible `AbsolutePower.dll` is detected:
 
 | Group | Pages | Purpose |
 |-----|---------|---------|
 | **Flight Controls** | Flight Axes (Core), Ship Buttons | The core setup path: visually grouped six-degree-of-freedom axes with binding, inversion, response, calibration, and live feedback in one place; plus reverse strategies, digital fallbacks, named ship actions, and custom outputs. |
 | **Flight Modes** | Aiming & Combat, Rate Throttle | Optional independent aiming, HOSAM support, self-centering throttle behavior, and pilot assists. |
 | **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation and wizard-access controls, device inspection, calibration, reassignment, and profile management. |
+| **Power** *(when installed)* | Power Presets, Automation, Diagnostics | The Absolute Power preset/pip editor, priority rules, live allocation preview, and HOTAS preset-button capture. Power remains authoritative for configuration reload and runtime activation; AbsoluteHOTAS supplies the optional host tab and DirectInput bindings. |
 
 ### Direct flight controls
 
@@ -620,3 +622,6 @@ useful, but safety and core-flight regressions take priority during maintenance.
 ## Notes
 
 Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bEnableLog = true`).
+
+Development planning lives in the [workbench UX overhaul](docs/UX-OVERHAUL-HANDOFF.md) and the
+[Absolute Control integration handoff](docs/ABSOLUTE-CONTROL-INTEGRATION-HANDOFF.md).

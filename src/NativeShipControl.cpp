@@ -1,6 +1,7 @@
 #include "PCH.h"
 
 #include "NativeShipControl.h"
+#include "AbsolutePowerAPI.h"
 #include "RuntimePaths.h"
 
 namespace {
@@ -9,6 +10,48 @@ using NativeShipControl::Action;
 using ThrusterOutputFunction = void (*)(void*, const float*, float*);
 using CameraRotationFunction = void (*)(void*, float*);
 using ButtonBroadcaster = void (*)(void*, void*);
+
+void NativeLog(std::string_view message);
+
+std::atomic<const AbsolutePowerApi::ApiV1*> g_powerApi{};
+std::atomic<bool> g_powerApiResolved{};
+
+const AbsolutePowerApi::ApiV1* ResolvePowerApi()
+{
+    if (const auto* api = g_powerApi.load(std::memory_order_acquire)) return api;
+    if (g_powerApiResolved.exchange(true, std::memory_order_acq_rel)) return nullptr;
+    const HMODULE module = GetModuleHandleW(L"AbsolutePower.dll");
+    if (!module) return nullptr;
+    const FARPROC address = GetProcAddress(module, "AbsolutePower_QueryApi");
+    if (!address) return nullptr;
+    using Query = const AbsolutePowerApi::ApiV1*(__cdecl*)(std::uint32_t) noexcept;
+    const auto* api = reinterpret_cast<Query>(address)(AbsolutePowerApi::kAbiVersion);
+    constexpr std::size_t minimum = offsetof(AbsolutePowerApi::ApiV1, processGameThread) +
+                                    sizeof(api->processGameThread);
+    if (!api || api->structSize < minimum ||
+        api->abiVersion != AbsolutePowerApi::kAbiVersion || !api->moduleId ||
+        std::string_view(api->moduleId) != "absolute.power" || !api->processGameThread) {
+        return nullptr;
+    }
+    g_powerApi.store(api, std::memory_order_release);
+    NativeLog("Absolute Power game-thread bridge connected through the selected-handler output hook.");
+    return api;
+}
+
+void ProcessPowerGameThread()
+{
+    if (const auto* api = ResolvePowerApi()) (void)api->processGameThread();
+}
+
+void ReportPowerWeaponFire(std::uint32_t groupIndex)
+{
+    const auto* api = ResolvePowerApi();
+    constexpr std::size_t minimum =
+        offsetof(AbsolutePowerApi::ApiV1, recordWeaponFire) +
+        sizeof(api->recordWeaponFire);
+    if (api && api->structSize >= minimum && api->recordWeaponFire)
+        (void)api->recordWeaponFire(groupIndex);
+}
 
 constexpr std::size_t kActionCount = static_cast<std::size_t>(Action::Count);
 constexpr std::uintptr_t kFlightHandlerVtableRva = 0x4C41BA0;
@@ -445,6 +488,7 @@ bool DispatchWeaponGroup(std::uint32_t groupIndex, bool stop)
             reinterpret_cast<LeafStart>(module + kLeafStartRva)(
                 reinterpret_cast<void*>(weapons[index]), context);
     }
+    if (!stop) ReportPowerWeaponFire(groupIndex);
     return true;
 }
 
@@ -638,6 +682,12 @@ void HookedThrusterOutput(void* handler, const float* input, float* output)
         g_lastSelectedHandlerOutputMs.store(
             SteadyNowMilliseconds(), std::memory_order_release);
 
+    // Absolute Power may traverse live ship equipment. Do not call it for
+    // generic flight handlers while Signal Hunter is still acquiring the
+    // control cluster; the bridge opens only after the selected handler has
+    // passed AbsoluteHOTAS's exact identity and method gates.
+    if (address == activeHandler) ProcessPowerGameThread();
+
     ProcessShipActions(handler, input, address == activeHandler);
     if (address == drainHandler && g_shipAppliedMask == 0) {
         auto expected = drainHandler;
@@ -823,6 +873,15 @@ std::string_view ActionId(Action action)
 {
     const auto index = static_cast<std::size_t>(action);
     return index < kActionIds.size() ? kActionIds[index] : std::string_view{};
+}
+
+ShipActionAvailability GetActionAvailability(Action action)
+{
+    const auto index = static_cast<std::size_t>(action);
+    const bool buildSupported = index < kActionCount &&
+        g_thrusterHookInstalled.load(std::memory_order_acquire);
+    return ResolveShipActionAvailability(
+        buildSupported, Enabled(), ShipHandlerReady());
 }
 
 void SetActionHeld(Action action, std::uint32_t ownerId, bool held)
