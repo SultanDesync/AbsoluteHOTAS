@@ -19,6 +19,7 @@ struct RuntimeStatus {
 
 void SetRuntimeStatus(const RuntimeStatus& status) noexcept;
 void SetExternalMouseSteeringOwner(bool active) noexcept;
+void SetExternalCameraOwner(bool active) noexcept;
 
 // Safe to call at more than one documented SFSE lifecycle boundary. Host
 // absence and rejection never prevent AbsoluteHOTAS gameplay initialization.

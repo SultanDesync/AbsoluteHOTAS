@@ -1,5 +1,6 @@
 #include "MouseSteeringPolicy.h"
 #include "AbsoluteMouseSteeringAPI.h"
+#include "AbsoluteCameraOwnershipAPI.h"
 
 #include <cassert>
 #include <cstddef>
@@ -10,6 +11,11 @@ int main()
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, readMouseAccumulator) == 16);
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, declareAbsoluteZeroOwner) == 40);
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, absoluteZeroOwnsPitchYaw) == 48);
+    static_assert(sizeof(AbsoluteCameraOwnershipApi::ApiV1) == 48);
+    static_assert(offsetof(AbsoluteCameraOwnershipApi::ApiV1,
+                           declareAbsoluteHeadTrackingOwner) == 16);
+    static_assert(offsetof(AbsoluteCameraOwnershipApi::ApiV1,
+                           cockpitSignalAgeMilliseconds) == 40);
 
     using MouseSteeringPolicy::Decide;
 

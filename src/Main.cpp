@@ -7,6 +7,7 @@
 #include "SettingBeacon.h"
 #include "UIHook.h"
 #include "BindingWizard.h"
+#include "HeadTracking.h"
 #include "NativeShipControl.h"
 #include "SFSEInterface.h"
 #include <windows.h>
@@ -18,6 +19,13 @@ static bool AbsoluteZeroPresent() {
     return GetModuleHandleW(L"AbsoluteZero.dll") != nullptr ||
            std::filesystem::exists(
                RuntimePaths::PluginDirectory() / L"AbsoluteZero.dll", error);
+}
+
+static bool AbsoluteHeadTrackingPresent() {
+    std::error_code error;
+    return GetModuleHandleW(L"AbsoluteHeadTracking.dll") != nullptr ||
+           std::filesystem::exists(
+               RuntimePaths::PluginDirectory() / L"AbsoluteHeadTracking.dll", error);
 }
 
 static void MainLog(const std::string& msg) {
@@ -153,6 +161,14 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
     if (!hookOk) {
         MainLog("WARNING: Hook installation failed. Throttle injection disabled.");
         MainLog("The game may have updated; the .text signature scan found no match.");
+    }
+
+    const bool absoluteHeadTrackingPresent = AbsoluteHeadTrackingPresent();
+    HeadTracking::SetExternalOwner(absoluteHeadTrackingPresent);
+    NativeShipControl::SetExternalCameraOwner(absoluteHeadTrackingPresent);
+    AbsoluteControlSubscriber::SetExternalCameraOwner(absoluteHeadTrackingPresent);
+    if (absoluteHeadTrackingPresent) {
+        MainLog("Absolute Head Tracking detected: it owns camera composition; HOTAS retains the selected-flight observer.");
     }
 
     const bool nativeControlsInitialized = NativeShipControl::Initialize();

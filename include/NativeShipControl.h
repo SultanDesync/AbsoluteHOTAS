@@ -61,6 +61,18 @@ bool ShipHandlerReady();
 // stops advancing immediately.
 std::int64_t SelectedHandlerOutputAgeMilliseconds();
 bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds);
+// Age of any execution through the exact-gated flight-output vtable seam. This
+// mirrors Absolute Head Tracking's standalone cockpit observer and remains
+// independent of HOTAS controller acquisition/enabled state.
+std::int64_t FlightObserverOutputAgeMilliseconds();
+
+// Absolute Head Tracking owns the FirstPersonState camera seam when present.
+// HOTAS keeps the selected-flight observer and exposes only its bounded signal
+// age through the suite ABI.
+void SetExternalCameraOwner(bool active);
+bool ExternalCameraOwnerActive();
+bool CameraHookInstalled();
+bool FlightObserverInstalled();
 
 // Targeting Mode replaces the normal cockpit flight update with a dedicated
 // camera state. This exact-vtable check remains live while the selected-handler

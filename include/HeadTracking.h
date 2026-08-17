@@ -58,6 +58,11 @@ void Update(const Settings& settings, const AxisCalibrationMap& calibration,
 // only the OpenTrack transport and never publishes a camera quaternion.
 void PollPreview(const Settings& settings);
 LiveInput GetLiveInput();
+// Parks the legacy embedded tracker when Absolute Head Tracking owns camera
+// composition. This is process-lifetime arbitration; transport cleanup remains
+// on the controller thread during normal shutdown.
+void SetExternalOwner(bool active);
+bool ExternalOwnerActive();
 void Suspend();
 void Shutdown();
 

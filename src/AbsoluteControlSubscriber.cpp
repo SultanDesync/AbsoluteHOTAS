@@ -32,6 +32,7 @@ std::mutex g_registrationMutex;
 std::atomic_bool g_throttleHookInstalled{};
 std::atomic_bool g_nativeControlsInitialized{};
 std::atomic_bool g_externalMouseSteeringOwner{};
+std::atomic_bool g_externalCameraOwner{};
 std::atomic_bool g_controllerStarted{};
 std::atomic_bool g_legacyWorkbenchConfigured{};
 std::atomic_bool g_legacyWorkbenchInstalled{};
@@ -339,9 +340,21 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
             g_legacyWorkbenchInstalled.load(std::memory_order_acquire) ?
                 "available" : "unavailable or disabled"));
     } else if (id == "diagnostics-coordination") {
-        output = StringValue(g_externalMouseSteeringOwner.load(std::memory_order_acquire) ?
-            "AbsoluteZero compatibility active: native mouse owns pitch/yaw; HOTAS retains roll, strafe, and the shared writer hook." :
-            "Standalone HOTAS steering ownership; optional Absolute Flight Runtime is deferred.");
+        const bool zero = g_externalMouseSteeringOwner.load(std::memory_order_acquire);
+        const bool head = g_externalCameraOwner.load(std::memory_order_acquire);
+        if (zero && head) {
+            output = StringValue(
+                "Absolute Head Tracking owns camera; AbsoluteZero owns native mouse pitch/yaw; HOTAS retains the flight observer, writer, and other lanes.");
+        } else if (head) {
+            output = StringValue(
+                "Absolute Head Tracking owns camera; HOTAS retains the shared flight observer and flight-control lanes.");
+        } else if (zero) {
+            output = StringValue(
+                "AbsoluteZero compatibility active: native mouse owns pitch/yaw; HOTAS retains roll, strafe, and the shared writer hook.");
+        } else {
+            output = StringValue(
+                "Standalone HOTAS steering and legacy camera ownership; optional Absolute Flight Runtime is deferred.");
+        }
     } else {
         return Result::NotFound;
     }
@@ -631,6 +644,11 @@ void SetExternalMouseSteeringOwner(bool active) noexcept
     g_externalMouseSteeringOwner.store(active, std::memory_order_release);
 }
 
+void SetExternalCameraOwner(bool active) noexcept
+{
+    g_externalCameraOwner.store(active, std::memory_order_release);
+}
+
 AbsoluteControlPanelApi::Result RegisterDiscoveredHost() noexcept
 {
     return Testing::RegisterWithResolver(&ResolveLoadedHost);
@@ -793,6 +811,7 @@ void Reset() noexcept
         g_forceReadException.store(false, std::memory_order_release);
         SetRuntimeStatus({});
         SetExternalMouseSteeringOwner(false);
+        SetExternalCameraOwner(false);
     }
     {
         std::scoped_lock lock(g_settingsMutex);

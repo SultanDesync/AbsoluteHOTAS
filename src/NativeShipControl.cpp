@@ -114,7 +114,9 @@ ThrusterOutputFunction g_thrusterOutputOriginal = nullptr;
 CameraRotationFunction g_cameraRotationOriginal = nullptr;
 std::atomic<bool> g_thrusterHookInstalled{ false };
 std::atomic<bool> g_cameraHookInstalled{ false };
+std::atomic<bool> g_externalCameraOwner{ false };
 std::atomic<std::int64_t> g_lastSelectedHandlerOutputMs{ 0 };
+std::atomic<std::int64_t> g_lastFlightObserverOutputMs{ 0 };
 
 constexpr std::int64_t kHeadPosePilotFreshMilliseconds = 400;
 constexpr std::uintptr_t kPlayerCameraSingletonRva = 0x61DD460;
@@ -131,6 +133,13 @@ std::int64_t SteadyNowMilliseconds()
 std::int64_t SelectedHandlerOutputAgeAt(std::int64_t nowMilliseconds)
 {
     const auto observed = g_lastSelectedHandlerOutputMs.load(std::memory_order_acquire);
+    if (observed <= 0 || nowMilliseconds < observed) return -1;
+    return nowMilliseconds - observed;
+}
+
+std::int64_t FlightObserverOutputAgeAt(std::int64_t nowMilliseconds)
+{
+    const auto observed = g_lastFlightObserverOutputMs.load(std::memory_order_acquire);
     if (observed <= 0 || nowMilliseconds < observed) return -1;
     return nowMilliseconds - observed;
 }
@@ -672,6 +681,10 @@ void HookedThrusterOutput(void* handler, const float* input, float* output)
     const auto original = g_thrusterOutputOriginal;
     if (!original) return;
     original(handler, input, output);
+    if (handler && input && output) {
+        g_lastFlightObserverOutputMs.store(
+            SteadyNowMilliseconds(), std::memory_order_release);
+    }
     if (!handler || !output) return;
     const auto address = reinterpret_cast<std::uintptr_t>(handler);
     const auto activeHandler = g_handler.load(std::memory_order_acquire);
@@ -708,7 +721,9 @@ void HookedCameraRotation(void* state, float* quaternion)
     const auto original = g_cameraRotationOriginal;
     if (!original) return;
     original(state, quaternion);
-    if (!state || !quaternion || !g_enabled.load(std::memory_order_acquire) ||
+    if (!state || !quaternion ||
+        g_externalCameraOwner.load(std::memory_order_acquire) ||
+        !g_enabled.load(std::memory_order_acquire) ||
         !g_headPoseActive.load(std::memory_order_acquire) ||
         !g_handler.load(std::memory_order_acquire) ||
         !SelectedHandlerOutputFreshAt(
@@ -739,6 +754,25 @@ void HookedCameraRotation(void* state, float* quaternion)
     SafeCopy(quaternion, result.data(), sizeof(result));
 }
 
+bool ReleaseCameraHook()
+{
+    if (!g_cameraHookInstalled.load(std::memory_order_acquire)) return true;
+    const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!module) return false;
+    auto* slot = reinterpret_cast<std::uintptr_t*>(
+        module + 0x4D04360 + 13 * sizeof(std::uintptr_t));
+    RestorePointerHook(slot, reinterpret_cast<std::uintptr_t>(&HookedCameraRotation),
+        reinterpret_cast<std::uintptr_t>(g_cameraRotationOriginal));
+    std::uintptr_t current = 0;
+    const bool released = SafeRead(reinterpret_cast<std::uintptr_t>(slot), current) &&
+        current == reinterpret_cast<std::uintptr_t>(g_cameraRotationOriginal);
+    if (released) {
+        g_cameraHookInstalled.store(false, std::memory_order_release);
+        NativeLog("FirstPersonState camera hook released to Absolute Head Tracking.");
+    }
+    return released;
+}
+
 bool InstallHooks()
 {
     const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -761,21 +795,26 @@ bool InstallHooks()
         NativeLog("Native ship controls unavailable: selected-handler vtable gate failed.");
     }
 
-    constexpr std::size_t kRotationSlot = 13;
-    auto* cameraSlot = reinterpret_cast<std::uintptr_t*>(
-        module + 0x4D04360 + kRotationSlot * sizeof(std::uintptr_t));
-    std::uintptr_t cameraOriginal = module + 0x1E84A20;
-    g_cameraRotationOriginal = reinterpret_cast<CameraRotationFunction>(cameraOriginal);
-    const bool cameraOk = InstallPointerHook(
-        cameraSlot, module + 0x1E84A20,
-        reinterpret_cast<std::uintptr_t>(&HookedCameraRotation), cameraOriginal);
-    if (cameraOk) {
-        g_cameraRotationOriginal = reinterpret_cast<CameraRotationFunction>(cameraOriginal);
-        g_cameraHookInstalled.store(true, std::memory_order_release);
-        NativeLog("Validated FirstPersonState head-rotation hook installed.");
+    bool cameraOk = false;
+    if (g_externalCameraOwner.load(std::memory_order_acquire)) {
+        NativeLog("Absolute Head Tracking detected; legacy FirstPersonState camera hook skipped.");
     } else {
-        g_cameraRotationOriginal = nullptr;
-        NativeLog("Head tracking unavailable: FirstPersonState vtable gate failed.");
+        constexpr std::size_t kRotationSlot = 13;
+        auto* cameraSlot = reinterpret_cast<std::uintptr_t*>(
+            module + 0x4D04360 + kRotationSlot * sizeof(std::uintptr_t));
+        std::uintptr_t cameraOriginal = module + 0x1E84A20;
+        g_cameraRotationOriginal = reinterpret_cast<CameraRotationFunction>(cameraOriginal);
+        cameraOk = InstallPointerHook(
+            cameraSlot, module + 0x1E84A20,
+            reinterpret_cast<std::uintptr_t>(&HookedCameraRotation), cameraOriginal);
+        if (cameraOk) {
+            g_cameraRotationOriginal = reinterpret_cast<CameraRotationFunction>(cameraOriginal);
+            g_cameraHookInstalled.store(true, std::memory_order_release);
+            NativeLog("Validated FirstPersonState head-rotation hook installed.");
+        } else {
+            g_cameraRotationOriginal = nullptr;
+            NativeLog("Head tracking unavailable: FirstPersonState vtable gate failed.");
+        }
     }
     return thrusterOk || cameraOk;
 }
@@ -793,6 +832,7 @@ void Shutdown()
 {
     SetEnabled(false);
     g_lastSelectedHandlerOutputMs.store(0, std::memory_order_release);
+    g_lastFlightObserverOutputMs.store(0, std::memory_order_release);
     const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     if (!module) return;
     if (g_thrusterHookInstalled.exchange(false, std::memory_order_acq_rel)) {
@@ -800,11 +840,7 @@ void Shutdown()
             reinterpret_cast<std::uintptr_t>(&HookedThrusterOutput),
             reinterpret_cast<std::uintptr_t>(g_thrusterOutputOriginal));
     }
-    if (g_cameraHookInstalled.exchange(false, std::memory_order_acq_rel)) {
-        RestorePointerHook(reinterpret_cast<std::uintptr_t*>(module + 0x4D04360 + 13 * 8),
-            reinterpret_cast<std::uintptr_t>(&HookedCameraRotation),
-            reinterpret_cast<std::uintptr_t>(g_cameraRotationOriginal));
-    }
+    (void)ReleaseCameraHook();
 }
 
 void SetEnabled(bool enabled)
@@ -855,6 +891,38 @@ bool SelectedHandlerOutputFresh(std::int64_t maximumAgeMilliseconds)
 {
     return SelectedHandlerOutputFreshAt(
         SteadyNowMilliseconds(), maximumAgeMilliseconds);
+}
+
+std::int64_t FlightObserverOutputAgeMilliseconds()
+{
+    return FlightObserverOutputAgeAt(SteadyNowMilliseconds());
+}
+
+void SetExternalCameraOwner(bool active)
+{
+    const bool previous = g_externalCameraOwner.exchange(active, std::memory_order_acq_rel);
+    if (!active) return;
+    ClearHeadPose();
+    if (!ReleaseCameraHook()) {
+        NativeLog("WARNING: could not release the FirstPersonState camera hook.");
+    } else if (!previous) {
+        NativeLog("Absolute Head Tracking selected as the external camera owner.");
+    }
+}
+
+bool ExternalCameraOwnerActive()
+{
+    return g_externalCameraOwner.load(std::memory_order_acquire);
+}
+
+bool CameraHookInstalled()
+{
+    return g_cameraHookInstalled.load(std::memory_order_acquire);
+}
+
+bool FlightObserverInstalled()
+{
+    return g_thrusterHookInstalled.load(std::memory_order_acquire);
 }
 
 bool TargetingModeActive()
@@ -964,6 +1032,10 @@ void SetSplitFlightAxes(float roll, float lateral, bool active)
 
 void SetHeadQuaternion(float w, float x, float y, float z, bool active)
 {
+    if (g_externalCameraOwner.load(std::memory_order_acquire)) {
+        ClearHeadPose();
+        return;
+    }
     const float norm = std::sqrt(w * w + x * x + y * y + z * z);
     if (!active || !std::isfinite(norm) || norm < 1e-6F) {
         ClearHeadPose();

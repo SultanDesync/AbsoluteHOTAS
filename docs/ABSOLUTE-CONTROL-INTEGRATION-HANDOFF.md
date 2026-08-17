@@ -390,8 +390,21 @@ pitch/yaw and source-aim claims, and exposes size-versioned bounded accumulator 
 AbsoluteZero installs no second trampoline and retains its own centering policy/configuration.
 Build and contract tests pass, and the paired runtime smoke confirmed that AbsoluteZero owns mouse
 auto-centering while HOTAS retains the shared hook and releases its mouse pitch/yaw claims.
-Absolute Head Tracking remains a separate extraction/coexistence task because HOTAS still embeds
-its legacy head-tracking implementation. This is not an Absolute Control registration defect.
+The camera extraction/coexistence slice is now implemented for runtime validation. Absolute Head
+Tracking declares sole camera ownership through a size-versioned ABI after SFSE plugin loading;
+HOTAS parks its embedded tracker and skips or releases its legacy FirstPersonState hook while
+retaining the flight-output observer. Its shared timestamp is independent of HOTAS controller
+acquisition/enabled state. Head Tracking consumes only the observer's bounded signal age and
+installs the sole camera hook. Older HOTAS builds without the ownership ABI remain
+fail-closed. This is runtime arbitration between daughter modules, not an Absolute Control
+registration responsibility.
+
+Supervised combined-suite smoke passed on 2026-08-17: Absolute Control enumerated the full installed
+suite in one menu and the Head Tracking/HOTAS camera-ownership boundary loaded successfully. The
+current HOTAS pages remain a proof of concept/technical demonstration. There is not yet a provider-
+owned joystick capture/action path for Absolute Power controls or Absolute Head Tracking toggle and
+recenter actions; those are requirements for the full HOTAS binding UI, not reasons to move daughter
+feature ownership back into AbsoluteHOTAS.
 
 ### H2 — Selected profiles and layers
 

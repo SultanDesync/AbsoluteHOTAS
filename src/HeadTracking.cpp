@@ -72,6 +72,7 @@ std::array<std::atomic<std::uint32_t>, 3> g_liveTrackerBits{
     std::bit_cast<std::uint32_t>(0.0F)
 };
 std::atomic<bool> g_liveTrackerActive{ false };
+std::atomic<bool> g_externalOwner{ false };
 
 void HeadLog(std::string_view message)
 {
@@ -256,6 +257,12 @@ namespace HeadTracking {
 void Update(const Settings& settings, const AxisCalibrationMap& calibration,
             float dt, bool eligible)
 {
+    if (g_externalOwner.load(std::memory_order_acquire)) {
+        NativeShipControl::ClearHeadPose();
+        ClearLiveTracker();
+        g_filtered = {};
+        return;
+    }
     const bool recenterDown = settings.recenterButton.IsValid() &&
         DeviceManager::IsButtonPressed(settings.recenterButton);
     const bool toggleDown = settings.toggleButton.IsValid() &&
@@ -359,6 +366,11 @@ void Update(const Settings& settings, const AxisCalibrationMap& calibration,
 
 void PollPreview(const Settings& settings)
 {
+    if (g_externalOwner.load(std::memory_order_acquire)) {
+        NativeShipControl::ClearHeadPose();
+        ClearLiveTracker();
+        return;
+    }
     const bool recenterDown = settings.recenterButton.IsValid() &&
         DeviceManager::IsButtonPressed(settings.recenterButton);
     FreeTrackData frame{};
@@ -386,6 +398,21 @@ LiveInput GetLiveInput()
         input.trackerDegrees[index] = std::bit_cast<float>(
             g_liveTrackerBits[index].load(std::memory_order_relaxed));
     return input;
+}
+
+void SetExternalOwner(bool active)
+{
+    const bool previous = g_externalOwner.exchange(active, std::memory_order_acq_rel);
+    if (active) {
+        NativeShipControl::ClearHeadPose();
+        ClearLiveTracker();
+        if (!previous) HeadLog("Legacy tracker parked; Absolute Head Tracking owns camera pose.");
+    }
+}
+
+bool ExternalOwnerActive()
+{
+    return g_externalOwner.load(std::memory_order_acquire);
 }
 
 void Suspend()
