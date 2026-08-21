@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -72,6 +73,7 @@ void RemoveStandaloneOwned(CSimpleIniA& ini)
     CSimpleIniA::TNamesDepend sections;
     ini.GetAllSections(sections);
     std::vector<std::string> removeSections;
+    std::vector<std::pair<std::string, std::string>> removeKeys;
     for (const auto& section : sections) {
         if (!section.pItem) continue;
         if (IsStandaloneOwned(section.pItem, "") &&
@@ -83,9 +85,12 @@ void RemoveStandaloneOwned(CSimpleIniA& ini)
         ini.GetAllKeys(section.pItem, keys);
         for (const auto& key : keys) {
             if (key.pItem && IsStandaloneOwned(section.pItem, key.pItem)) {
-                ini.Delete(section.pItem, key.pItem, true);
+                removeKeys.emplace_back(section.pItem, key.pItem);
             }
         }
+    }
+    for (const auto& [section, key] : removeKeys) {
+        ini.Delete(section.c_str(), key.c_str(), true);
     }
     for (const auto& section : removeSections) {
         ini.Delete(section.c_str(), nullptr);
