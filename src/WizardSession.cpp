@@ -112,10 +112,6 @@ Route GetRoute() {
                 case AdvancedPage::Devices: return Route::AdvancedDevices;
             }
             break;
-        case Page::Power:
-            // Power owns its own nested routes; the return value is used only by
-            // legacy HOTAS capture context bookkeeping while this page is active.
-            break;
     }
     return Route::BindFlightAxes;
 }

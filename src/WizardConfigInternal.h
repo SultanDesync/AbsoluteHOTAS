@@ -40,6 +40,8 @@ void LoadEffectiveCollections(const std::filesystem::path& profilePath,
                               WizardState& state);
 void SerializeUserOwnedState(const WizardState& state, CSimpleIniA& ini);
 void SerializeMacros(const WizardState& state, CSimpleIniA& ini);
+void ReplaceHotasOwnedState(CSimpleIniA& destination,
+                            const CSimpleIniA& incoming);
 std::string StateSignature(const WizardState& state);
 
 bool SaveIniAtomically(CSimpleIniA& ini, const std::filesystem::path& path);

@@ -79,6 +79,8 @@ struct WizardState {
     bool        accumulatorTurnAssist = false;
     int         turnAssistMode = 0;        // 0=Always, 1=Hold, 2=Toggle
     std::string turnAssistBinding;         // Button binding for Hold/Toggle activation
+    // Presentation-only link state, derived from idle/saturation on load. It is
+    // intentionally excluded from persistence and dirty-state signatures.
     bool        symmetricalThrottleDz = true;
     bool        holdForBoost = true;
 
@@ -126,6 +128,13 @@ struct ProfileSummary {
     std::string mode = "momentary";
     int sequence = 0;
     int slot = 0;
+    int overrideCount = 0;
+};
+
+struct ProfileActivationUpdate {
+    std::string profile; // Empty means Main controls.
+    std::string trigger;
+    std::string mode;
 };
 
 WizardState& GetState();
@@ -163,6 +172,8 @@ bool EnsureStarterProfiles(std::string& err);
 bool CreateOverlayProfile(const std::string& name, std::string& err);
 bool SetProfileActivation(const std::string& name, const std::string& trigger,
                           const std::string& mode, std::string& err);
+bool SetProfileActivations(const std::vector<ProfileActivationUpdate>& updates,
+                           std::string& err);
 // Read the base config's own activation (the "(base)" swap slot), so the wizard can
 // bind base as a first-class swap position (e.g. a rotary detent for base flight).
 void GetBaseActivation(std::string& trigger, std::string& mode);

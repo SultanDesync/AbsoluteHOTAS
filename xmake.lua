@@ -130,6 +130,17 @@ target("config_overlay_test")
     add_files("tests/config_overlay_test.cpp")
     add_files("src/ProfileOverlay.cpp")
 
+target("config_ownership_migration_test")
+    set_kind("binary")
+    set_default(false)
+    set_rundir(os.projectdir())
+    add_tests("managed_replace_external_preservation_and_ui_boundary")
+
+    add_packages("simpleini")
+    add_includedirs("include")
+    add_files("tests/config_ownership_migration_test.cpp")
+    add_files("src/ConfigOwnershipPolicy.cpp")
+
 -- Header-only BindingRef parser regression tests. These protect the configuration
 -- boundary without pulling the DirectInput runtime into the test process.
 target("binding_ref_test")
@@ -147,6 +158,15 @@ target("absolute_power_api_test")
     add_includedirs("include")
     add_files("tests/absolute_power_api_test.cpp")
 
+-- Public Input Bus ABI plus pure edge, capture-debounce, and runtime-context
+-- policies. This freezes v1's binary shape before first-party SDK dogfooding.
+target("input_bus_api_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("abi_edges_capture_context")
+    add_includedirs("include")
+    add_files("tests/input_bus_api_test.cpp")
+
 -- Fail-optional Absolute Control subscriber contract. Compiles the adapter
 -- without the gameplay DLL so host absence/rejection and callback containment
 -- remain mechanically testable without Starfield or Absolute Control installed.
@@ -154,9 +174,45 @@ target("absolute_control_subscriber_test")
     set_kind("binary")
     set_default(false)
     add_tests("abi_descriptors_and_absence")
+    add_packages("simpleini")
     add_includedirs("include")
     add_files("tests/absolute_control_subscriber_test.cpp")
     add_files("src/AbsoluteControlSubscriber.cpp")
+    add_files("src/AbsoluteControlDeviceProvider.cpp")
+    add_files("src/AbsoluteControlDevices.cpp")
+    add_files("src/AbsoluteControlFlightAxesComposition.cpp")
+    add_files("src/AbsoluteControlShipButtonsComposition.cpp")
+    add_files("src/AbsoluteControlMacros.cpp")
+    add_files("src/AbsoluteControlProfiles.cpp")
+    add_files("src/AbsoluteControlScalarCatalog.cpp")
+    add_files("src/AbsoluteControlTelemetry.cpp")
+
+-- Experimental live-component publication. The provider callbacks copy only
+-- fixed-capacity atomic mailboxes prepared by the controller thread.
+target("absolute_control_telemetry_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("descriptors_registration_and_mailboxes")
+    add_includedirs("include")
+    add_files("tests/absolute_control_telemetry_test.cpp")
+    add_files("src/AbsoluteControlTelemetry.cpp")
+
+target("absolute_control_flight_axes_composition_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("legacy_card_anchor_control_and_live_coverage")
+    add_includedirs("include")
+    add_files("tests/absolute_control_flight_axes_composition_test.cpp")
+    add_files("src/AbsoluteControlFlightAxesComposition.cpp")
+    add_files("src/AbsoluteControlScalarCatalog.cpp")
+
+target("absolute_control_ship_buttons_composition_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("binding_method_rows_and_full_control_coverage")
+    add_includedirs("include")
+    add_files("tests/absolute_control_ship_buttons_composition_test.cpp")
+    add_files("src/AbsoluteControlShipButtonsComposition.cpp")
 
 -- Header-only pilot-context policy tests. These lock the distinction between
 -- piloting, on-foot, and suspended/menu states without loading the game runtime.
@@ -207,3 +263,75 @@ target("mouse_steering_policy_test")
 
     add_includedirs("include")
     add_files("tests/mouse_steering_policy_test.cpp")
+
+-- Header-only parity tests shared by the legacy workbench and flight runtime.
+target("control_mode_policy_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("aim_and_boost_parity")
+
+    add_includedirs("include")
+    add_files("tests/control_mode_policy_test.cpp")
+
+-- Renderer-neutral metadata coverage for every static HOTAS binding target.
+target("hotas_binding_catalog_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("ids_slots_capture_kinds_and_exclusions")
+
+    add_includedirs("include")
+    add_files("tests/hotas_binding_catalog_test.cpp")
+
+-- Renderer-neutral bounded device records, non-adjacent duplicate reassignment,
+-- and eight-axis sweep-calibration policy.
+target("absolute_control_devices_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("records_reassignment_and_calibration")
+
+    add_includedirs("include")
+    add_files("tests/absolute_control_devices_test.cpp")
+    add_files("src/AbsoluteControlDevices.cpp")
+
+target("absolute_control_device_provider_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("record_callbacks_actions_and_live_session")
+
+    add_includedirs("include")
+    add_files("tests/absolute_control_device_provider_test.cpp")
+    add_files("src/AbsoluteControlDeviceProvider.cpp")
+    add_files("src/AbsoluteControlDevices.cpp")
+    add_files("src/AbsoluteControlTelemetry.cpp")
+
+-- Renderer-neutral selected macro/step/chord and custom-shortcut transactions.
+-- The production repository delegates its one save to WizardConfig; this target
+-- uses an in-memory repository to verify lossless incomplete drafts and ordering.
+target("absolute_control_macros_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("records_ordering_and_atomic_apply")
+
+    add_includedirs("include")
+    add_files("tests/absolute_control_macros_test.cpp")
+    add_files("src/AbsoluteControlMacros.cpp")
+
+-- Renderer-neutral profile record/session semantics over the legacy Wizard
+-- config owner, including dirty target switches and activation conflicts.
+target("absolute_control_profiles_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("records_switches_activations_and_operations")
+
+    add_includedirs("include")
+    add_files("tests/absolute_control_profiles_test.cpp")
+    add_files("src/AbsoluteControlProfiles.cpp")
+
+target("absolute_control_throttle_actions_test")
+    set_kind("binary")
+    set_default(false)
+    add_tests("landmarks_and_one_shot_link")
+
+    add_includedirs("include")
+    add_files("tests/absolute_control_throttle_actions_test.cpp")
+    add_files("src/AbsoluteControlScalarCatalog.cpp")

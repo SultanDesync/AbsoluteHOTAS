@@ -1,9 +1,9 @@
 # AbsoluteHOTAS -> Absolute Control integration handoff
 
-> **Status:** H1 implemented, mechanically verified, and runtime-validated
-> **Date:** 2026-08-17
-> **Immediate objective:** Begin H2 selected profiles/layers, then H3 provider-owned DirectInput
-> capture, without regressing the qualified H1 scalar path.
+> **Status:** C2 Flight Axes tab mechanically complete; in-game visual/input qualification pending
+> **Date:** 2026-08-20
+> **Immediate objective:** Qualify the legacy-faithful Flight Axes composition in Starfield,
+> then rebuild the remaining HOTAS pages one tab at a time on the same fail-optional foundation.
 > **Release posture:** Absolute Power Presets and Diagnostics may ship alongside this work;
 > its unfinished Automation / Cheats route is an explicitly unavailable **Coming Soon** preview.
 
@@ -13,15 +13,12 @@ Begin in the AbsoluteHOTAS repository. Read this document completely, then inspe
 contracts linked under [Required reading](#required-reading). Do not start by copying ImGui draw
 code or by adding settings to Absolute Control itself.
 
-The first implementation slice is:
-
-1. introduce an `AbsoluteControlSubscriber` adapter inside AbsoluteHOTAS;
-2. dynamically discover the product or ResearchDev Control host without linking to it;
-3. register module `absolute.hotas` plus read-only **Setup Overview** and
-   **Plugin & Compatibility** pages;
-4. keep all flight controls, manual INI use, profiles, and the existing overlay functional when
-   Control is absent or rejected; and
-5. add ABI/descriptor/absence tests before exposing an editable setting.
+The active implementation slice is the **Flight Axes** tab. Inspect the C2 semantic-composition
+contract, the renderer-neutral HOTAS composition, its six telemetry channels, and the legacy
+workbench reference before changing either repository. Preserve the flat page as the deterministic
+fallback for an absent, older, or rejecting composition host. Do not begin the next tab until this
+one has current in-game pointer, keyboard, controller/HOTAS capture, Apply/Cancel, and visual-layout
+evidence.
 
 Stop and document a blocker rather than inventing a synthetic key path, letting Control parse a
 HOTAS INI, or moving DirectInput polling into the menu host.
@@ -99,26 +96,64 @@ own configuration owners.
   Throttle Setup, and Profiles & Layers.
 - `AbsoluteHOTAS_QueryApi(1)` is the existing suite command-binding/capture contract used by
   other mods. It is not a Control provider API.
+- `AbsoluteHOTAS_QueryInputBusApi(1)` is the new pre-release, fail-optional Input Bus. It mirrors
+  copied DirectInput snapshots and edges, runs serialized provider-owned capture, publishes active
+  profile identity, and shares validated pilot/gameplay/targeting context. It does not dispatch
+  consumer actions or replace the separate runtime-ownership arbitration boundary. See
+  [Absolute Input Bus ABI v1](ABSOLUTE-INPUT-BUS-V1.md).
 - `AbsoluteControlSubscriber` now discovers either Control product DLL name at SFSE
-  post-data-load, registers copied Setup, Flight Axes, and Plugin & Compatibility descriptors,
-  retries a `NotReady` host once at post-post-data-load, and leaves standalone gameplay unchanged
-  when the host is absent or rejects the provider.
-- The H1 scalar adapter owns a revisioned draft for Main controls, atomically updates only its six
-  keys in `AbsoluteHOTAS_Custom.ini`, requests the normal controller reload, and performs semantic
-  read-back. The legacy workbench and Control cannot write simultaneously.
+  post-data-load and registers all nine stable HOTAS page IDs. Flight Axes, Ship Buttons,
+  Throttle Setup, Aiming & Combat, and Plugin & Compatibility publish the 63 HOTAS-owned static
+  settings that ABI-v1 scalar controls can express. The provider-owned capture tail publishes the
+  53-target static HOTAS binding catalog, including the Rate Throttle Turn Assist activation.
+  Throttle Setup exposes inversion-aware guided landmark capture: a transient set-by-feel gesture
+  moves detent/zero-thrust/boost bands with the live lever, then the second press or Apply commits
+  the current position. Zone widths and idle/saturation edits publish into the same preview before
+  persistence. The legacy symmetric idle/saturation relationship remains an explicit one-shot draft
+  action rather than persistent presentation state.
+  Every named ship binding publishes its selected Direct/Context/Keyboard route and live availability.
+  Profiles & Layers publishes a bounded Main/overlay/full-profile collection, sparse inheritance
+  summaries, activation capture, dirty-switch resolution, and the existing create/export/import/reset
+  repository operations. Twelve experimental live channels add six card-local Flight Axes plots,
+  calibrated/shaped overview plots, throttle range/landmark/response, HOTAS aim telemetry, and
+  selected-device state without changing the stable ABI. The C2 composition lane publishes the
+  Flight Axes page as a 91-node legacy-faithful tree: six jump anchors, four sections, nine cards,
+  all 45 existing controls, six embedded plots, and 29 control-to-series associations.
+  Control's live lane publishes active-page-only latest-sample patches at the movie frame boundary;
+  the pinned throttle range redraws independently of the scrolling controls, while throttle response
+  history is a host-owned secondary disclosure collapsed by default.
+  Macros and custom shortcuts publish bounded selected-record editing, while Devices publishes
+  bounded inventory, binding reassignment, and transactional calibration. Setup remains status-only. It
+  retries a `NotReady` host once at post-post-data-load and leaves standalone gameplay unchanged
+  when the optional host is absent or rejects the provider.
+- The scalar adapter owns one renderer-neutral, revisioned draft for Main controls, atomically
+  updates its catalogued keys in `AbsoluteHOTAS_Custom.ini`, requests the normal controller
+  reload, and performs semantic read-back. The legacy workbench and Control cannot write
+  simultaneously.
 - Opening either editing frontend parks HOTAS gameplay output. The embedded workbench refuses to
   open while Control owns the frontend; held input edges are reseeded when editing ends.
 - `xmake` builds and optionally deploys the DLL/default INI. `xmake test` currently exercises
-  nine standalone test targets, including the Control ABI/subscriber contract suite.
+  21 standalone test targets, including composition, Control subscriber, capture, transaction,
+  device, macro/profile, ownership-migration, and live-mailbox suites.
 
 ### Absolute Control
 
 - The product ABI authority is `include/AbsoluteControlPanelAPI.h`, ABI v1.
+- AbsoluteHOTAS's byte-identical vendored snapshot and update provenance are recorded in
+  [Absolute Control SDK snapshot](ABSOLUTE-CONTROL-SDK-SNAPSHOT.md).
 - The host copies module/page/control descriptors and invokes provider callbacks through leases.
 - Standard controls, labeled choices, text entry, page transactions, keyboard capture, and the
   experimental live-component channel exist.
-- Mouse/controller/HOTAS binding capture is not currently implemented.
-- There is no public host command that opens Control directly at a requested module/page.
+- The separately negotiated C2 semantic-composition API adds bounded sections, cards, anchors,
+  status/conditions, same-page live slots, and validated marker/series associations. It does not
+  advertise direct graph manipulation or the later record/workflow vocabulary.
+- Mouse/controller/HOTAS capture is provider-owned through the optional size-gated capture tail.
+- The appended, size/capability-gated page-open command asynchronously routes Toggle Wizard to
+  `absolute.hotas/hotas-setup`; older or unavailable hosts retain the embedded-workbench fallback.
+  The provider call performs no synthesized input or direct Starfield UI work.
+- The same command backs renderer-neutral deep links from Flight Axes to the single-owner Throttle
+  Setup draft and from Ship Buttons shortcuts to Macros. Pre-command hosts receive the original
+  read-only guidance instead of a nonfunctional Action.
 - Dirty page/module navigation and Close now use the host-owned Apply / Discard / Stay modal.
   Provider Apply failure retains the draft and lease; abnormal Hide/destruction still performs
   fail-safe Cancel.
@@ -402,9 +437,28 @@ registration responsibility.
 Supervised combined-suite smoke passed on 2026-08-17: Absolute Control enumerated the full installed
 suite in one menu and the Head Tracking/HOTAS camera-ownership boundary loaded successfully. The
 current HOTAS pages remain a proof of concept/technical demonstration. There is not yet a provider-
-owned joystick capture/action path for Absolute Power controls or Absolute Head Tracking toggle and
-recenter actions; those are requirements for the full HOTAS binding UI, not reasons to move daughter
-feature ownership back into AbsoluteHOTAS.
+owned joystick binding UI for Absolute Power controls or Absolute Head Tracking toggle and recenter
+actions. The Input Bus backend for those pages is now implemented in HOTAS and pending full-suite
+runtime qualification plus first-party consumer dogfooding; daughter action/configuration ownership
+does not move back into AbsoluteHOTAS.
+
+### Input Bus v1 backend — before remaining menu work
+
+Implementation checkpoint: the pre-release ABI, copied device snapshots, digital press/release
+counters, controller-thread capture service, active-profile identity, and typed runtime-context
+snapshot are implemented. The complete eleven-test HOTAS suite and full DLL build pass. The current
+test build is deployed for an ordinary HOTAS load/gameplay smoke; public stability is not claimed
+until first-party consumers have exercised the contract.
+
+- Keep HOTAS as the sole DirectInput poller and mirror snapshots after its normal poll.
+- Keep action semantics, transactions, and persistence in each consumer mod.
+- Treat consumer discovery as fail-optional; custom/keyboard bindings remain the fallback.
+- Dogfood button capture in Absolute Head Tracking and Absolute Power before publishing an SDK.
+- Keep full profile serialization out of the bus; expose identity and generation only.
+- Publish pilot, gameplay-active, targeting, and handler-age signals with validity metadata.
+
+Exit: Head Tracking and Power record and execute direct flight-stick bindings through the same bus,
+both still load without HOTAS, and a profile switch/reconnect produces no synthetic press.
 
 ### H2 — Selected profiles and layers
 
@@ -417,14 +471,24 @@ Exit: no profile operation flattens inherited state or silently loses another pa
 
 ### H3 — Provider-owned HOTAS capture
 
-- Land the optional capture contract and shell modal first.
-- Adapt `WizardCapture` rather than duplicating DirectInput enumeration.
+- Use the landed Input Bus capture backend; add the Control shell modal/presentation contract.
+- Adapt the existing HOTAS binding pages and first-party daughter pages to the shared backend rather
+  than duplicating DirectInput enumeration or recording logic.
 - Port core axis and ship-button bindings.
 - Prove cancellation, device loss, duplicate device labels, parked output, and held-edge reseeding.
 
 Exit: a DirectInput binding captures, drafts, applies, reloads, and executes without input leakage.
 
 ### H4 — Flight Axes and Throttle behavior
+
+Implementation checkpoint: the first tab-by-tab rebuild is mechanically complete. Flight Axes
+publishes the legacy page summary, six-axis jump navigator, Thrust/Rotation/6-DOF/Fallback
+sections, six core axis cards, Reverse and Digital Fallback cards, the complete 45-control stable
+surface, and six embedded input/output plots. Node state reports bound source, missing-required
+severity, reverse strategy, fallback coverage, and unapplied draft state. The provider registers
+this enhancement only after both the stable page and live channels succeed; otherwise the existing
+flat page remains available. Runtime visual/input qualification is still required, so this is not
+yet a parity or release claim.
 
 - Port all six axis bindings and common scalar tuning.
 - Add behavior-first throttle choices before raw parameters.
@@ -541,3 +605,17 @@ The integration is not complete until:
 
 Do not publish, upload, merge broad dirty worktrees, or remove the legacy overlay merely because
 the first page renders.
+# Throttle direct-edit refinement
+
+The pinned throttle range is the primary positional editor. Absolute Control resolves the
+provider's range semantics into distinct idle/zero/active/cruise/full/reverse/boost colours and
+draws the physical lever separately in white. The three center markers retain typed scalar
+`controlId` links, so pointer dragging uses the ordinary HOTAS draft-write, validation, Apply, and
+Cancel path. A direct graph write cancels any active physical set-by-feel capture before updating
+the draft, preventing two input sources from moving one landmark.
+
+The page groups the remaining controls by workflow: direct/by-feel landmark setup, positional
+zone widths, advanced precise landmark values, rate throttle, turn assist, and the one-shot
+idle/saturation utility. Width controls continue to redraw the range immediately. Physical
+tracking remains the preferred tactile workflow and precise raw sliders remain the accessible
+keyboard/controller fallback.

@@ -26,6 +26,7 @@ struct Observation {
 
 struct Snapshot {
     State state = State::Suspended;
+    std::int64_t selectedOutputAgeMilliseconds = -1;
     bool headTrackingAllowed = false;
     bool gameplayContextKnown = false;
     bool gameplayContextActive = false;

@@ -10,7 +10,6 @@
 #include "UIHook.h"
 #include "DeviceManager.h"
 #include "Plugin.h"
-#include "PowerModuleUI.h"
 
 #include <imgui.h>
 
@@ -67,7 +66,6 @@ static const char* PrimarySectionLabel() {
         case WizardSession::Page::Bind: return "Flight Controls";
         case WizardSession::Page::Tune: return "Flight Modes";
         case WizardSession::Page::Advanced: return "Advanced";
-        case WizardSession::Page::Power: return "Absolute Power";
     }
     return "Section";
 }
@@ -86,8 +84,6 @@ static void DrawPrimaryNavigation() {
                 // While synchronizing an externally selected route, ignore the
                 // tab bar's formerly active item until the requested tab is drawn.
                 if (!synchronizeSelection && WizardSession::GetPage() != page) {
-                    if (WizardSession::GetPage() == WizardSession::Page::Power)
-                        PowerModuleUI::CancelTransientInteractions();
                     WizardSession::SelectPage(page);
                 }
                 ImGui::EndTabItem();
@@ -97,8 +93,6 @@ static void DrawPrimaryNavigation() {
         DrawTab("Flight Controls##Primary", WizardSession::Page::Bind);
         DrawTab("Flight Modes##Primary", WizardSession::Page::Tune);
         DrawTab("Advanced##Primary", WizardSession::Page::Advanced);
-        if (PowerModuleUI::Available())
-            DrawTab("Power##Primary", WizardSession::Page::Power);
         ImGui::EndTabBar();
     }
 
@@ -107,7 +101,6 @@ static void DrawPrimaryNavigation() {
 }
 
 static void DrawSecondaryNavigation() {
-    if (WizardSession::GetPage() == WizardSession::Page::Power) return;
     ImGui::Spacing();
     ImGui::SeparatorText(PrimarySectionLabel());
 
@@ -156,10 +149,6 @@ static void DrawSecondaryNavigation() {
 }
 
 static void DrawActivePage(WizardState& s, bool dirty) {
-    if (WizardSession::GetPage() == WizardSession::Page::Power) {
-        PowerModuleUI::Draw();
-        return;
-    }
     if (WizardSession::GetPage() == WizardSession::Page::Advanced)
         WizardUI::DrawProfileManagementPanel(dirty);
 
@@ -212,28 +201,18 @@ static void DrawCaptureModal() {
 }
 
 static bool CanCloseWorkbench() {
-    PowerModuleUI::CancelTransientInteractions();
-    if (PowerModuleUI::Dirty()) {
-        WizardSession::RequireCloseResolution(
-            "Unsaved Power changes must be saved or discarded before closing.");
-        return false;
-    }
     return WizardSession::RequestClose();
 }
 
 static bool SaveAndCloseWorkbench() {
-    PowerModuleUI::CancelTransientInteractions();
     if (WizardSession::HasUnsavedChanges() && !WizardSession::SaveCurrentProfile()) return false;
-    if (PowerModuleUI::Dirty() && !PowerModuleUI::Save()) return false;
     WizardSession::CancelPendingClose();
     UIHook::ToggleUI();
     return true;
 }
 
 static bool CloseWorkbenchWithoutSaving() {
-    PowerModuleUI::CancelTransientInteractions();
     if (WizardSession::HasUnsavedChanges() && !WizardSession::DiscardChanges()) return false;
-    if (PowerModuleUI::Dirty()) PowerModuleUI::Discard();
     WizardSession::CancelPendingClose();
     UIHook::ToggleUI();
     return true;
@@ -311,7 +290,6 @@ void BindingWizard::Draw() {
     WizardSession::UpdateCapture(WizardUI::OnCaptureCommit);
     auto& s = WizardConfig::GetState();
     const bool dirty = WizardSession::HasUnsavedChanges();
-    bool powerPage = WizardSession::GetPage() == WizardSession::Page::Power;
 
     ImGui::SetNextWindowSize(ImVec2(800, 680), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(620, 480), ImVec2(1600, 1200));
@@ -335,9 +313,8 @@ void BindingWizard::Draw() {
         ImGui::Separator();
     }
 
-    if (!powerPage) WizardUI::DrawProfileContextBar(dirty);
+    WizardUI::DrawProfileContextBar(dirty);
     DrawPrimaryNavigation();
-    powerPage = WizardSession::GetPage() == WizardSession::Page::Power;
     DrawSecondaryNavigation();
     ImGui::Separator();
 
@@ -366,10 +343,8 @@ void BindingWizard::Draw() {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
-        if (ImGui::Button("Save & Apply", ImVec2(-1.0f, footerButtonHeight))) {
-            if (powerPage) (void)PowerModuleUI::Save();
-            else SaveCurrentProfile();
-        }
+        if (ImGui::Button("Save & Apply", ImVec2(-1.0f, footerButtonHeight)))
+            SaveCurrentProfile();
         ImGui::PopStyleColor(3);
         ImGui::TableNextColumn();
         if (ImGui::Button("Save & Close", ImVec2(-1.0f, footerButtonHeight)))
@@ -381,14 +356,8 @@ void BindingWizard::Draw() {
     }
 
     const auto& status = WizardSession::GetStatus();
-    const bool footerDirty = powerPage ? PowerModuleUI::Dirty()
-                                       : WizardSession::HasUnsavedChanges();
-    if (powerPage && footerDirty) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Unsaved: Absolute Power");
-    } else if (powerPage) {
-        ImGui::TextDisabled("%.*s", static_cast<int>(PowerModuleUI::StatusText().size()),
-                            PowerModuleUI::StatusText().data());
-    } else if (status.kind == WizardSession::StatusKind::Error && !status.message.empty()) {
+    const bool footerDirty = WizardSession::HasUnsavedChanges();
+    if (status.kind == WizardSession::StatusKind::Error && !status.message.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", status.message.c_str());
     } else if (footerDirty) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Unsaved: %s", VisibleProfileName(WizardConfig::GetEditProfile()).c_str());
@@ -409,7 +378,6 @@ void BindingWizard::Draw() {
 
 void BindingWizard::Initialize() {
     WizardSession::Initialize();
-    PowerModuleUI::Initialize();
     UIHook::SetDrawCallback(&BindingWizard::Draw);
     UIHook::SetCloseGuardCallback(&CanCloseWorkbench);
     WizardUI::Log("BindingWizard registered with UIHook.");

@@ -44,7 +44,7 @@ struct AxisSlot {
     const char* deadzoneKey;      // May be nullptr
 };
 
-inline const AxisSlot kAxisSlots[] = {
+inline constexpr AxisSlot kAxisSlots[] = {
     {"Throttle",         "iThrottleAxis",    "bInvertThrottle",    "fThrottleSensitivity","fThrottleSaturation",  "fThrottleDeadzone"},
     {"Pitch",            "iPitchAxis",       "bInvertPitch",       "fPitchSensitivity",   "fPitchSaturation",    "fPitchDeadzone"},
     {"Yaw",              "iYawAxis",         "bInvertYaw",         "fYawSensitivity",     "fYawSaturation",      "fYawDeadzone"},
@@ -61,7 +61,7 @@ struct ButtonSlot {
     const char* iniKey;
 };
 
-inline const ButtonSlot kButtonSlots[] = {
+inline constexpr ButtonSlot kButtonSlots[] = {
     {"Activate",       "iActivateButtonId"},
     {"Stop",           "iStopButtonId"},
     {"Toggle Wizard",  "iToggleWizardButton"},
@@ -69,7 +69,7 @@ inline const ButtonSlot kButtonSlots[] = {
 inline constexpr int kNumButtonSlots = sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
 inline constexpr int kToggleWizardButtonSlot = 2;
 
-inline const ButtonSlot kControlExtensionSlots[] = {
+inline constexpr ButtonSlot kControlExtensionSlots[] = {
     {"Hold Current Throttle", "iCruiseHoldButton"},
     {"Full Stop",             "iFullStopButton"},
     {"Cruise 50%",            "iCruiseHalfButton"},
@@ -84,7 +84,7 @@ struct DigitalAxisSlot {
     const char* iniKey;
 };
 
-inline const DigitalAxisSlot kDigitalAxisSlots[] = {
+inline constexpr DigitalAxisSlot kDigitalAxisSlots[] = {
     {"Digital Reverse",       "iDigitalReverseButton"},
     {"Digital Roll Left",     "iDigitalRollLeftButton"},
     {"Digital Roll Right",    "iDigitalRollRightButton"},
@@ -103,7 +103,7 @@ struct AimAxisSlot {
     const char* sensitivityKey;
 };
 
-inline const AimAxisSlot kAimAxisSlots[] = {
+inline constexpr AimAxisSlot kAimAxisSlots[] = {
     {"Aim Yaw",   "iAimYawAxis",   "bInvertAimYaw",   "fAimYawSensitivity"},
     {"Aim Pitch", "iAimPitchAxis", "bInvertAimPitch",  "fAimPitchSensitivity"},
 };
@@ -133,7 +133,7 @@ struct DigitalAimSlot {
     const char* iniKey;
 };
 
-inline const DigitalAimSlot kDigitalAimSlots[] = {
+inline constexpr DigitalAimSlot kDigitalAimSlots[] = {
     {"Aim Left",   "iDigitalAimLeftButton"},
     {"Aim Right",  "iDigitalAimRightButton"},
     {"Aim Up",     "iDigitalAimUpButton"},

@@ -8,7 +8,7 @@
 
 namespace WizardSession {
 
-enum class Page { Bind, Tune, Advanced, Power };
+enum class Page { Bind, Tune, Advanced };
 enum class BindPage { FlightAxes, ShipButtons };
 enum class TunePage { Aiming, CameraLook, GamepadThrottle };
 enum class AdvancedPage { Macros, PluginControls, Devices };

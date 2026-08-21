@@ -61,33 +61,34 @@ requirements even where the current ImGui screen is less complete.
 | Ship buttons, custom shortcuts, profiles and macros | AbsoluteHOTAS | AbsoluteHOTAS pages |
 | Bound pitch/yaw steering | AbsoluteHOTAS | AbsoluteHOTAS / Flight Axes |
 | Independent reticle/aim axes and digital aiming | AbsoluteHOTAS | AbsoluteHOTAS / Aiming & Combat |
-| HOSAM mode that releases pitch/yaw to native mouse steering | AbsoluteHOTAS | AbsoluteHOTAS / Flight Axes or Aiming & Combat summary |
+| HOSAM/native mouse-steering routing and idle-centering policy | AbsoluteZero | Its own Control module/pages |
 | OpenTrack input, pose shaping, camera composition, recenter and toggle | Absolute Head Tracking | Its own Control module/pages |
-| Idle mouse-centering policy, radius, delay and decay | AbsoluteZero | Its own Control module/page |
 | Shared flight-lane arbitration | Optional Absolute Flight Runtime | Headless runtime; status may appear in diagnostics |
 | Page layout, focus, modals, help and generic transactions | Absolute Control | Host shell |
 
 ### 3.1 Mouse ownership rule
 
-Mouse input itself does not belong to AbsoluteZero. During flight:
+Mouse input remains a shared game input, while the standalone mouse-steering module owns
+the HOSAM routing policy. During flight:
 
 - a bound HOTAS pitch or yaw axis claims the corresponding steering lane;
-- HOSAM deliberately releases pitch/yaw steering to Starfield's native mouse path;
+- the standalone mouse-steering module may release pitch/yaw steering to Starfield's
+  native mouse path;
 - independent aiming remains a separate HOTAS-owned lane; and
 - AbsoluteZero may center native mouse steering only while the arbitration state says
   that path is active and no higher-priority owner has claimed it.
 
 The Control UI should show the effective owner in plain language. It must not imply that
-installing AbsoluteZero transfers mouse or steering ownership away from HOTAS.
+installing AbsoluteZero erases HOTAS bindings or transfers unrelated flight lanes.
 
 ### 3.2 Transitional legacy features
 
-The current HOTAS binary and ImGui menu still contain Camera Look and alignment assist.
+The current HOTAS binary and ImGui menu still contain Camera Look, HOSAM, and alignment assist.
 They remain in this inventory so their behavior can be migrated without loss, but they
 must not become settings on the target `absolute.hotas` Control module:
 
 - **Camera Look** migrates to Absolute Head Tracking.
-- **Alignment assist** migrates to AbsoluteZero.
+- **HOSAM/native mouse steering and alignment assist** migrate to AbsoluteZero.
 - The embedded Absolute Power tab is not a HOTAS feature and is not reproduced. Absolute
   Power already registers as its own Control module.
 
@@ -140,9 +141,9 @@ These behaviors apply to every editable HOTAS page.
 - Fresh or incomplete configurations open Setup Overview. Otherwise, reopen the last
   HOTAS route used in the current game session.
 - Overview cards and contextual actions deep-link to the exact resolving page/control.
-- The legacy Toggle Wizard binding must eventually request
-  `Show("absolute.hotas", pageId)` through an optional host command. It must never
-  synthesize Pause, Escape, F2 or mouse input to navigate the menu. **HABI, PROV**
+- The legacy Toggle Wizard binding requests `absolute.hotas/hotas-setup` through the optional,
+  size/capability-gated host command and falls back to the embedded workbench when unavailable.
+  It never synthesizes Pause, Escape, F2 or mouse input to navigate the menu. **HABI, PROV**
 - When Control or the open-command capability is absent, the standalone HOTAS runtime
   and its supported fallback access path continue to work.
 - Keyboard, mouse and controller navigation are host responsibilities. DirectInput
@@ -215,7 +216,7 @@ Required cards/status:
 
 1. **Devices detected** — count, duplicate-name warning and Devices deep link.
 2. **Primary axes** — bound/responding state for throttle, pitch, yaw, roll, lateral
-   strafe and vertical strafe; pitch/yaw may truthfully show mouse-owned under HOSAM.
+   strafe and vertical strafe; pitch/yaw may truthfully show externally mouse-owned.
 3. **Throttle behavior** — selected recipe/custom state, sensible live interpretation,
    and Throttle Setup deep link.
 4. **Essential ship actions** — useful bound count and Ship Buttons deep link. Do not
@@ -280,9 +281,9 @@ Supported tuning by axis:
 All bindings require **CAP, PROV**. Standard tuning is **STD, PROV**. The graphs require
 **LIVE, HUX, PROV**.
 
-Pitch and yaw cards must preserve their binding/tuning while HOSAM is enabled, show them
-inactive rather than empty, and state that Starfield's mouse path currently owns
-steering.
+Pitch and yaw cards must preserve their binding/tuning while the standalone
+mouse-steering module owns those lanes, show them inactive rather than empty, and state
+that Starfield's mouse path currently owns steering.
 
 ### 8.3 Throttle card summary
 
@@ -324,16 +325,18 @@ Tuning:
 
 These accept buttons or POV directions. **CAP, STD, PROV**
 
-### 8.6 HOSAM
+### 8.6 External mouse-steering ownership
 
-Retain **Mouse steering (HOSAM)** as a HOTAS routing setting. The page must explain:
+Do not reproduce the **Mouse steering (HOSAM)** toggle or alignment tuning in HOTAS.
+The page may report effective state and must explain:
 
 - pitch/yaw HOTAS injection is parked while native mouse steering owns those lanes;
 - roll, strafe, throttle, buttons and independent aim remain HOTAS capabilities; and
-- idle centering, when installed, is configured in AbsoluteZero.
+- mouse-steering enablement and idle centering are configured in AbsoluteZero.
 
-Show the current aiming mode with a deep link to Aiming & Combat. Do not show alignment
-radius, idle delay or decay settings here. **STD, PROV, SUITE status optional**
+Show the current aiming mode with a deep link to Aiming & Combat and offer an AbsoluteZero
+module link when available. Do not show an enable toggle, alignment radius, idle delay,
+or decay settings here. **PROV, SUITE status optional**
 
 ### 8.7 Flight Axes acceptance
 
@@ -342,7 +345,7 @@ radius, idle delay or decay settings here. **STD, PROV, SUITE status optional**
 - Every boundary is recognizable without color alone.
 - Binding, movement, inversion, tuning and saved read-back can be verified end to end.
 - Live graphs use runtime normalization, not a renderer-side approximation.
-- HOSAM never erases preserved pitch/yaw bindings.
+- External mouse-steering ownership never erases preserved pitch/yaw bindings.
 
 ## 9. Page specification — Throttle Setup
 
@@ -547,8 +550,7 @@ authority. **STD, CAP, LIVE optional, PROV**
   - **Independent Aim & Steer** when separate aim axes are bound; or
   - **Aim-Driven Steering** when they are unbound.
 - In aim-driven mode, expose Steering Sensitivity.
-- Show the relationship with HOSAM without duplicating the HOSAM toggle unless UX
-  testing demonstrates that one synchronized control is clearer than a deep link.
+- Show the relationship with external mouse steering without duplicating its toggle.
 
 ### 11.2 Independent analog aim
 
@@ -892,7 +894,8 @@ provider-supplied RGBA constants.
 | `[Normalization]` throttle regions | Throttle Setup |
 | `[DualStick]` accumulator/rate throttle | Throttle Setup |
 | `[DigitalAxes]` | Flight Axes |
-| `[Aim]` source/aim axes/digital aim/HOSAM | Aiming & Combat plus HOSAM summary/toggle |
+| `[Aim]` source/aim axes/digital aim | Aiming & Combat |
+| `[Aim] bHOSAMMode` | AbsoluteZero; HOTAS shows effective ownership only |
 | `[Buttons]` three hardware bindings | Plugin & Compatibility |
 | `[Gate]` automatic context mode/signal/latch | Plugin & Compatibility |
 | `[ControlExtensions]` | Ship Buttons / Flight Assist, linked to throttle |
@@ -1008,7 +1011,7 @@ evidence:
 - Setup Overview identifies devices, axes, throttle, actions, profiles and compatibility.
 - Six core axes bind, clear, invert, tune, render live state, save, reload and execute.
 - All reverse and digital fallback strategies remain usable.
-- HOSAM parks pitch/yaw without losing them; independent aim continues separately.
+- External mouse steering parks pitch/yaw without losing them; independent aim continues separately.
 - Every one of the 23 named ship actions captures and reports its truthful method/state.
 - Menu reuse neutral-arming and threshold hysteresis prevent carried input.
 - All four Flight Assist commands and custom keyboard/mouse shortcuts remain usable.

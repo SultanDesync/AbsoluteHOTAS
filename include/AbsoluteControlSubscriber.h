@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AbsoluteControlPanelAPI.h"
+#include "AbsoluteControlCompositionExperimentalAPI.h"
 
 #include <cstddef>
 
@@ -29,6 +30,9 @@ void SetExternalCameraOwner(bool active) noexcept;
 // open, HOTAS parks gameplay output even if the user is viewing another module.
 [[nodiscard]] bool IsHostOpen() noexcept;
 [[nodiscard]] bool IsHostInputCaptureActive() noexcept;
+// Requests this provider's already-registered page through the optional host
+// ABI tail. False means the caller should retain its legacy configuration UI.
+[[nodiscard]] bool RequestHostPage(const char* pageId) noexcept;
 
 namespace Testing {
 
@@ -45,6 +49,14 @@ using ResolveLoadedHostCallback = const AbsoluteControlPanelApi::ApiV1*(__cdecl*
 [[nodiscard]] const AbsoluteControlPanelApi::ModuleDescriptorV1& Module() noexcept;
 [[nodiscard]] const AbsoluteControlPanelApi::PageDescriptorV1* Pages(
     std::size_t& pageCount) noexcept;
+[[nodiscard]] AbsoluteControlPanelApi::Result
+RegisterFlightAxesComposition(
+    const AbsoluteControlCompositionExperimental::ApiV1* api) noexcept;
+[[nodiscard]] bool IsFlightAxesCompositionRegistered() noexcept;
+[[nodiscard]] AbsoluteControlPanelApi::Result
+RegisterShipButtonsComposition(
+    const AbsoluteControlCompositionExperimental::ApiV1* api) noexcept;
+[[nodiscard]] bool IsShipButtonsCompositionRegistered() noexcept;
 void ForceReadException(bool enabled) noexcept;
 void Reset() noexcept;
 

@@ -2,6 +2,9 @@
 
 #include "WizardConfigInternal.h"
 
+#include "ConfigOwnershipPolicy.h"
+#include "ShipActionCatalog.h"
+
 #include "RuntimePaths.h"
 
 #include <cstdio>
@@ -154,8 +157,9 @@ static void SetIniInt(CSimpleIniA& ini, const char* section, const char* key, in
             s.macros.push_back(std::move(row));
         }
 
-        std::stable_sort(s.macros.begin(), s.macros.end(),
-                  [](const MacroRow& a, const MacroRow& b) { return a.name < b.name; });
+        // Keep source-section order. The selected-record editor uses that order as
+        // the user's macro order, and sorting by display name would make a no-op
+        // Apply rewrite hand-authored sections in a different sequence.
     }
 
 
@@ -321,9 +325,10 @@ void LoadEffectiveCollections(const std::filesystem::path& profilePath,
 }
 
 
-// Serialize every user-owned key from a WizardState into an ini object. Shared by
-// the full user-file save and the sparse profile-overlay diff, so both write the
-// exact same key set for the same state — which is what makes the diff clean.
+// Serialize every HOTAS-owned key from a WizardState into an ini object. Settings
+// owned by separately installed modules may still be loaded for compatibility but
+// are deliberately absent here. The full save and sparse overlay diff therefore
+// author the same bounded key set.
 void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
     ini.SetBoolValue("Injection", "bEnableInjection", s.axisInjectionEnabled);
 
@@ -417,33 +422,6 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
         ini.SetValue("Aim", "iToggleAimModeButton", val);
     }
 
-    // Camera look
-    ini.SetBoolValue("HeadTracking", "bEnabled", s.headLookEnabled);
-    ini.SetBoolValue("HeadTracking", "bOpenTrackEnabled", s.headLookOpenTrackEnabled);
-    for (int i = 0; i < kNumHeadLookAxisSlots; ++i) {
-        const auto& slot = kHeadLookAxisSlots[i];
-        const char* axis = s.headLookAxisBindings[i] != "(unbound)"
-            ? s.headLookAxisBindings[i].c_str() : "";
-        ini.SetValue("HeadTracking", slot.iniKey, axis);
-        ini.SetBoolValue("HeadTracking", slot.enabledIniKey, s.headLookAxisEnabled[i]);
-        ini.SetBoolValue("HeadTracking", slot.invertIniKey, s.headLookInvert[i]);
-        SetIniFloat(ini, "HeadTracking", slot.sensitivityKey,
-                    s.headLookSensitivity[i]);
-        SetIniFloat(ini, "HeadTracking", slot.maximumKey,
-                    s.headLookMaxDegrees[i], "%.1f");
-    }
-    SetIniFloat(ini, "HeadTracking", "fDeadzoneDegrees",
-                s.headLookDeadzoneDegrees);
-    SetIniFloat(ini, "HeadTracking", "fJoystickDeadzone",
-                s.headLookJoystickDeadzone);
-    SetIniFloat(ini, "HeadTracking", "fSmoothing", s.headLookSmoothing);
-    ini.SetValue("HeadTracking", "iRecenterButton",
-        s.headLookRecenterBinding != "(unbound)"
-            ? s.headLookRecenterBinding.c_str() : "-1");
-    ini.SetValue("HeadTracking", "iToggleButton",
-        s.headLookToggleBinding != "(unbound)"
-            ? s.headLookToggleBinding.c_str() : "-1");
-
     // DualStick accumulator
     ini.SetBoolValue("DualStick", "bAccumulatorThrottle", s.accumulatorThrottle);
     SetIniFloat(ini, "DualStick", "fAccumulatorRate", s.accumulatorRate, "%.1f");
@@ -457,13 +435,6 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
     }
     // Relocated from [Injection] in 4.0 (see LoadConfig alias read).
     ini.SetBoolValue("DualStick", "bHoldForBoost", s.holdForBoost);
-
-    // HOSAM
-    ini.SetBoolValue("Aim", "bHOSAMMode", s.hosamMode);
-    ini.SetBoolValue("Aim", "bAlignmentAssist", s.alignmentAssist);
-    SetIniFloat(ini, "Aim", "fAlignmentRadius", s.alignmentRadius, "%.1f");
-    SetIniInt(ini, "Aim", "iAlignmentIdleMs", s.alignmentIdleMs);
-    SetIniFloat(ini, "Aim", "fAlignmentDecayRate", s.alignmentDecayRate, "%.1f");
 
     // Calibration
     ini.Delete("Calibration", nullptr);
@@ -528,6 +499,18 @@ void SerializeMacros(const WizardState& state, CSimpleIniA& ini) {
     }
 }
 
+void ReplaceHotasOwnedState(CSimpleIniA& destination,
+                            const CSimpleIniA& incoming) {
+    CSimpleIniA managed;
+    managed.SetUnicode(false);
+    SerializeUserOwnedState(WizardState{}, managed);
+    for (const auto& action : kShipActionCatalog) {
+        managed.SetValue("ShipButtons", action.sourceIniKey.data(), "-1");
+    }
+    ConfigOwnershipPolicy::ReplaceManagedPayload(
+        destination, incoming, managed);
+}
+
 std::string StateSignature(const WizardState& state) {
     CSimpleIniA ini;
     ini.SetUnicode(false);
@@ -535,10 +518,9 @@ std::string StateSignature(const WizardState& state) {
     SerializeMacros(state, ini);
     std::string signature;
     ini.Save(signature);
-    // Include editor drafts that intentionally do not yet serialize to runnable
-    // config. This keeps an incomplete row visibly dirty until completed/removed.
+    // Include incomplete editor rows that intentionally do not yet serialize to
+    // runnable config, keeping them visibly dirty until completed or removed.
     signature += "\n[EditorDrafts]\n";
-    signature += "symmetrical=" + std::to_string(state.symmetricalThrottleDz) + "\n";
     for (const auto& row : state.customBindings) {
         signature += "custom=" + std::to_string(row.buttonBinding.size()) + ":" + row.buttonBinding
             + ":" + std::to_string(row.output.size()) + ":" + row.output + "\n";

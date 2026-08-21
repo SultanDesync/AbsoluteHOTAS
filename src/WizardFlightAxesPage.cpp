@@ -2,6 +2,7 @@
 
 #include "WizardUI.h"
 
+#include "AimInputPolicy.h"
 #include "BindingRef.h"
 #include "DeviceManager.h"
 #include "WizardConfig.h"
@@ -449,21 +450,6 @@ static void DrawButtonBasedAxes(WizardState& s) {
 // --- Tab: Devices ---
 
 
-static void DrawMouseSteeringOptions(WizardState& s) {
-    ImGui::Indent(12.0f);
-    ImGui::Checkbox("Alignment assist", &s.alignmentAssist);
-    if (s.alignmentAssist) {
-        ImGui::TextDisabled("Gently centers steering when the mouse is idle near center.");
-        ImGui::PushItemWidth(180.0f);
-        ImGui::SliderFloat("Assist radius##mouseSteering", &s.alignmentRadius, 1.0f, 200.0f, "%.0f units");
-        int idleMs = s.alignmentIdleMs;
-        if (ImGui::SliderInt("Idle time##mouseSteering", &idleMs, 10, 500, "%d ms")) s.alignmentIdleMs = idleMs;
-        ImGui::SliderFloat("Centering speed##mouseSteering", &s.alignmentDecayRate, 0.5f, 30.0f, "%.1f");
-        ImGui::PopItemWidth();
-    }
-    ImGui::Unindent(12.0f);
-}
-
 static const char* CoreAxisDescription(int axisIndex) {
     static constexpr const char* descriptions[] = {
         "Positional thrust and cruise authority",
@@ -571,14 +557,18 @@ static void DrawAxisIcon(int axisIndex, ImVec2 center, float size, ImU32 color) 
     }
 }
 
+static AimInputPolicy::Presence DetectAimInputs(const WizardState& s) {
+    return AimInputPolicy::Detect(
+        AimInputPolicy::IsConfiguredBinding(s.aimAxisBindings[0]),
+        AimInputPolicy::IsConfiguredBinding(s.aimAxisBindings[1]),
+        AimInputPolicy::IsConfiguredBinding(s.digitalAimBindings[0]),
+        AimInputPolicy::IsConfiguredBinding(s.digitalAimBindings[1]),
+        AimInputPolicy::IsConfiguredBinding(s.digitalAimBindings[2]),
+        AimInputPolicy::IsConfiguredBinding(s.digitalAimBindings[3]));
+}
+
 static bool HasSeparateAimInput(const WizardState& s) {
-    for (int i = 0; i < kNumAimAxisSlots; ++i) {
-        if (s.aimAxisBindings[i] != "(unbound)") return true;
-    }
-    for (int i = 0; i < kNumDigitalAimSlots; ++i) {
-        if (s.digitalAimBindings[i] != "(unbound)") return true;
-    }
-    return false;
+    return DetectAimInputs(s).HasSeparateInput();
 }
 
 static const char* CoreAxisInjectionPath(const WizardState& s, int axisIndex) {
@@ -895,17 +885,17 @@ static void DrawMouseSteeringCard(WizardState& s) {
         ImGui::TableNextColumn();
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
             ImGui::GetColorU32(ImVec4(0.075f, 0.095f, 0.115f, 0.96f)));
-        ImGui::Checkbox("Mouse steering (HOSAM)", &s.hosamMode);
+        ImGui::TextUnformatted("Mouse steering (HOSAM)");
         ImGui::SameLine();
         ImGui::TextDisabled(s.hosamMode
-            ? "Mouse owns pitch and yaw; saved stick bindings remain available."
-            : "Pitch and yaw use the flight-axis cards below.");
-        if (s.hosamMode) DrawMouseSteeringOptions(s);
+            ? "Legacy state is enabled; AbsoluteZero owns its configuration."
+            : "AbsoluteZero owns HOSAM and alignment configuration.");
+        ImGui::TextDisabled(
+            "HOTAS preserves existing Aim ownership keys but this fallback no longer edits them.");
 
-        const bool hasAimAxes =
-            s.aimAxisBindings[0] != "(unbound)" || s.aimAxisBindings[1] != "(unbound)";
+        const bool hasSeparateAimInput = HasSeparateAimInput(s);
         const char* aimSummary = !s.sourceObjectAim ? "Aim system disabled"
-            : hasAimAxes ? "Independent aim & steer" : "Aim-driven steering";
+            : hasSeparateAimInput ? "Independent aim & steer" : "Aim-driven steering";
         ImGui::TextDisabled("Aiming: %s", aimSummary);
         ImGui::SameLine();
         if (ImGui::SmallButton("Configure aiming & steering..."))

@@ -66,6 +66,8 @@ Snapshot Update(bool autoSource, int pilotLatchMilliseconds)
     }
 
     Snapshot snapshot;
+    snapshot.selectedOutputAgeMilliseconds =
+        observation.selectedOutputAgeMilliseconds;
     snapshot.headTrackingAllowed = EvaluateHeadTracking(observation);
     snapshot.gameplayContextKnown = observation.gameplayContextKnown;
     snapshot.gameplayContextActive = observation.gameplayContextActive;

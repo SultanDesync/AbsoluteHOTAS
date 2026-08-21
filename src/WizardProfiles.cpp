@@ -3,6 +3,7 @@
 #include "WizardConfigInternal.h"
 
 #include "ProfileOverlay.h"
+#include "ConfigOwnershipPolicy.h"
 #include "RuntimePaths.h"
 #include "ThrottleController.h"
 
@@ -247,6 +248,14 @@ std::vector<ProfileSummary> ListProfileSummaries() {
         profile.SetUnicode(false);
         profile.LoadFile(record.path.string().c_str());
         summary.kind = profile.GetValue("Profile", "sKind", "overlay");
+        CSimpleIniA::TNamesDepend sections;
+        profile.GetAllSections(sections);
+        for (const auto& section : sections) {
+            if (_stricmp(section.pItem, "Profile") == 0) continue;
+            CSimpleIniA::TNamesDepend keys;
+            profile.GetAllKeys(section.pItem, keys);
+            summary.overrideCount += static_cast<int>(keys.size());
+        }
         const char* keyboardShortcut = profile.GetValue("Profile", "sKeyboardShortcut", "-1");
         summary.keyboardShortcut = (!keyboardShortcut || !*keyboardShortcut
             || std::strcmp(keyboardShortcut, "-1") == 0)
@@ -351,19 +360,9 @@ void GetBaseActivation(std::string& trigger, std::string& mode) {
     }
 }
 
-bool SetProfileActivation(const std::string& name, const std::string& trigger,
-                          const std::string& mode, std::string& err) {
-    // An empty name is the base config — a first-class swap position identified by the
-    // sentinel "(base)" instead of a profile file (see ParseProfileSlots).
-    std::string fileId;
-    if (name.empty()) {
-        fileId = "(base)";
-    } else {
-        const auto path = FindProfilePath(name);
-        if (path.empty()) { err = "Profile not found."; return false; }
-        fileId = path.filename().string();
-    }
-
+bool SetProfileActivations(const std::vector<ProfileActivationUpdate>& updates,
+                           std::string& err) {
+    if (updates.empty()) return true;
     CSimpleIniA custom;
     custom.SetUnicode(false);
     const auto customPath = RuntimePaths::CustomIniPath();
@@ -373,30 +372,57 @@ bool SetProfileActivation(const std::string& name, const std::string& trigger,
         return false;
     }
 
-    int assigned = 0;
-    for (int slot = 1; slot <= 16; ++slot) {
-        const std::string prefix = "Slot" + std::to_string(slot);
-        const char* file = custom.GetValue("Profiles", (prefix + "File").c_str(), nullptr);
-        if (file && _stricmp(file, fileId.c_str()) == 0) { assigned = slot; break; }
-    }
-    if (!assigned) {
-        for (int slot = 1; slot <= 16; ++slot) {
-            const std::string key = "Slot" + std::to_string(slot) + "File";
-            if (!custom.GetValue("Profiles", key.c_str(), nullptr)) { assigned = slot; break; }
+    for (const auto& update : updates) {
+        // An empty name is the base config — a first-class swap position identified
+        // by the sentinel "(base)" instead of a profile file.
+        std::string fileId;
+        if (update.profile.empty()) {
+            fileId = "(base)";
+        } else {
+            const auto path = FindProfilePath(update.profile);
+            if (path.empty()) { err = "Profile not found."; return false; }
+            fileId = path.filename().string();
         }
-    }
-    if (!assigned) { err = "No activation slots are available."; return false; }
 
-    const std::string prefix = "Slot" + std::to_string(assigned);
-    custom.SetValue("Profiles", (prefix + "File").c_str(), fileId.c_str());
-    custom.SetValue("Profiles", (prefix + "Button").c_str(),
-                    trigger == "(unbound)" ? "-1" : trigger.c_str());
-    const char* normalizedMode = mode == "toggle" ? "toggle" : mode == "selector" ? "selector" : "momentary";
-    custom.SetValue("Profiles", (prefix + "Mode").c_str(), normalizedMode);
+        int assigned = 0;
+        for (int slot = 1; slot <= 16; ++slot) {
+            const std::string prefix = "Slot" + std::to_string(slot);
+            const char* file = custom.GetValue(
+                "Profiles", (prefix + "File").c_str(), nullptr);
+            if (file && _stricmp(file, fileId.c_str()) == 0) {
+                assigned = slot;
+                break;
+            }
+        }
+        if (!assigned) {
+            for (int slot = 1; slot <= 16; ++slot) {
+                const std::string key = "Slot" + std::to_string(slot) + "File";
+                if (!custom.GetValue("Profiles", key.c_str(), nullptr)) {
+                    assigned = slot;
+                    break;
+                }
+            }
+        }
+        if (!assigned) { err = "No activation slots are available."; return false; }
+
+        const std::string prefix = "Slot" + std::to_string(assigned);
+        custom.SetValue("Profiles", (prefix + "File").c_str(), fileId.c_str());
+        custom.SetValue("Profiles", (prefix + "Button").c_str(),
+            update.trigger == "(unbound)" ? "-1" : update.trigger.c_str());
+        const char* normalizedMode = update.mode == "toggle" ? "toggle"
+            : update.mode == "selector" ? "selector" : "momentary";
+        custom.SetValue("Profiles", (prefix + "Mode").c_str(), normalizedMode);
+    }
     custom.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
     if (!SaveIniAtomically(custom, customPath)) { err = "Could not save profile activation."; return false; }
     ThrottleController::ReloadConfig();
     return true;
+}
+
+bool SetProfileActivation(const std::string& name, const std::string& trigger,
+                          const std::string& mode, std::string& err) {
+    return SetProfileActivations(
+        { ProfileActivationUpdate{name, trigger, mode} }, err);
 }
 
 bool ResetBaseToDefaults(std::string& err) {
@@ -421,16 +447,11 @@ bool ResetBaseToDefaults(std::string& err) {
         }
     }
 
-    CSimpleIniA clean;
-    clean.SetUnicode(false);
-    CSimpleIniA::TNamesDepend routeKeys;
-    current.GetAllKeys("Profiles", routeKeys);
-    for (const auto& key : routeKeys) {
-        const char* value = current.GetValue("Profiles", key.pItem, nullptr);
-        if (value) clean.SetValue("Profiles", key.pItem, value);
-    }
-    clean.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
-    if (!SaveIniAtomically(clean, customPath)) {
+    CSimpleIniA empty;
+    empty.SetUnicode(false);
+    Detail::ReplaceHotasOwnedState(current, empty);
+    current.SetLongValue("Meta", "iConfigVersion", kConfigVersion);
+    if (!SaveIniAtomically(current, customPath)) {
         err = "Could not reset the custom configuration.";
         return false;
     }
@@ -463,6 +484,7 @@ bool ExportProfile(const std::string& name, std::string& err) {
     prof.Delete("Profiles", nullptr);
     prof.Delete("Meta", nullptr);
     prof.Delete("ShipControlMethods", nullptr);
+    ConfigOwnershipPolicy::RemoveStandaloneOwned(prof);
 
     prof.SetValue("Profile", "sName", clean.c_str());
     prof.SetValue("Profile", "sKind", "full");
@@ -501,10 +523,6 @@ bool ImportProfile(const std::string& name, std::string& err) {
         return false;
     }
 
-    CSimpleIniA current;
-    current.SetUnicode(false);
-    current.LoadFile(RuntimePaths::CustomIniPath().string().c_str());
-
     // Auto-backup the current pair before overwriting it — importing is a full swap,
     // so the working setup must be recoverable.
     {
@@ -522,40 +540,17 @@ bool ImportProfile(const std::string& name, std::string& err) {
 
     const long ver = prof.GetLongValue("Profile", "iConfigVersion", kConfigVersion);
 
-    // Drop profile metadata and rebuild one custom payload.
+    // Replace only HOTAS's managed payload. Existing unknown keys and all
+    // standalone-module state stay byte-for-value; external fields carried by
+    // an older full profile are deliberately ignored.
     CSimpleIniA custom;
     custom.SetUnicode(false);
-
-    CSimpleIniA::TNamesDepend sections;
-    prof.GetAllSections(sections);
-    for (const auto& sec : sections) {
-        const char* secName = sec.pItem;
-        if (_stricmp(secName, "Profile") == 0) continue;
-        if (_stricmp(secName, "Profiles") == 0) continue;
-        if (_stricmp(secName, "ShipControlMethods") == 0) continue;
-        CSimpleIniA::TNamesDepend keys;
-        prof.GetAllKeys(secName, keys);
-        for (const auto& k : keys) {
-            const char* v = prof.GetValue(secName, k.pItem, nullptr);
-            if (v) custom.SetValue(secName, k.pItem, v);
-        }
-    }
+    custom.LoadFile(RuntimePaths::CustomIniPath().string().c_str());
+    Detail::ReplaceHotasOwnedState(custom, prof);
     custom.SetLongValue("Meta", "iConfigVersion", ver);
-    CSimpleIniA::TNamesDepend routeKeys;
-    current.GetAllKeys("Profiles", routeKeys);
-    for (const auto& key : routeKeys) {
-        const char* value = current.GetValue("Profiles", key.pItem, nullptr);
-        if (value) custom.SetValue("Profiles", key.pItem, value);
-    }
-    CSimpleIniA::TNamesDepend methodKeys;
-    current.GetAllKeys("ShipControlMethods", methodKeys);
-    for (const auto& key : methodKeys) {
-        const char* value = current.GetValue("ShipControlMethods", key.pItem, nullptr);
-        if (value) custom.SetValue("ShipControlMethods", key.pItem, value);
-    }
 
-    // Full replace so no stale key or macro survives the swap. SaveFile overwrites
-    // both files; an empty macros object clears a previously-populated macro file.
+    // The managed slice is a full replacement, so stale HOTAS keys and macros do
+    // not survive. Foreign and standalone-owned keys remain in the existing file.
     if (!SaveIniAtomically(custom, RuntimePaths::CustomIniPath())) {
         err = "Could not write custom config.";
         return false;

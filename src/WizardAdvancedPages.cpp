@@ -62,9 +62,6 @@ void DrawDevicesTab(WizardState& s) {
                     for (auto& b : s.digitalAimBindings) allBindings.push_back(&b);
                     allBindings.push_back(&s.toggleAimModeBinding);
                     allBindings.push_back(&s.turnAssistBinding);
-                    for (auto& b : s.headLookAxisBindings) allBindings.push_back(&b);
-                    allBindings.push_back(&s.headLookRecenterBinding);
-                    allBindings.push_back(&s.headLookToggleBinding);
                     for (auto& macro : s.macros) allBindings.push_back(&macro.buttonBinding);
 
                     for (auto* bp : allBindings) doSwap(*bp);
