@@ -2,29 +2,30 @@
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
-## Release Status
+## Release status
 
-**5.0.1 is the experimental native-control track.** Seventeen named ship functions,
-the boost zone, and the strafe modifier enter Starfield through validated internal
-ship-control seams. Six profile-compatible context inputs use vanilla E, Esc, and
-arrow keys across menus, dialogue, power, and targeting. This experimental build
-also adds OpenTrack-compatible rotational camera look, validated with Tobii and
-NeuralNet webcam tracker sources.
+**5.0.1 is the current stable AbsoluteHOTAS release.** Seventeen named ship functions, the boost
+zone, strafe modifier, and six-axis flight output use validated Starfield control seams. Six
+profile-compatible context inputs retain vanilla E, Esc, and arrow behavior across menus, dialogue,
+power, and targeting.
 
-Version **4.0.2 remains the stable baseline** while 5.0 receives in-game coverage
-across ship states, cameras, and hardware. Renderer compatibility with third-party
-overlays, frame-generation layers, and Proton graphics stacks is best effort; an
-explicit hook bypass keeps manual configuration and flight controls available when a
-graphics utility conflicts with the workbench.
+Version 5.0.1 is also the HOTAS module shipped in Absolute Suite `0.2.0-beta.1`. It provides the
+complete native Absolute Control menu while retaining the legacy Dear ImGui workbench as a
+standalone fallback. Version 4.0.2 remains available only as a rollback option for older setups.
+
+Renderer compatibility with third-party overlays, frame-generation layers, and Proton graphics
+stacks is best effort for the legacy workbench. The Absolute Control menu does not use HOTAS's
+renderer hook, and an explicit workbench bypass keeps flight controls and manual configuration
+available when a graphics utility conflicts with the fallback UI.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
-[Reporting a 5.0 experimental issue](#reporting-a-50-experimental-issue) for the information that makes a
+[Reporting a 5.0 issue](#reporting-a-50-issue) for the information that makes a
 report actionable.
 
 ## Changelog
 
-### v5.0.1 (experimental)
+### v5.0.1
 
 - **Native Ship Functions and Universal Context Inputs:** Seventeen named ship actions use exact-gated Starfield control paths. The existing Select Target, Cancel, and four power-navigation profile slots preserve one assignment across contexts with vanilla E, Esc, and arrows; Targeting Mode switches Left/Right to its exact `SelectLeft`/`SelectRight` selector events so ship power is not changed simultaneously.
 - **Optional Menu Control Reuse:** The Ship Buttons workbench can independently reuse Pitch for Up/Down, Yaw for Left/Right, and the current Primary Weapon button for Select/Accept. Per-profile inversion and actuation/release thresholds preserve the workbench approach, while neutral/release arming prevents carried flight input from acting as a menu opens.
@@ -137,6 +138,8 @@ fThrottleAtEngineStart = 0.0314
 - Starfield 1.16.242 or 1.16.244
 - SFSE 0.2.20 or later
 - OpenTrack with FreeTrack 2.0 output only when using tracker-based camera look
+- Absolute Control is recommended for the shared native menu, but is not a flight dependency
+- No Starfield Address Library required
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
 
@@ -155,26 +158,47 @@ wizard. After the first save, user-owned settings live in
 `AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
 INI. Use full profile exports for backup, sharing, and migration going forward.
 
-When updating from 4.0.x to 5.0.1, replace only `AbsoluteHOTAS.dll` and the
-shipped `AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles`
-directory. A real 4.0.0 setup completed this migration without losing bindings or
-profile data; back up both user-owned locations because broader experimental coverage is
-still in progress.
+When updating from 4.0.x to 5.0.1, replace only `AbsoluteHOTAS.dll` and the shipped
+`AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles` directory. Back up both
+user-owned locations before any update.
+
+## Absolute Control and modular ownership
+
+With Absolute Control installed, open the Pause Menu, select **MOD OPTIONS**, and choose
+**AbsoluteHOTAS**. The native menu provides the complete bindings, throttle tuning, axes, buttons,
+profiles, shift layers, macros, devices, and diagnostics workflow. HOTAS continues to own its
+configuration, live input, persistence, Apply, and Cancel behavior.
+
+The suite resolves overlapping gameplay responsibilities explicitly:
+
+- **AbsoluteZero:** when installed, it owns mouse pitch/yaw steering. HOTAS yields its pitch/yaw
+  stick bindings but retains roll, strafe, throttle, buttons, profiles, and the shared writer hook.
+- **Absolute Head Tracking:** when installed, it owns cockpit camera composition. HOTAS parks its
+  embedded legacy tracker while retaining flight controls and the Absolute Input Bus.
+- **Absolute Power:** remains the authority for power presets and activation. HOTAS supplies the
+  optional Input Bus used for controller/POV preset capture.
+
+When Absolute Control is absent, `Ctrl+Alt+B` opens the legacy HOTAS workbench and existing INI,
+profile, and hotkey workflows remain available.
 
 ## Quick Start
 
 1. Install the plugin files.
 2. Launch the game via SFSE.
-3. Open the Starfield main or pause menu, then press `Ctrl+Alt+B`.
-4. Under **Flight Controls → Flight Axes (Core)**, bind and tune each axis while watching its live input display.
-5. Under **Flight Controls → Ship Buttons**, bind the ship actions you want and optionally configure **Menu Control Reuse**.
-6. Click **Save & Close**. Bindings take effect without restarting.
+3. With Absolute Control installed, open the Pause Menu and select **MOD OPTIONS → AbsoluteHOTAS**.
+   Without it, open the main or pause menu and press `Ctrl+Alt+B` for the legacy workbench.
+4. Bind and tune the six flight axes while watching their live input markers.
+5. Configure ship buttons, throttle behavior, profiles, and any optional shift layer.
+6. Apply/save the changes. Bindings take effect without restarting.
 
 `Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
 
-## In-Game Binding Wizard
+## Legacy standalone workbench
 
-Press `Ctrl+Alt+B` to toggle the workbench. Use the Starfield main or pause menu for full mouse interaction. If opened during active gameplay, Starfield keeps the mouse locked for camera control; the wizard displays a warning and remains usable with `Tab`, arrow keys, `Enter`, and other standard keyboard-navigation keys.
+When Absolute Control is not installed, press `Ctrl+Alt+B` to toggle the retained Dear ImGui
+workbench. Use the Starfield main or pause menu for full mouse interaction. If opened during active
+gameplay, Starfield keeps the mouse locked for camera control; the workbench displays a warning and
+remains usable with `Tab`, arrow keys, `Enter`, and other standard keyboard-navigation keys.
 
 The workbench uses three built-in task groups and registers an optional fourth
 group when a compatible `AbsolutePower.dll` is detected:
@@ -599,7 +623,7 @@ If you encounter hardware axis mapping or detection issues:
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
-### Reporting a 5.0 experimental issue
+### Reporting a 5.0 issue
 
 Open an issue in the
 [GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and
@@ -608,7 +632,7 @@ include:
 - the exact AbsoluteHOTAS version;
 - Starfield and SFSE versions;
 - controller, throttle, pedal, or button-box names;
-- whether the issue occurs on Main Controls or a named profile;
+- whether the issue occurs on Main Controls, a named profile, or a shift layer;
 - the smallest repeatable sequence that triggers the problem;
 - `AbsoluteHOTAS.log` with `bEnableLog = true`;
 - the relevant `AbsoluteHOTAS_Custom.ini` and profile file, with any personal paths
@@ -616,8 +640,8 @@ include:
 
 For stuck inputs or configuration loss, say so in the title and describe how you
 recovered. For overlay problems, list other overlays, capture tools, graphics
-injectors, and frame-generation mods. Hardware-specific or cosmetic issues remain
-useful, but safety and core-flight regressions take priority during maintenance.
+injectors, and frame-generation mods. Hardware-specific and cosmetic reports remain useful, but
+safety and core-flight regressions take priority.
 
 ## Notes
 

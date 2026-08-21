@@ -1,65 +1,66 @@
 [center][img]https://staticdelivery.nexusmods.com/mods/4187/images/16668/16668-1782428954-1893709378.gif[/img]
 
-[size=6][color=#00ccff][b]AbsoluteHOTAS 5.0.1 Experimental[/b][/color][/size]
-[size=4][b][color=#ffaa00]Universal context controls, native ship controls, simultaneous roll + strafe, and OpenTrack-compatible cockpit head tracking.[/color][/b][/size]
+[size=6][color=#00ccff][b]AbsoluteHOTAS 5.0.1[/b][/color][/size]
+[size=4][b][color=#ffaa00]Direct HOTAS/HOSAS flight control, native ship actions, throttle detents, profiles, layers, and live tuning for Starfield.[/color][/b][/size][/center]
 
-[i]This is an opt-in experimental build. AbsoluteHOTAS 4.0.2 remains available as the stable fallback while 5.0 receives broader hardware, context-routing, and ship-state testing.[/i][/center]
+AbsoluteHOTAS reads DirectInput hardware natively and drives Starfield ship controls without vJoy or Joystick Gremlin. Version 5.0.1 is the current stable standalone release and the HOTAS module shipped in Absolute Suite 0.2.0-beta.1.
 
 [line]
 
-[center][size=5][color=#ffcc00][b]What is new in 5.0[/b][/color][/size][/center]
+[center][size=5][color=#ffcc00][b]Core features[/b][/color][/size][/center]
 
 [list]
-[*][b][color=#00ff88]Native Ship Functions + Universal Navigation:[/color][/b] Seventeen ship-specific actions use validated internal Starfield paths. The existing Select, Cancel, and four power-navigation bindings preserve user profiles across menus, dialogue, power, and targeting. Targeting Mode switches Left/Right from arrows to exact SelectLeft/SelectRight events so component selection does not also change ship power.[/*]
-[*][b][color=#00ff88]Optional Menu Control Reuse:[/color][/b] Independently reuse Pitch for Up/Down, Yaw for Left/Right, and Primary Weapon for Select/Accept. Per-profile inversion, thresholds, hysteresis, and neutral/release arming are available in the Ship Buttons workbench.[/*]
-[*][b][color=#00ff88]Native Boost and Strafe:[/color][/b] The throttle boost zone and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.[/*]
-[*][b][color=#00ff88]Simultaneous Roll + Strafe:[/color][/b] Lateral and vertical strafe can both be combined with roll for full six-degree-of-freedom control.[/*]
-[*][b][color=#00ff88]OpenTrack Camera Look:[/color][/b] Rotational cockpit yaw, pitch, and roll support for OpenTrack tracker sources, validated with Tobii Tracker 2 and NeuralNet webcam input.[/*]
-[*][b][color=#00ff88]Camera Look Workbench:[/color][/b] Per-axis enable, inversion, sensitivity, limits, filtering, joystick overrides, toggle/recenter bindings, and live graph/readouts.[/*]
-[*][b][color=#00ff88]Automatic Pilot/FPS Context:[/color][/b] Flight controls now park automatically after leaving the pilot seat. Menus/loading remain suspended rather than being mistaken for FPS, and head pose has its own conservative 400 ms safety gate.[/*]
-[*][b]Fail-Closed Runtime Gates:[/b] A version or object mismatch disables the affected native operation instead of falling back to SendInput.[/*]
+[*][b][color=#00ff88]Six-axis flight control:[/color][/b] pitch, yaw, roll, lateral strafe, vertical strafe, and absolute or rate-based throttle.[/*]
+[*][b][color=#00ff88]Native ship actions:[/color][/b] seventeen named ship functions, weapons, boost, strafe, targeting, power navigation, POV camera controls, and context-aware Select/Back inputs.[/*]
+[*][b][color=#00ff88]Live axis tuning:[/color][/b] responsive graphs for deadzones, saturation, inversion, response, calibration, and physical input position.[/*]
+[*][b][color=#00ff88]Throttle setup:[/color][/b] direct detent-zone tuning for zero thrust, maximum thrust, reverse behavior, boost, and set-by-feel adjustment.[/*]
+[*][b][color=#00ff88]Profiles and shift layers:[/color][/b] reusable base profiles, modifier-controlled layers, macros, and device-specific calibration.[/*]
+[*][b][color=#00ff88]Button output methods:[/color][/b] native function calls, Starfield key output, and HOTAS-owned custom actions where supported.[/*]
+[*][b][color=#00ff88]Automatic pilot context:[/color][/b] flight output parks when leaving the pilot seat and remains suspended through menus/loading.[/*]
+[*][b]Fail-closed native gates:[/b] a runtime mismatch disables the affected operation instead of guessing or emitting unsafe fallback input.[/*]
 [/list]
 
 [line]
 
-[center][size=5][color=#ffaa00][b]Upgrade validation and user data[/b][/color][/size][/center]
+[center][size=5][color=#00ccff][b]Configuration menus[/b][/color][/size][/center]
 
-The release archive contains only [b]AbsoluteHOTAS.dll[/b] and the mod-owned default [b]AbsoluteHOTAS.ini[/b]. It does not include or overwrite [b]AbsoluteHOTAS_Custom.ini[/b], profiles, or logs.
+[b]Recommended:[/b] install Absolute Control, open the Pause Menu, select [color=#ffaa00][b]MOD OPTIONS[/b][/color], and choose [b]AbsoluteHOTAS[/b]. The native shared menu includes axes, buttons, throttle tuning, profiles, shift layers, macros, devices, and diagnostics.
 
-One real maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after installing 5.0.1 with no rebinding. That is a successful migration smoke test, but it is still a sample of one. [b]Back up AbsoluteHOTAS_Custom.ini and the Profiles directory before installing the experimental build.[/b]
+AbsoluteHOTAS remains fully standalone. Without Absolute Control, open the retained Dear ImGui workbench from the main or pause menu with [font=Courier New]Ctrl+Alt+B[/font]. Existing INI, profile, and hotkey workflows remain available.
 
 [line]
 
-[center][size=5][color=#00ccff][b]Install and test[/b][/color][/size][/center]
+[center][size=5][color=#ffaa00][b]Modular ownership warnings[/b][/color][/size][/center]
 
-[b]Requirements[/b]
+[b]AbsoluteZero:[/b] when installed with AbsoluteHOTAS, AbsoluteZero owns mouse pitch/yaw steering and HOTAS yields its pitch/yaw stick bindings. HOTAS continues to control roll, strafe, throttle, buttons, and profiles while retaining the shared writer hook. Install both only when you want mouse steering—not a joystick—to own pitch and yaw.
+
+[b]Absolute Head Tracking:[/b] when installed, the standalone Head Tracking module owns cockpit camera composition and HOTAS parks its embedded legacy tracker. Flight controls and the Absolute Input Bus continue normally.
+
+[b]Absolute Power:[/b] remains authoritative for power presets and activation. HOTAS supplies the optional Input Bus used for controller/POV preset capture.
+
+[line]
+
+[center][size=5][color=#00ccff][b]Requirements and installation[/b][/color][/size][/center]
+
 [list]
 [*]Starfield 1.16.242 or 1.16.244[/*]
-[*]SFSE 0.2.20 or later[/*]
-[*]OpenTrack with FreeTrack 2.0 Enhanced output only for tracker-based camera look[/*]
+[*][url=https://sfse.silverlock.org/]SFSE[/url] 0.2.20 or later[/*]
 [*]No Starfield Address Library required[/*]
+[*]OpenTrack with FreeTrack 2.0 output only when using the embedded fallback camera tracker[/*]
 [/list]
 
-[list=1]
-[*]Back up AbsoluteHOTAS_Custom.ini and your Profiles directory.[/*]
-[*]Install the archive normally with your mod manager.[/*]
-[*]Launch Starfield through SFSE.[/*]
-[*]Open the main or pause menu and press [color=#ffaa00][b]Ctrl+Alt+B[/b][/color].[/*]
-[*]Review Flight Axes, Ship Buttons, and the new [b]Tune > Camera Look[/b] page, then Save & Apply.[/*]
-[/list]
+Install normally with MO2 or Vortex, or place [font=Courier New]AbsoluteHOTAS.dll[/font] and [font=Courier New]AbsoluteHOTAS.ini[/font] in [font=Courier New]Data\SFSE\Plugins\[/font].
 
-For tracker input, start OpenTrack and enable [b]freetrack 2.0 Enhanced[/b] output. Head tracking is rotational only; translation is not implemented.
+[b]User data is separate:[/b] updates must not overwrite [font=Courier New]AbsoluteHOTAS_Custom.ini[/font] or the [font=Courier New]Profiles[/font] directory. Back up both before updating. A 4.0.x setup can update by replacing only the DLL and shipped default INI.
 
 [line]
 
-[center][size=5][color=#ffcc00][b]Experimental boundaries and feedback[/b][/color][/size][/center]
+[center][size=5][color=#ffcc00][b]Known boundaries and reporting[/b][/color][/size][/center]
 
-[b]Undock / Take-Off[/b] and [b]Exit Ship From Cockpit[/b] use native contextual routes but still need broader seated-state testing. Other devices, duplicate-device rigs, overlays, profiles, and mod stacks may reveal issues not present in the maintainer setup.
+Renderer compatibility with third-party overlays, capture tools, frame-generation layers, and Proton graphics stacks is best effort for the legacy workbench. The Absolute Control menu does not use HOTAS's renderer hook. Set [font=Courier New][UI] bEnableWorkbench=false[/font] in the custom INI to install no HOTAS D3D12/DXGI hooks while retaining flight controls.
 
-Please report reproducible crashes, configuration loss, stuck outputs, core flight regressions, failed ship actions, and tracker direction/centering issues first. Include Starfield/SFSE versions, hardware and tracker source, reproduction steps, and an AbsoluteHOTAS log with logging enabled.
+Please report reproducible crashes, configuration loss, stuck outputs, core-flight regressions, failed ship actions, hardware-specific mapping problems, or menu issues. Include the AbsoluteHOTAS version, Starfield/SFSE versions, device names, active profile/layer, reproduction steps, and a sanitized log with logging enabled.
 
-[b]Rollback:[/b] reinstall the 4.0.2 DLL and default INI. Keep your backed-up AbsoluteHOTAS_Custom.ini and Profiles directory.
+[center][url=https://github.com/SultanDesync/AbsoluteHOTAS/tree/5.0.0-beta#readme][color=#00ff88][b]Complete Guide[/b][/color][/url]
 
-[center][url=https://github.com/SultanDesync/AbsoluteHOTAS/tree/5.0.0-beta#readme][color=#00ff88][b]Complete 5.0 Guide and Changelog[/b][/color][/url]
-
-[url=https://github.com/SultanDesync/AbsoluteHOTAS/tree/5.0.0-beta]5.0 Source[/url] · [url=https://github.com/SultanDesync/AbsoluteHOTAS/issues]Issue Tracker[/url][/center]
+[url=https://github.com/SultanDesync/AbsoluteHOTAS/tree/5.0.0-beta]Source[/url] · [url=https://github.com/SultanDesync/AbsoluteHOTAS/issues]Issue Tracker[/url] · [url=https://www.nexusmods.com/starfield/mods/17872]Absolute Head Tracking[/url] · [url=https://www.nexusmods.com/starfield/mods/17460]AbsoluteZero[/url][/center]

@@ -1,15 +1,15 @@
 # Release Plan — AbsoluteHOTAS v5.0.1
 
 **Source branch:** `5.0.0-beta`
-**Release track:** opt-in experimental Nexus file alongside the established 4.0.2 stable file
+**Release track:** current stable standalone release and Absolute Suite `0.2.0-beta.1` component
 
 ## Release position
 
-5.0.1 is the experimental validation build for universal context controls,
+5.0.1 is the current stable build for universal context controls,
 targeting-aware navigation, native ship actions, native movement modifiers,
-simultaneous roll/strafe output, and rotational cockpit head tracking. Keep 4.0.2
-available as the stable fallback while 5.0 gains broader hardware, ship-state,
-camera, context-routing, and mod-stack coverage.
+simultaneous roll/strafe output, and rotational cockpit head tracking. Version 4.0.2 remains
+available as a rollback option for older setups. The shared Absolute Control menu is the recommended
+configuration route; the Dear ImGui workbench remains the standalone fallback.
 
 The release archive retains the 4.0 two-file configuration contract. It replaces
 only the plugin DLL and mod-owned default INI; it does not contain or overwrite
@@ -59,17 +59,16 @@ only the plugin DLL and mod-owned default INI; it does not contain or overwrite
   cached handler remains valid.
 - [x] Production Camera Look automatically deactivated when the maintainer exited
   the pilot seat.
-- [x] Release build completed and all six registered `xmake test` suites passed,
-  including the universal-context map, menu-reuse policy, and pilot-context
-  freshness policy.
+- [x] Release build completed and all 22 registered native suites passed, including current
+  Absolute Control composition, binding, profile/layer, throttle, and compatibility coverage.
 - [x] Verify the final two-file archive through a clean extraction and record all
   release hashes.
 
 The upgrade result is a successful sample of one. It establishes that the 4.0
-configuration contract works on a real maintained setup, but experimental users
-should still back up their custom INI and Profiles directory before installing.
+configuration contract works on a real maintained setup, but users should still
+back up their custom INI and Profiles directory before installing.
 
-## Known experimental boundaries
+## Known boundaries
 
 - `Undock / Take-Off` and `Exit Ship From Cockpit` use native contextual routes but
   still need broader seated-state validation.
@@ -82,7 +81,7 @@ should still back up their custom INI and Profiles directory before installing.
   signature or object validation does not match.
 - The production head-pose gate passed cockpit exit. Cockpit re-entry, the delayed
   general flight-control latch, long targeting sessions, pause/loading transitions,
-  and Full mode still need broader experimental coverage.
+  and Full mode still need broader validation.
 
 ## Final artifacts
 
@@ -100,15 +99,15 @@ The clean-extracted archive contains exactly:
 
 ## Publication checklist
 
-- [x] Keep 4.0.2 available as the stable fallback.
-- [x] Describe 5.0.1 as experimental and opt-in rather than replacing the main stable file.
+- [x] Keep 4.0.2 available as an older rollback option.
+- [x] Describe 5.0.1 as the current stable standalone and suite release.
 - [x] Document the tested 4.0.0 user-data migration without overstating its sample
   size.
 - [x] Include rollback, logging, and feedback instructions in package/Nexus copy.
-- [ ] Upload the archive to the Nexus experimental branch.
+- [ ] Upload the archive as the primary Nexus file.
 - [ ] Publish the Nexus description and changelog.
 
-## Experimental feedback priorities
+## Feedback priorities
 
 Prioritize reports in this order:
 
