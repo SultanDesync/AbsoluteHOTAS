@@ -5,9 +5,6 @@
 #include "ThrottleController.h"
 #include "RuntimePaths.h"
 #include "SettingBeacon.h"
-#include "UIHook.h"
-#include "BindingWizard.h"
-#include "HeadTracking.h"
 #include "NativeShipControl.h"
 #include "SFSEInterface.h"
 #include <windows.h>
@@ -42,7 +39,7 @@ static void OnSfseMessage(SFSE::MessagingInterface::Message* message) {
     const auto result = AbsoluteControlSubscriber::RegisterDiscoveredHost();
     using AbsoluteControlPanelApi::Result;
     if (result == Result::Ok || result == Result::Duplicate) {
-        MainLog("Registered read-only Setup Overview and Plugin & Compatibility pages with Absolute Control.");
+        MainLog("Registered the complete AbsoluteHOTAS configuration module with Absolute Control.");
     } else if (result == Result::NotReady &&
                message->type == SFSE::MessagingInterface::kPostDataLoad) {
         MainLog("Absolute Control is not ready; registration will retry at post-post-data-load.");
@@ -164,7 +161,6 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
     }
 
     const bool absoluteHeadTrackingPresent = AbsoluteHeadTrackingPresent();
-    HeadTracking::SetExternalOwner(absoluteHeadTrackingPresent);
     NativeShipControl::SetExternalCameraOwner(absoluteHeadTrackingPresent);
     AbsoluteControlSubscriber::SetExternalCameraOwner(absoluteHeadTrackingPresent);
     if (absoluteHeadTrackingPresent) {
@@ -188,27 +184,10 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
         }
     }
 
-    // Phase 2: optional D3D12 ImGui workbench. This is intentionally independent
-    // of the controller: users with an incompatible renderer stack can disable
-    // every graphics hook and continue using their manual configuration.
-    const bool workbenchConfigured = RuntimePaths::IsWorkbenchEnabled();
-    bool workbenchInstalled = false;
-    if (!workbenchConfigured) {
-        MainLog("Workbench disabled by [UI] bEnableWorkbench=false; manual configuration and flight controls remain active.");
-    } else if (UIHook::Install()) {
-        BindingWizard::Initialize();
-        workbenchInstalled = true;
-        MainLog("UIHook + BindingWizard armed. Press Ctrl+Alt+B in-game to initialize the renderer.");
-    } else {
-        MainLog("WARNING: UIHook installation failed. Workbench disabled; manual configuration and flight controls remain active.");
-    }
-
     AbsoluteControlSubscriber::SetRuntimeStatus({
         .throttleHookInstalled = hookOk,
         .nativeControlsInitialized = nativeControlsInitialized,
         .controllerStarted = controllerStarted,
-        .legacyWorkbenchConfigured = workbenchConfigured,
-        .legacyWorkbenchInstalled = workbenchInstalled,
     });
 
     if (!RegisterSfseListener(a_sfse)) {

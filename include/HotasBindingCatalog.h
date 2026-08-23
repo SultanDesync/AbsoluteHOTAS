@@ -27,6 +27,7 @@ enum class TargetFamily : std::uint8_t {
     AimModeToggle,
     TurnAssist,
     ShipAction,
+    MenuNavigation,
 };
 
 struct Target {
@@ -38,7 +39,7 @@ struct Target {
     int captureSlot = -1;
     std::string_view iniSection;
     std::string_view iniKey;
-    std::string_view actionId; // Populated only for TargetFamily::ShipAction.
+    std::string_view actionId; // Populated for named ship/menu actions.
 };
 
 inline constexpr std::string_view kFlightAxesPageId = "hotas-flight-axes";
@@ -70,6 +71,8 @@ inline constexpr std::array<std::string_view, kNumDigitalAxisSlots>
 inline constexpr std::array<std::string_view, kNumButtonSlots> kPluginButtonControlIds{
     "bind-plugin-activate",
     "bind-plugin-stop",
+    // Stable provider ID retained for existing host state; the visible action is
+    // now "Open Absolute Control" and has no embedded-workbench fallback.
     "bind-toggle-workbench",
 };
 
@@ -121,10 +124,20 @@ inline constexpr std::array<std::string_view, kShipActionCatalog.size()>
         "bind-ship-autopilot-on-off",
     };
 
+inline constexpr std::array<std::string_view, kMenuNavigationCatalog.size()>
+    kMenuNavigationControlIds{
+        "bind-menu-accept",
+        "bind-menu-cancel",
+        "bind-menu-up",
+        "bind-menu-down",
+        "bind-menu-left",
+        "bind-menu-right",
+    };
+
 inline constexpr std::size_t kTargetCount =
     kNumAxisSlots + kNumDigitalAxisSlots + kNumButtonSlots +
     kNumControlExtensionSlots + kNumAimAxisSlots + kNumDigitalAimSlots + 1 +
-    1 + kShipActionCatalog.size();
+    1 + kShipActionCatalog.size() + kMenuNavigationCatalog.size();
 
 consteval std::array<Target, kTargetCount> BuildTargets()
 {
@@ -133,7 +146,7 @@ consteval std::array<Target, kTargetCount> BuildTargets()
 
     for (int index = 0; index < kNumAxisSlots; ++index) {
         targets[output++] = {
-            kAxisControlIds[index], kShipButtonsPageId, kAxisSlots[index].label,
+            kAxisControlIds[index], kFlightAxesPageId, kAxisSlots[index].label,
             index == kNumAxisSlots - 1 ? TargetFamily::ReverseAxis : TargetFamily::CoreAxis,
             CaptureKind::Axis, CaptureSlot::kAxisBase + index,
             "Hardware", kAxisSlots[index].iniKey, {},
@@ -199,6 +212,17 @@ consteval std::array<Target, kTargetCount> BuildTargets()
             TargetFamily::ShipAction, CaptureKind::ButtonOrPov,
             CaptureSlot::kShipActionBase + static_cast<int>(index),
             "ShipButtons", action.sourceIniKey, action.actionId,
+        };
+    }
+
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        const auto& action = kMenuNavigationCatalog[index];
+        targets[output++] = {
+            kMenuNavigationControlIds[index], kShipButtonsPageId,
+            action.displayLabel, TargetFamily::MenuNavigation,
+            CaptureKind::ButtonOrPov,
+            CaptureSlot::kMenuNavigationBase + static_cast<int>(index),
+            "MenuControls", action.iniKey, action.actionId,
         };
     }
 

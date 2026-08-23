@@ -52,8 +52,6 @@ std::atomic_bool g_nativeControlsInitialized{};
 std::atomic_bool g_externalMouseSteeringOwner{};
 std::atomic_bool g_externalCameraOwner{};
 std::atomic_bool g_controllerStarted{};
-std::atomic_bool g_legacyWorkbenchConfigured{};
-std::atomic_bool g_legacyWorkbenchInstalled{};
 
 struct SettingsSession {
     bool loaded{};
@@ -193,7 +191,10 @@ ControlDescriptorV1 BindingControl(
             "Press a DirectInput button or POV direction. AbsoluteHOTAS handles this function internally; it does not emit a keypress.");
     } else if (target.family == HotasBindingCatalog::TargetFamily::ShipAction) {
         Copy(control.description,
-            "Press a DirectInput button or POV direction, then choose how AbsoluteHOTAS dispatches the action below.");
+            "Press a DirectInput button or POV direction. The adjacent method control shows how AbsoluteHOTAS dispatches this ship-context action.");
+    } else if (target.family == HotasBindingCatalog::TargetFamily::MenuNavigation) {
+        Copy(control.description,
+            "Optional menu-only binding. It release-arms on menu entry and never triggers the similarly named native ship action.");
     } else {
         Copy(control.description,
             target.captureKind == HotasBindingCatalog::CaptureKind::Axis
@@ -360,13 +361,13 @@ const ModuleDescriptorV1 g_module = [] {
 
 const std::array g_setupControls{
     ReadOnlyStatus("setup-control-host", "Absolute Control",
-        "Optional native menu connection; flight controls do not depend on the host."),
+        "Native configuration menu connection; flight controls remain independently initialized."),
     ReadOnlyStatus("setup-flight-runtime", "Flight runtime",
         "Startup state of the standalone injection hook and controller poller."),
     ReadOnlyStatus("setup-configuration", "Configuration owner",
         "AbsoluteHOTAS owns defaults, custom settings, profiles, validation, and reload."),
-    ReadOnlyStatus("setup-legacy-workbench", "Legacy workbench",
-        "The embedded workbench remains an optional transition and fallback frontend."),
+    ReadOnlyStatus("setup-menu-frontend", "Configuration frontend",
+        "Absolute Control is the only in-game editor; AbsoluteHOTAS installs no graphics hooks."),
     ReadOnlyStatus("setup-suite-modules", "Optional suite modules",
         "Head Tracking and Mouse Alignment remain separately installed, separately owned modules."),
 };
@@ -525,9 +526,6 @@ const std::array g_shortcutControls{
         kControlMutatesDraft | kControlLayoutInline),
     Action("shortcut-delete", "Remove shortcut", "Remove the selected shortcut.",
         kControlMutatesDraft | kControlLayoutInline | kControlRequiresConfirmation),
-    Action("shortcut-menu-preset", "Add menu-navigation preset",
-        "Add unbound W, A, S, D, Tab, E, and Escape shortcut rows.",
-        kControlMutatesDraft),
     ReadOnlyStatus("shortcut-macro-link", "Need a chord or sequence?",
         "Open the Macros page in Absolute Control. This ABI has no provider-driven page-navigation callback."),
     ReadOnlyStatus("shortcut-status", "Shortcut draft", "Persistence and validation status for this page transaction."),
@@ -567,13 +565,13 @@ const std::array g_macroControls{
 };
 
 const std::array g_macroFallbackControls{
-    ReadOnlyStatus("macros-scope", "Legacy host fallback",
-        "Macros remain editable in the embedded workbench because this Control host lacks selected records, confirmations, or provider capture."),
+    ReadOnlyStatus("macros-scope", "Control update required",
+        "Update Absolute Control to edit macros; this host lacks selected records, confirmations, or provider capture."),
 };
 
 const std::array g_deviceFallbackControls{
-    ReadOnlyStatus("devices-scope", "Legacy host fallback",
-        "Device inventory and calibration remain in the embedded workbench because this Control host lacks selected records and confirmations."),
+    ReadOnlyStatus("devices-scope", "Control update required",
+        "Update Absolute Control to use device inventory and calibration; this host lacks selected records and confirmations."),
 };
 
 const std::array g_diagnosticControls{
@@ -595,7 +593,7 @@ const std::array g_diagnosticControls{
     ReadOnlyStatus("diagnostics-controller", "Controller service",
         "Standalone DirectInput polling and flight-control execution state."),
     ReadOnlyStatus("diagnostics-frontends", "Frontends",
-        "Absolute Control connection and embedded-workbench fallback state."),
+        "Absolute Control connection and confirmation that no HOTAS graphics frontend is installed."),
     ReadOnlyStatus("diagnostics-coordination", "Suite coordination",
         "Current standalone ownership and the deferred optional headless runtime boundary."),
 };
@@ -627,8 +625,8 @@ std::vector<ControlDescriptorV1> WithThrottleNavigation(
 {
     std::vector<ControlDescriptorV1> controls = base;
     controls.push_back(Action(
-        "flight-open-bindings", "Open Bindings",
-        "Return to the landing page to bind the core analog flight axes."));
+        "flight-open-bindings", "Open Ship Buttons",
+        "Open the dedicated page for ship actions, plugin functions, and shortcuts."));
     controls.push_back(ReadOnlyStatus(
         "flight-throttle-summary", "Throttle behavior",
         "Positional and rate-throttle behavior share the Throttle Setup draft; Flight Axes does not duplicate those fields."));
@@ -657,47 +655,37 @@ ControlDescriptorV1 ShipRouteControl(
     const auto* action = FindShipAction(target.actionId);
     const auto id = std::format("{}-route", target.controlId);
     const auto label = std::format("{} output method", target.displayLabel);
-    if (action && action->allowedMethods == kDirectOrKeyboard) {
+    if (action && HasSelectableShipControlRoute(*action)) {
+        const auto alternate = AlternateShipControlMethod(*action);
+        const auto description = alternate == ShipControlMethod::Context
+            ? "Direct calls the native Select Target function. Ship-context SendInput E is a compatibility route and never doubles as Menu Accept."
+            : "Direct calls the native ship function. SendInput emits the current Starfield key or mouse binding, with the catalog fallback if none is mapped.";
         return Choice(id, label,
-            "Direct calls the native ship function. SendInput emits the current Starfield key or mouse binding, with the catalog fallback if none is mapped.",
+            description,
             0.0, 1.0, 1.0);
     }
-    return ReadOnlyStatus(id, label,
-        "This universal context action automatically follows menu, targeting, and ship state; it has no manual output-method switch.");
+    auto control = Choice(id, label,
+        "Only the fixed ship-context key route is currently validated for this action. Direct injection remains visibly unavailable instead of being offered as a no-op; menu navigation is independent.",
+        0.0, 1.0, 1.0);
+    control.flags |= kControlReadOnly;
+    return control;
 }
 
 std::vector<ControlDescriptorV1> ShipButtonControls()
 {
     std::vector<ControlDescriptorV1> controls;
-    controls.reserve(80);
+    controls.reserve(72);
     const auto appendAction = [&](std::string_view actionId) {
         if (const auto* target = FindShipActionTarget(actionId)) {
             controls.push_back(BindingControl(*target));
-            const auto* action = FindShipAction(target->actionId);
-            if (action && action->allowedMethods == kDirectOrKeyboard) {
-                controls.push_back(ShipRouteControl(*target));
-            }
+            controls.push_back(ShipRouteControl(*target));
         }
     };
 
     controls.push_back(GroupHeader(
-        "ship-axis-bindings", "FLIGHT AXES",
-        "Bind the seven analog HOTAS lanes here. Response graphs, inversion, deadzones, and saturation remain on Flight Axes."));
-    for (const auto& target : HotasBindingCatalog::kTargets) {
-        if (target.pageId == HotasBindingCatalog::kShipButtonsPageId &&
-            (target.family == HotasBindingCatalog::TargetFamily::CoreAxis ||
-             target.family == HotasBindingCatalog::TargetFamily::ReverseAxis)) {
-            controls.push_back(BindingControl(target));
-        }
-    }
-
-    controls.push_back(GroupHeader(
-        "ship-primary-controls", "PRIMARY FLIGHT & COMBAT",
-        "Bind the controls used most often in flight. Where offered, Direct calls the ship function while SendInput emits Starfield's current keyboard or mouse binding."));
-    for (const auto actionId : {
-             "FireWeapon0", "FireWeapon1", "FireWeapon2", "FireBoosters",
-             "SwitchFlightModes", "ShipAction1", "OpenScanner", "Repair",
-             "ShipAlternateControlHold", "Cruise", "AutopilotOnOff" }) {
+        "ship-native-controls", "NATIVE SHIP CONTROLS",
+        "Complete controller equivalents for Starfield's native ship-button list, in native menu order. Analog flight lanes remain on Flight Axes."));
+    for (const auto actionId : kNativeShipButtonActions) {
         appendAction(actionId);
         if (actionId == std::string_view{"FireBoosters"}) {
             controls.push_back(g_shipButtonControls[0]);
@@ -705,8 +693,8 @@ std::vector<ControlDescriptorV1> ShipButtonControls()
     }
 
     controls.push_back(GroupHeader(
-        "ship-hotas-functions", "ABSOLUTEHOTAS THROTTLE FUNCTIONS",
-        "These are plugin-owned throttle commands. They operate on HOTAS state directly and never simulate a keyboard or mouse input."));
+        "ship-hotas-functions", "ABSOLUTEHOTAS HOTKEYS",
+        "Plugin-owned throttle and turn-assist commands operate directly on HOTAS state and never simulate keyboard or mouse input."));
     for (const auto& target : HotasBindingCatalog::kTargets) {
         if (target.pageId == HotasBindingCatalog::kShipButtonsPageId &&
             (target.family == HotasBindingCatalog::TargetFamily::FlightAssist ||
@@ -714,28 +702,17 @@ std::vector<ControlDescriptorV1> ShipButtonControls()
             controls.push_back(BindingControl(target));
         }
     }
-
     controls.push_back(GroupHeader(
-        "ship-navigation-controls", "CONTEXT & NAVIGATION",
-        "These universal controls automatically choose the appropriate menu, targeting, or cockpit path and therefore use a fixed context route."));
-    for (const auto actionId : {
-             "SelectTarget", "IncreaseSystemPower", "DecreaseSystemPower",
-             "PreviousSystem", "NextSystem", "Cancel" }) {
-        appendAction(actionId);
+        "ship-menu-navigation", "OPTIONAL MENU NAVIGATION",
+        "Dedicated controller bindings for ordinary menus. These are independent of Select Target, Ship Cancel, and ship-system power controls, and remain unbound by default."));
+    for (const auto& target : HotasBindingCatalog::kTargets) {
+        if (target.family == HotasBindingCatalog::TargetFamily::MenuNavigation) {
+            controls.push_back(BindingControl(target));
+        }
     }
-
     controls.push_back(GroupHeader(
-        "ship-camera-cockpit", "CAMERA & COCKPIT",
-        "Less-frequent camera, docking, and cockpit controls. Compatibility defaults are selected where Starfield requires its ordinary input path."));
-    for (const auto actionId : {
-             "TogglePov", "ZoomCameraIn", "ZoomCameraOut", "UndockTakeOff",
-             "GetUp", "ExitShipFromCockpit" }) {
-        appendAction(actionId);
-    }
-
-    controls.push_back(GroupHeader(
-        "ship-menu-axis-reuse", "MENU CONTROL REUSE",
-        "Optionally reuse flight axes and Primary Weapon for menu navigation with neutral arming and hysteresis."));
+        "ship-menu-axis-reuse", "OPTIONAL FLIGHT-CONTROL REUSE",
+        "Alternatively reuse Pitch, Yaw, and Primary Weapon for menu navigation with neutral arming and hysteresis."));
     controls.insert(controls.end(), g_shipButtonControls.begin() + 1,
                     g_shipButtonControls.end());
     return controls;
@@ -748,8 +725,8 @@ std::vector<ControlDescriptorV1> WithShortcutControls(
 {
     std::vector<ControlDescriptorV1> controls = base;
     controls.push_back(GroupHeader(
-        "ship-custom-shortcuts", "CUSTOM KEYBOARD & MOUSE SHORTCUTS",
-        "Use these for raw compatibility outputs or ordinary UI shortcuts. Chords and ordered sequences belong on the Macros page."));
+        "ship-custom-shortcuts", "CUSTOM SENDINPUT BINDINGS",
+        "Bind controller buttons to arbitrary keyboard or mouse outputs. Chords and ordered sequences belong on the Macros page."));
     for (const auto& shortcutControl : g_shortcutControls) {
         if (pageNavigation &&
             std::string_view{ shortcutControl.controlId } == "shortcut-macro-link") {
@@ -1081,7 +1058,7 @@ std::string RouteDetail(const ShipActionRouteInfo& route)
         return std::format("Direct native action | {} | {}", selection,
                            AvailabilityLabel(route.availability));
     case ShipControlMethod::Context:
-        return std::format("Context navigation route | {} | {}", selection,
+        return std::format("Ship-context route | {} | {}", selection,
                            AvailabilityLabel(route.availability));
     case ShipControlMethod::KeyboardCompatibility: {
         std::string output = "no resolved output";
@@ -1120,17 +1097,15 @@ Result ReadShipRouteStatus(std::string_view id, ValueV1& output)
     const auto* action = FindShipAction(target->actionId);
     if (!action) return Result::NotFound;
 
-    if (action->allowedMethods == kDirectOrKeyboard) {
+    if (HasSelectableShipControlRoute(*action)) {
         std::scoped_lock lock(g_settingsMutex);
         if (!LoadSessionLocked(true)) return Result::Rejected;
         const auto index = static_cast<std::size_t>(
             action - kShipActionCatalog.data());
-        output = IntegerValue(
-            g_settings.draftRoutes[index] ==
-                ShipControlMethod::KeyboardCompatibility ? 1 : 0);
+        output = IntegerValue(g_settings.draftRoutes[index] ==
+            ShipControlMethod::Direct ? 0 : 1);
     } else {
-        output = StringValue(RouteDetail(
-            ShipOutputSystem::GetShipActionRouteInfo(target->actionId)));
+        output = IntegerValue(1);
     }
     return Result::Ok;
 }
@@ -1148,15 +1123,9 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
     } else if (id == "setup-configuration") {
         output = StringValue(
             "AbsoluteHOTAS.ini -> AbsoluteHOTAS_Custom.ini -> active profile overlay");
-    } else if (id == "setup-legacy-workbench") {
-        const bool configured =
-            g_legacyWorkbenchConfigured.load(std::memory_order_acquire);
-        const bool installed =
-            g_legacyWorkbenchInstalled.load(std::memory_order_acquire);
-        output = StringValue(!configured ?
-            "Disabled by [UI] bEnableWorkbench; manual configuration remains available." :
-            installed ? "Available as the supported transition/fallback frontend." :
-                        "Configured but renderer hooks were unavailable; gameplay is unaffected.");
+    } else if (id == "setup-menu-frontend") {
+        output = StringValue(
+            "Absolute Control owns all in-game presentation; the retired Dear ImGui workbench and D3D12/DXGI hooks are not present in this build.");
     } else if (id == "setup-suite-modules") {
         output = StringValue(
             "Camera pose: Absolute Head Tracking | mouse centering: AbsoluteZero");
@@ -1197,13 +1166,13 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
             "Static HOTAS aiming settings and bindings are available; optional live telemetry is unavailable. Camera and native mouse steering remain external.");
     } else if (id == "profiles-scope") {
         output = StringValue(
-            "Profiles remain editable in the embedded workbench because this Control host lacks the required record and confirmation capabilities.");
+            "This Absolute Control build lacks the record and confirmation capabilities required to edit profiles. Update Absolute Control or edit the HOTAS-owned files manually.");
     } else if (id == "macros-scope") {
         output = StringValue(
-            "Macros remain editable in the embedded workbench because this Control host lacks the required record and capture capabilities.");
+            "This Absolute Control build lacks the record and capture capabilities required to edit macros. Update Absolute Control or edit the HOTAS-owned files manually.");
     } else if (id == "devices-scope") {
         output = StringValue(
-            "Device inventory and calibration remain in the embedded workbench because this Control host lacks the required record and confirmation capabilities.");
+            "This Absolute Control build lacks the record and confirmation capabilities required for device calibration. Update Absolute Control.");
     } else if (id == "diagnostics-control-session") {
         std::scoped_lock lock(g_settingsMutex);
         if (!g_settings.lastError.empty()) {
@@ -1228,10 +1197,8 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
                 "DirectInput poller running under AbsoluteHOTAS ownership." :
                 "Controller poller not running; configuration and diagnostics remain available.");
     } else if (id == "diagnostics-frontends") {
-        output = StringValue(std::format(
-            "Absolute Control connected | embedded workbench {}",
-            g_legacyWorkbenchInstalled.load(std::memory_order_acquire) ?
-                "available" : "unavailable or disabled"));
+        output = StringValue(
+            "Absolute Control connected as the sole in-game editor | no HOTAS renderer hooks installed");
     } else if (id == "diagnostics-coordination") {
         const bool zero = g_externalMouseSteeringOwner.load(std::memory_order_acquire);
         const bool head = g_externalCameraOwner.load(std::memory_order_acquire);
@@ -1308,7 +1275,6 @@ Result __cdecl WriteDraft(void* rawContext, const char* rawId,
         return Result::InvalidArgument;
     }
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_settingsMutex);
         if (!LoadSessionLocked(true)) return Result::Rejected;
 
@@ -1408,7 +1374,6 @@ Result __cdecl WriteDraft(void* rawContext, const char* rawId,
 Result __cdecl ApplyDraft(void*) noexcept
 {
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_settingsMutex);
         if (!LoadSessionLocked(true)) return Result::Rejected;
         using CaptureTarget = AbsoluteControlTelemetry::ThrottleCaptureTarget;
@@ -1500,7 +1465,6 @@ Result __cdecl InvokeThrottleAction(void*, const char* rawId) noexcept
 {
     if (!rawId) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         const std::string_view id{rawId};
         AbsoluteControlThrottleActions::Action action{};
         AbsoluteControlTelemetry::ThrottleCaptureTarget captureTarget{
@@ -1724,7 +1688,6 @@ Result __cdecl WriteMacroDraft(void*, const char* rawId, const ValueV1* value) n
 {
     if (!rawId || !value || value->structSize < sizeof(ValueV1)) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         return WriteDynamicDraft(rawId, *value);
     } catch (...) { return Result::Rejected; }
 }
@@ -1737,19 +1700,18 @@ Result __cdecl WriteShipDraft(void* context, const char* rawId, const ValueV1* v
         if (id.starts_with("shortcut-"))
             return WriteMacroDraft(context, rawId, value);
         if (const auto* target = FindShipRouteTarget(id)) {
-            if (!AbsoluteControlSettings::CanEdit() ||
-                !ContextOwns(context, *target) ||
+            if (!ContextOwns(context, *target) ||
                 value->kind != ValueKind::Integer ||
                 value->integerValue < 0 || value->integerValue > 1) {
                 return Result::InvalidArgument;
             }
             const auto* action = FindShipAction(target->actionId);
-            if (!action || action->allowedMethods != kDirectOrKeyboard) {
+            if (!action || !HasSelectableShipControlRoute(*action)) {
                 return Result::Rejected;
             }
             const auto method = value->integerValue == 0
                 ? ShipControlMethod::Direct
-                : ShipControlMethod::KeyboardCompatibility;
+                : AlternateShipControlMethod(*action);
             if (!AllowsShipControlMethod(*action, method)) {
                 return Result::InvalidArgument;
             }
@@ -1769,7 +1731,6 @@ Result __cdecl WriteShipDraft(void* context, const char* rawId, const ValueV1* v
 Result __cdecl ApplyMacroDraft(void*) noexcept
 {
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_macroMutex);
         if (!EnsureMacroSessionLocked()) return Result::Rejected;
         std::string error;
@@ -1843,7 +1804,7 @@ Result __cdecl ReadShipChoices(void* context, const char* rawId, ChoiceOptionV1*
         return ReadMacroChoices(context, rawId, options, capacity, outputCount);
     if (const auto* target = FindShipRouteTarget(id)) {
         const auto* action = FindShipAction(target->actionId);
-        if (!action || action->allowedMethods != kDirectOrKeyboard) {
+        if (!action) {
             *outputCount = 0;
             return Result::NotFound;
         }
@@ -1851,10 +1812,18 @@ Result __cdecl ReadShipChoices(void* context, const char* rawId, ChoiceOptionV1*
         if (!options || capacity < 2) return Result::CapacityExceeded;
         options[0] = {};
         options[0].value = 0;
-        Copy(options[0].label, "Direct function");
+        Copy(options[0].label,
+             HasSelectableShipControlRoute(*action)
+                 ? "Direct function"
+                 : "Direct injection unavailable");
         options[1] = {};
         options[1].value = 1;
-        Copy(options[1].label, "SendInput key / mouse");
+        Copy(options[1].label,
+             !HasSelectableShipControlRoute(*action)
+                 ? "Fixed ship-context SendInput"
+                 : AlternateShipControlMethod(*action) == ShipControlMethod::Context
+                     ? "Ship-context SendInput E"
+                     : "SendInput key / mouse");
         return Result::Ok;
     }
     return ReadChoiceOptions(context, rawId, options, capacity, outputCount);
@@ -1897,7 +1866,6 @@ Result __cdecl InvokeMacroAction(void*, const char* rawId) noexcept
 {
     if (!rawId) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_macroMutex);
         if (!EnsureMacroSessionLocked()) return Result::Rejected;
         const std::string_view id{rawId};
@@ -2040,7 +2008,6 @@ Result __cdecl WriteProfileDraft(void*, const char* rawId,
         return Result::InvalidArgument;
     }
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_profileMutex);
         if (!EnsureProfileSessionLocked()) return Result::Rejected;
         const std::string_view id{rawId};
@@ -2115,7 +2082,6 @@ Result __cdecl WriteProfileDraft(void*, const char* rawId,
 Result __cdecl ApplyProfileDraft(void*) noexcept
 {
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_profileMutex);
         if (!EnsureProfileSessionLocked()) return Result::Rejected;
         std::string error;
@@ -2212,7 +2178,6 @@ Result __cdecl InvokeProfileAction(void*, const char* rawId) noexcept
 {
     if (!rawId) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_profileMutex);
         if (!EnsureProfileSessionLocked()) return Result::Rejected;
         const std::string_view id{rawId};
@@ -2276,7 +2241,6 @@ Result __cdecl BeginBindingCapture(void* rawContext,
         const auto* target = HotasBindingCatalog::Find(rawId);
         if (!target) return Result::NotFound;
         if (!ContextOwns(rawContext, *target)) return Result::InvalidArgument;
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
 
         std::scoped_lock lock(g_settingsMutex);
         if (!LoadSessionLocked(true)) return Result::Rejected;
@@ -2383,7 +2347,6 @@ Result __cdecl ReassignBinding(void* rawContext, const char* rawId,
         const auto* target = HotasBindingCatalog::Find(rawId);
         if (!target) return Result::NotFound;
         if (!ContextOwns(rawContext, *target)) return Result::InvalidArgument;
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
 
         const auto* bindingEnd = static_cast<const char*>(
             std::memchr(rawBinding, '\0', kStringValueCapacity));
@@ -2440,7 +2403,6 @@ Result __cdecl BeginMacroBindingCapture(void* rawContext, const char* rawId) noe
 {
     if (!IsMacroBinding(rawContext, rawId)) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_macroMutex);
         if (!EnsureMacroSessionLocked()) return Result::Rejected;
         const bool macro = std::string_view{rawId} == "macro-trigger";
@@ -2547,7 +2509,6 @@ Result __cdecl BeginProfileBindingCapture(void* rawContext,
 {
     if (!IsProfileBinding(rawContext, rawId)) return Result::InvalidArgument;
     try {
-        if (!AbsoluteControlSettings::CanEdit()) return Result::Rejected;
         std::scoped_lock lock(g_profileMutex);
         if (!EnsureProfileSessionLocked()) return Result::Rejected;
         const auto* selected = g_profileSession->Selected();
@@ -2996,9 +2957,9 @@ PageDescriptorV1 ShipButtonsPage(bool pageNavigation = true) noexcept
     PageDescriptorV1 page;
     Copy(page.moduleId, kHotasModuleId);
     Copy(page.pageId, "hotas-ship-buttons");
-    Copy(page.displayName, "Bindings");
+    Copy(page.displayName, "Ship Buttons");
     Copy(page.description,
-        "Core flight axes, named ship actions, plugin functions, and custom keyboard/mouse shortcuts.");
+        "Named ship actions, plugin functions, menu reuse, and custom keyboard/mouse shortcuts. Analog axes live exclusively on Flight Axes.");
     const auto& controls = pageNavigation
         ? g_shipButtonControlsWithShortcuts
         : g_shipButtonControlsWithShortcutFallback;
@@ -3093,7 +3054,7 @@ PageDescriptorV1 Page(std::string_view id, std::string_view name,
 
 const auto g_deviceFallbackPage = Page(
     "hotas-devices", "Devices & Calibration",
-    "DirectInput device identity, state, and hardware calibration remain available in the embedded workbench on this host.",
+    "Update Absolute Control to use HOTAS-owned DirectInput inventory and hardware calibration.",
     g_deviceFallbackControls.data(),
     static_cast<std::uint32_t>(g_deviceFallbackControls.size()), false);
 
@@ -3103,12 +3064,12 @@ PageContext g_aimingContext{HotasBindingCatalog::kAimingPageId};
 PageContext g_diagnosticsContext{HotasBindingCatalog::kDiagnosticsPageId};
 
 const std::array g_unpinnedPages{
-    ShipButtonsPage(),
     Page("hotas-flight-axes", "Flight Axes",
-         "First native Control editing slice for HOTAS-owned flight-axis settings.",
+         "Bind and tune HOTAS-owned analog and digital flight-axis controls.",
           g_flightAxisControlsWithNavigation.data(),
           static_cast<std::uint32_t>(g_flightAxisControlsWithNavigation.size()),
           true, false, &g_flightAxesContext, true, &InvokePageLinkAction),
+    ShipButtonsPage(),
     ThrottlePage(),
     Page("hotas-aiming", "Aiming & Combat",
          "HOTAS-owned independent reticle and digital aiming behavior.",
@@ -3124,7 +3085,7 @@ const std::array g_unpinnedPages{
           static_cast<std::uint32_t>(g_diagnosticControlsWithBindings.size()),
           true, true, &g_diagnosticsContext, true),
     Page("hotas-setup", "Administration",
-         "Read-only readiness, ownership, and fallback-frontend summary for the standalone HOTAS runtime.",
+         "Read-only readiness, ownership, and native-menu summary for the standalone HOTAS runtime.",
          g_setupControls.data(), static_cast<std::uint32_t>(g_setupControls.size()), false),
 };
 
@@ -3219,21 +3180,21 @@ const PinnedPageSet& PinnedPages()
     return pages;
 }
 
-// Captureless ABI-1 hosts retain the scalar/status provider and the embedded
-// workbench remains the binding fallback. They never receive editable binding
-// rows or callback pointers they do not understand.
+// Captureless ABI-1 hosts retain the scalar/status provider. They never receive
+// editable binding rows or callback pointers they do not understand; status text
+// directs users to update Absolute Control because no renderer fallback exists.
 const std::array g_capturelessPages{
-    Page("hotas-ship-buttons", "Bindings",
-         "HOTAS ship settings; bindings remain in the embedded workbench on this host.",
-         g_shipButtonControls.data(),
-         static_cast<std::uint32_t>(g_shipButtonControls.size()), true),
     Page("hotas-flight-axes", "Flight Axes",
-         "HOTAS-owned flight-axis settings; bindings remain in the embedded workbench on this host.",
+         "HOTAS-owned flight-axis settings are editable; update Absolute Control to capture bindings.",
          g_flightAxisControls.data(),
          static_cast<std::uint32_t>(g_flightAxisControls.size()), true),
+    Page("hotas-ship-buttons", "Ship Buttons",
+         "HOTAS ship settings are editable; update Absolute Control to capture bindings.",
+         g_shipButtonControls.data(),
+         static_cast<std::uint32_t>(g_shipButtonControls.size()), true),
     ThrottlePage(),
     Page("hotas-aiming", "Aiming & Combat",
-         "HOTAS aiming settings; bindings remain in the embedded workbench on this host.",
+         "HOTAS aiming settings are editable; update Absolute Control to capture bindings.",
          g_aimingControls.data(),
          static_cast<std::uint32_t>(g_aimingControls.size()), true),
     Page("hotas-profiles", "Profiles & Layers",
@@ -3241,7 +3202,7 @@ const std::array g_capturelessPages{
          g_profileFallbackControls.data(),
          static_cast<std::uint32_t>(g_profileFallbackControls.size()), false),
     Page("hotas-macros", "Macros",
-         "HOTAS macros remain available in the embedded workbench on this host.",
+         "Update Absolute Control to edit HOTAS-owned macros.",
          g_macroFallbackControls.data(),
          static_cast<std::uint32_t>(g_macroFallbackControls.size()), false),
     DevicePage(),
@@ -3250,7 +3211,7 @@ const std::array g_capturelessPages{
          g_diagnosticControls.data(),
          static_cast<std::uint32_t>(g_diagnosticControls.size()), true, true),
     Page("hotas-setup", "Administration",
-         "Read-only readiness, ownership, and fallback-frontend summary for the standalone HOTAS runtime.",
+         "Read-only readiness, ownership, and native-menu summary for the standalone HOTAS runtime.",
          g_setupControls.data(), static_cast<std::uint32_t>(g_setupControls.size()), false),
 };
 
@@ -3369,9 +3330,10 @@ bool ValidControl(const ControlDescriptorV1& control,
                control.minimumValue <= control.maximumValue &&
                control.stepValue > 0.0;
     case ControlKind::Choice:
-        return !readOnly && hasChoiceReader &&
-               (control.flags & ~(kControlAdvanced | kControlRequiresRestart |
-                   kControlTransientChoice | kControlPinnedContext)) == 0;
+        return hasChoiceReader &&
+               (control.flags & ~(kControlReadOnly | kControlAdvanced |
+                   kControlRequiresRestart | kControlTransientChoice |
+                   kControlPinnedContext)) == 0;
     case ControlKind::Action:
         return !readOnly &&
                (control.flags & ~(kControlAdvanced | kControlMutatesDraft |
@@ -3421,10 +3383,6 @@ void SetRuntimeStatus(const RuntimeStatus& status) noexcept
     g_nativeControlsInitialized.store(
         status.nativeControlsInitialized, std::memory_order_release);
     g_controllerStarted.store(status.controllerStarted, std::memory_order_release);
-    g_legacyWorkbenchConfigured.store(
-        status.legacyWorkbenchConfigured, std::memory_order_release);
-    g_legacyWorkbenchInstalled.store(
-        status.legacyWorkbenchInstalled, std::memory_order_release);
 }
 
 void SetExternalMouseSteeringOwner(bool active) noexcept

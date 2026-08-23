@@ -5,7 +5,6 @@
 #include "BindingRef.h"
 #include "RuntimePaths.h"
 #include "ThrottleController.h"
-#include "UIHook.h"
 #include "WizardConfigInternal.h"
 
 #include <SimpleIni.h>
@@ -359,11 +358,6 @@ Revision CurrentRevision() noexcept
     };
 }
 
-bool CanEdit() noexcept
-{
-    return !UIHook::IsUIOpen();
-}
-
 bool Load(ScalarState& state, Revision& revision, std::string& error) noexcept
 {
     try {
@@ -470,10 +464,6 @@ bool Apply(const ScalarState& state, const Revision& expected,
     try {
         error.clear();
         if (!Validate(state, error)) return false;
-        if (!CanEdit()) {
-            error = "Close the embedded HOTAS workbench before editing in Absolute Control.";
-            return false;
-        }
         if (CurrentRevision().sourceFingerprint != expected.sourceFingerprint) {
             error = "The HOTAS configuration changed after this draft was opened.";
             return false;
@@ -552,10 +542,6 @@ bool ApplyWithBindingsAndRoutes(
     try {
         error.clear();
         if (!Validate(state, error)) return false;
-        if (!CanEdit()) {
-            error = "Close the embedded HOTAS workbench before editing in Absolute Control.";
-            return false;
-        }
         if (CurrentRevision().sourceFingerprint != expected.sourceFingerprint) {
             error = "The HOTAS configuration changed after this draft was opened.";
             return false;
@@ -618,10 +604,6 @@ bool ApplyEditTargetWithBindingsAndRoutes(
     try {
         error.clear();
         if (!Validate(state, error)) return false;
-        if (!CanEdit()) {
-            error = "Close the embedded HOTAS workbench before editing in Absolute Control.";
-            return false;
-        }
         if (WizardConfig::GetEditProfile() != expectedEditTarget) {
             error = "The selected HOTAS edit profile changed after this draft opened.";
             return false;
@@ -676,10 +658,6 @@ bool ApplyDeviceState(
 {
     try {
         error.clear();
-        if (!CanEdit()) {
-            error = "Close the embedded HOTAS workbench before editing in Absolute Control.";
-            return false;
-        }
         if (CurrentRevision().sourceFingerprint != expected.sourceFingerprint) {
             error = "The HOTAS configuration changed after this device action opened.";
             return false;

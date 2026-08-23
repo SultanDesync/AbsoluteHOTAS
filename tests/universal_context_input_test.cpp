@@ -1,4 +1,6 @@
 #include "UniversalContextInput.h"
+#include "MenuNavigationCatalog.h"
+#include "ShipActionCatalog.h"
 
 #include <cstdio>
 
@@ -33,6 +35,14 @@ int main()
     CheckMapping("Cancel", 0x01, false);
     CHECK(UniversalContextInput::Find("FireBoosters") == nullptr);
     CHECK(UniversalContextInput::Find("selecttarget") == nullptr);
+    CHECK(kMenuNavigationCatalog.size() == 6);
+    CHECK(FindMenuNavigationAction("MenuAccept")->scanCode == 0x12);
+    CHECK(FindMenuNavigationAction("MenuCancel")->scanCode == 0x01);
+    CHECK(FindMenuNavigationAction("MenuUp")->extended);
+    for (const auto& menuAction : kMenuNavigationCatalog) {
+        CHECK(UniversalContextInput::Find(menuAction.actionId) == nullptr);
+        CHECK(FindShipAction(menuAction.actionId) == nullptr);
+    }
 
     const auto normalLeft = UniversalContextInput::ResolveRoute("PreviousSystem", false);
     CHECK(normalLeft.vanillaKey);

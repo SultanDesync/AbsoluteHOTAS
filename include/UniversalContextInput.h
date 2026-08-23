@@ -4,10 +4,9 @@
 #include <cstdint>
 #include <string_view>
 
-// Compatibility aliases for the six existing ship-button slots that also form
-// Starfield's vanilla context-navigation cluster. Keeping the historical action
-// IDs and INI keys preserves every profile while fixed keyboard scan codes let
-// Starfield's active ControlMap context choose the meaning of each press.
+// Fixed compatibility routes for native ship bindings. These mappings are
+// deliberately not menu bindings: the controller loop gates them to the live
+// ship context, while optional menu controls use MenuNavigationCatalog instead.
 namespace UniversalContextInput {
 
 struct Mapping {
@@ -23,12 +22,12 @@ struct Route {
 };
 
 inline constexpr std::array<Mapping, 6> kMappings{
-    Mapping{ "SelectTarget",        0x12, false, false }, // E: Select Target / Accept
+    Mapping{ "SelectTarget",        0x12, false, false }, // E: ship Select Target compatibility
     Mapping{ "IncreaseSystemPower", 0x48, true,  false }, // Up
     Mapping{ "DecreaseSystemPower", 0x50, true,  false }, // Down
     Mapping{ "PreviousSystem",      0x4B, true,  true  }, // Left + targeting SelectLeft
     Mapping{ "NextSystem",          0x4D, true,  true  }, // Right + targeting SelectRight
-    Mapping{ "Cancel",              0x01, false, false }, // Esc: Ship Cancel / Menu Cancel
+    Mapping{ "Cancel",              0x01, false, false }, // Esc: Ship Cancel
 };
 
 constexpr const Mapping* Find(std::string_view actionId) noexcept

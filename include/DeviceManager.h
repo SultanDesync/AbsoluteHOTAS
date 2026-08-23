@@ -48,7 +48,7 @@ public:
     // Logging
     static void LogDeviceManifest();  // "=== Attached HID Devices ==="
     
-    // Open ALL enumerated devices for polling (used by BindingWizard)
+    // Open ALL enumerated devices for gameplay and provider-owned Control capture.
     static void OpenAllDevices();
 
     // Extract an axis value from DIJOYSTATE2 by HID usage ID (0x30-0x37)

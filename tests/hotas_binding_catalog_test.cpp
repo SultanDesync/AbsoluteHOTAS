@@ -36,7 +36,7 @@ int main()
 {
     using namespace HotasBindingCatalog;
 
-    static_assert(kTargetCount == 53);
+    static_assert(kTargetCount == 59);
     static_assert(kTargets.size() == kTargetCount);
 
     std::array<bool, kNumAxisSlots> axes{};
@@ -46,6 +46,7 @@ int main()
     std::array<bool, kNumAimAxisSlots> aimAxes{};
     std::array<bool, kNumDigitalAimSlots> digitalAim{};
     std::array<bool, kShipActionCatalog.size()> shipActions{};
+    std::array<bool, kMenuNavigationCatalog.size()> menuNavigation{};
     bool aimToggle = false;
     bool turnAssist = false;
 
@@ -76,6 +77,7 @@ int main()
         switch (target.family) {
         case TargetFamily::CoreAxis:
         case TargetFamily::ReverseAxis: {
+            assert(target.pageId == kFlightAxesPageId);
             assert(target.captureKind == CaptureKind::Axis);
             assert(target.iniSection == "Hardware");
             const int index = target.captureSlot - CaptureSlot::kAxisBase;
@@ -152,6 +154,7 @@ int main()
             turnAssist = true;
             break;
         case TargetFamily::ShipAction: {
+            assert(target.pageId == kShipButtonsPageId);
             assert(target.captureKind == CaptureKind::ButtonOrPov);
             assert(target.iniSection == "ShipButtons");
             const int index = target.captureSlot - CaptureSlot::kShipActionBase;
@@ -159,6 +162,18 @@ int main()
             assert(target.actionId == kShipActionCatalog[index].actionId);
             assert(target.iniKey == kShipActionCatalog[index].sourceIniKey);
             shipActions[index] = true;
+            break;
+        }
+        case TargetFamily::MenuNavigation: {
+            assert(target.pageId == kShipButtonsPageId);
+            assert(target.captureKind == CaptureKind::ButtonOrPov);
+            assert(target.iniSection == "MenuControls");
+            const int index = target.captureSlot - CaptureSlot::kMenuNavigationBase;
+            assert(index >= 0 &&
+                   index < static_cast<int>(kMenuNavigationCatalog.size()));
+            assert(target.actionId == kMenuNavigationCatalog[index].actionId);
+            assert(target.iniKey == kMenuNavigationCatalog[index].iniKey);
+            menuNavigation[index] = true;
             break;
         }
         }
@@ -171,12 +186,14 @@ int main()
     for (const bool covered : aimAxes) assert(covered);
     for (const bool covered : digitalAim) assert(covered);
     for (const bool covered : shipActions) assert(covered);
+    for (const bool covered : menuNavigation) assert(covered);
     assert(aimToggle);
     assert(turnAssist);
 
     assert(Find("bind-throttle-axis") != nullptr);
     assert(Find("bind-ship-autopilot-on-off") != nullptr);
     assert(Find("bind-turn-assist") != nullptr);
+    assert(Find("bind-menu-accept") != nullptr);
     assert(Find("missing-binding") == nullptr);
     return 0;
 }

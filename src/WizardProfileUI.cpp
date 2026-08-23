@@ -61,6 +61,10 @@ void OnCaptureCommit(int slot, const char* binding) {
     } else if (slot >= CaptureSlot::kControlExtensionBase
                && slot < CaptureSlot::kControlExtensionBase + kNumControlExtensionSlots) {
         s.controlExtensionBindings[slot - CaptureSlot::kControlExtensionBase] = binding;
+    } else if (slot >= CaptureSlot::kMenuNavigationBase
+               && slot < CaptureSlot::kMenuNavigationBase +
+                              static_cast<int>(kMenuNavigationCatalog.size())) {
+        s.menuNavigationBindings[slot - CaptureSlot::kMenuNavigationBase] = binding;
     } else if (slot == CaptureSlot::kProfileTrigger && s_profileCapturePending) {
         // s_profileCaptureName may be empty — that is the base config's own trigger.
         if (WizardSession::SetActivationDraft(s_profileCaptureName, binding, s_profileCaptureMode)) {

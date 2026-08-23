@@ -323,7 +323,7 @@ static void DrawMacroSteps(MacroRow& m) {
 void DrawMacrosTab(WizardState& s) {
     ImGui::TextWrapped(
         "A macro plays an ordered sequence of actions from one button press. Steps can target "
-        "named ship actions, universal context inputs, or explicit raw keys/mouse buttons. "
+        "named ship actions, dedicated menu inputs, or explicit raw keys/mouse buttons. "
         "Press '+' on a step to add targets pressed together as a chord.");
     ImGui::TextWrapped(
         "One press runs the whole sequence to the end - you do not need to hold the button. "

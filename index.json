@@ -1,21 +1,20 @@
 {
   "project": "AbsoluteHOTAS",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "type": "Standalone SFSE Plugin",
-  "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling, 17 internally dispatched ship actions, six universal context inputs, optional profile-aware flight-control reuse in menus, simultaneous roll/strafe output, and OpenTrack/Tobii rotational head tracking — no vJoy or Joystick Gremlin required.",
+  "summary": "Starfield Script Extender (SFSE) plugin providing direct HOTAS/HOSAS ship flight control via native DirectInput HID polling, the complete native ship-button set, six independent optional menu bindings, profile-aware flight-control reuse in menus, and simultaneous roll/strafe output — no vJoy or Joystick Gremlin required.",
   "technologies": [
     "C++23",
     "Starfield Script Extender (SFSE)",
     "DirectInput 8",
-    "Windows SendInput API (universal context and raw custom bindings)",
-    "ImGui (D3D12 overlay)",
-    "MinHook",
+    "Windows SendInput API (ship compatibility, optional menu, and raw custom bindings)",
+    "Absolute Control native menu provider ABI",
     "x86-64 assembly & trampoline hooks"
   ],
   "directories": {
     "src": {
       "path": "src",
-      "purpose": "All plugin C++ source files: the main entry point, low-level memory hooks, setting beacon, DirectInput controller thread, ImGui binding wizard, ship output, ControlMap reader, D3D12 UI hook, and runtime paths/logging.",
+      "purpose": "Plugin C++ source files: the main entry point, low-level flight hooks, setting beacon, DirectInput controller thread, Absolute Control provider, ship output, ControlMap reader, and runtime paths/logging. Retired ImGui/UIHook sources remain historical and are excluded from the shipping target.",
       "subdirectories": {}
     },
     "include": {
@@ -46,7 +45,7 @@
   "files": {
     "src/Main.cpp": {
       "role": "Plugin Loader & Entry Point",
-      "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, plants the Setting beacon, installs the low-level hooks, initializes the controller thread, and hooks D3D12 via UIHook."
+      "purpose": "Defines SFSEPluginLoad which initializes log paths, sets up a vectored exception handler for crash monitoring, plants the Setting beacon, installs the low-level flight hooks, initializes the controller thread, and registers the native Absolute Control module at SFSE lifecycle boundaries."
     },
     "src/ThrottleHook.cpp": {
       "role": "Low-level x86 Hook Manager",
@@ -62,7 +61,7 @@
     },
     "src/ShipOutput.cpp": {
       "role": "Ship Action & Output Management",
-      "purpose": "Routes ship-specific named actions into the native-control service while retaining ref-counted universal context and explicit raw keyboard/mouse outputs."
+      "purpose": "Routes named ship actions into the native-control service while keeping optional menu navigation and explicit raw keyboard/mouse outputs independently owned."
     },
     "src/AimController.cpp": {
       "role": "Aim & Source Object Reticle Injection",
@@ -73,16 +72,16 @@
       "purpose": "Scans the game module's .data and .rdata memory sections to locate the fThrottleAtEngineStart and fRollDeadzone settings, planting a signpost value (0.0314f) and disabling the native roll deadzone."
     },
     "src/BindingWizard.cpp": {
-      "role": "ImGui Binding Wizard UI",
-      "purpose": "Implements the interactive in-game overlay wizard allowing users to dynamically bind controller axes and buttons, calibrate deadzones, and configure sensitivities."
+      "role": "Retired ImGui Workbench Reference",
+      "purpose": "Historical presentation reference excluded from the shipping DLL; Absolute Control now owns all in-game menu presentation."
     },
     "src/WizardCapture.cpp": {
-      "role": "Binding Wizard Signal Capture",
-      "purpose": "Handles live input capture for physical joystick buttons/axes within the ImGui wizard UI."
+      "role": "Provider-owned Signal Capture",
+      "purpose": "Handles live physical joystick button/axis capture requested by the Absolute Control provider."
     },
     "src/WizardConfig.cpp": {
-      "role": "Binding Wizard Config Serializer",
-      "purpose": "Atomically serializes wizard state and macros to AbsoluteHOTAS_Custom.ini, and manages full/overlay profile records in Profiles/."
+      "role": "Renderer-neutral Config Serializer",
+      "purpose": "Atomically serializes provider state and macros to AbsoluteHOTAS_Custom.ini, and manages full/overlay profile records in Profiles/."
     },
     "config/AbsoluteHOTAS.ini": {
       "role": "Shipped Default Configuration",
@@ -93,8 +92,8 @@
       "purpose": "Manages low-level DirectInput 8 device enumeration, initialization, and capability polling for connected HOTAS/HOSAS controllers."
     },
     "src/UIHook.cpp": {
-      "role": "D3D12 & ImGui Graphics Hook",
-      "purpose": "Hooks the game's D3D12 Present and ResizeBuffers calls using MinHook to inject and render the ImGui controller configuration overlay."
+      "role": "Retired Graphics-hook Reference",
+      "purpose": "Historical D3D12/ImGui implementation excluded from the shipping DLL and dependency graph."
     },
     "src/RuntimePaths.cpp": {
       "role": "Path Resolver & Logger Utility",

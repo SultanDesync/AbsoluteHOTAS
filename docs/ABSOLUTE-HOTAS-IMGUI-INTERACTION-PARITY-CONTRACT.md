@@ -1,8 +1,8 @@
 # AbsoluteHOTAS ImGui interaction parity contract
 
-> **Status:** Audit gate. The current Absolute Control surface is an experimental
-> first-pass scaffold, not a feature-complete replacement for the Dear ImGui
-> workbench.
+> **Status:** Historical audit gate. The interaction contract informed the completed
+> Absolute Control provider; the Dear ImGui workbench is retired and excluded from
+> the shipping DLL.
 >
 > **Rule:** A persisted value appearing in Absolute Control is not parity. Parity
 > requires the same user task, state transitions, feedback, safety behavior, and
@@ -120,14 +120,13 @@ generic status row when the workbench provides an operable interaction.
 
 | Element | Dear ImGui behavior and controlled state | Required Control behavior | Status |
 |---|---|---|---|
-| Action groups | 23 actions grouped as Weapons, Flight Systems, Camera, Navigation/Context, Cockpit/Docking. | Section/card grouping that keeps binding and route together. | Bindings/status exist but are long flat lists. |
+| Native ship controls | All 23 actions in Starfield's menu order, with binding and route kept together. | One complete native section with card-local route state. | Implemented in the C2 composition. |
 | Binding row | Label, current binding, Bind/Rebind/Clear, colored unbound state. | Mixed row primitive with capture actions and accessible state text. | Generic binding control is less expressive. |
 | Route summary | Direct/Context/Keyboard compatibility, resolved output/source, waiting/build/context availability. | Status severity and route detail immediately beneath or beside its binding. | Data exists; layout/status primitive missing. |
 | Boost authority | Checkbox nested under Fire Boosters, because it modifies that action's throttle behavior. | Associated control within the Fire Boosters card. | Currently separated. |
-| Menu-control reuse | Collapsible explanation; pitch/yaw/primary toggles; conditional invert and engage/release sliders; hysteresis invariant. | Conditional compound section with neutral-arming explanation and validation feedback. | Values exist; compound conditional UX missing. |
+| Menu navigation | Six independent button bindings plus optional pitch/yaw/primary reuse, inversion, thresholds, and neutral arming. | One optional menu section separate from native ship controls. | Dedicated rows and reuse controls implemented. |
 | Four flight assists | Native throttle commands with binding rows. | Small grouped binding grid. | Flat rows. |
 | Shortcut repeater | Visible add/remove rows with trigger, raw output selector, Bind/Clear/Remove and empty state. | Bounded repeater/table; record popup alone is not parity. | Missing host primitive. |
-| Menu preset | Adds seven incomplete/explicit shortcut rows in one draft operation. | Draft action followed by visible inserted rows and focus on the first incomplete row. | Backend exists; visible result/focus missing. |
 | Macro deep link | Moves directly to macro editor. | Page-open request with deterministic destination focus. | Page open exists; destination focus proof pending. |
 
 ## Aiming & Combat

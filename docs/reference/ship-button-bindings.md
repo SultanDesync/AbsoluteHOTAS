@@ -1,8 +1,9 @@
-# AbsoluteHOTAS 5.0 Ship Button Bindings
+# AbsoluteHOTAS 5.1 Ship Button Bindings
 
-AbsoluteHOTAS maps DirectInput buttons to 23 profile-stable named controls. In
-5.0, 17 ship-specific actions enter validated internal control paths. Six existing
-slots form a universal context cluster using vanilla E, Esc, and arrow inputs.
+AbsoluteHOTAS maps DirectInput buttons to all 23 profile-stable native ship
+controls. They are active only in ship or targeting context. Six separate,
+optional menu-navigation bindings use vanilla E, Esc, and arrow inputs and do
+not inherit assignments from the ship controls.
 
 The physical button side is configured in `[ShipButtons]`. IDs `1..128` are
 physical DirectInput buttons and `129..144` are virtual POV/hat directions. Add
@@ -20,16 +21,16 @@ unbound.
 | Fire Weapon 1 | `iFireWeapon1Button` | Weapon group 1 start/stop |
 | Fire Weapon 2 | `iFireWeapon2Button` | Weapon group 2 start/stop |
 | Ship Action 1 | `iShipAction1Button` | Native `XButton` semantic action |
-| Select / Accept | `iSelectTargetButton` | Vanilla `E`; Select Target in flight |
-| Navigation Up | `iIncreaseSystemPowerButton` | Vanilla Up arrow; Increase Power in flight |
-| Navigation Down | `iDecreaseSystemPowerButton` | Vanilla Down arrow; Decrease Power in flight |
-| Navigation Left | `iPreviousSystemButton` | Vanilla Left arrow; exact-gated `SelectLeft` in Targeting Mode |
-| Navigation Right | `iNextSystemButton` | Vanilla Right arrow; exact-gated `SelectRight` in Targeting Mode |
+| Select Target | `iSelectTargetButton` | Validated native Select Target function by default; optional ship-context `E` compatibility route |
+| Increase System Power | `iIncreaseSystemPowerButton` | Vanilla Up arrow while in ship context |
+| Decrease System Power | `iDecreaseSystemPowerButton` | Vanilla Down arrow while in ship context |
+| Previous System | `iPreviousSystemButton` | Vanilla Left arrow; exact-gated `SelectLeft` in Targeting Mode |
+| Next System | `iNextSystemButton` | Vanilla Right arrow; exact-gated `SelectRight` in Targeting Mode |
 | Open Scanner | `iOpenScannerButton` | Native `SHMonocle` semantic action |
 | Repair | `iRepairButton` | Direct repair backend |
 | Ship Alternate Control Hold | `iShipAlternateControlHoldButton` | Native `AltHold` semantic action |
 | Cruise | `iCruiseButton` | Native `Cruise` semantic action |
-| Back / Cancel | `iCancelButton` | Vanilla `Esc`; ship and menu Cancel |
+| Ship Cancel | `iCancelButton` | Vanilla `Esc` while in ship context |
 | Undock / Take-Off | `iUndockTakeOffButton` | Native `TakeOff` semantic action |
 | Get Up | `iGetUpButton` | Native `SelectTarget` seat-exit lifecycle |
 | Exit Ship From Cockpit | `iExitShipFromCockpitButton` | Native `ExitShip` semantic action |
@@ -48,10 +49,10 @@ Function bytes, object vtables, active camera state, and the current player-came
 state are checked at the relevant boundary. A mismatch fails closed and never
 falls back to `SendInput`.
 
-The six universal context inputs are intentionally different: they remain live
-outside the pilot seat under the default `InjectionOnly` gate and let Starfield's
-active keyboard context decide their meaning. `Full` gating and the open workbench
-still park them with every other plugin-owned output.
+Every row above is suppressed outside the ship/targeting gate. A compatibility
+`SendInput` route is still a ship route; it does not gain authority over menus.
+Buttons held while the ship gate is closed are release-armed before they can act
+again.
 
 Targeting Mode is the one context-routed exception. Its component interface does
 not consume the ShipHUD Left/Right arrow actions. While the exact targeting-camera
@@ -62,7 +63,17 @@ immediately when Targeting Mode closes and is never active in menus or ordinary
 flight; a physical direction held across that transition must be released before
 it can resume power control.
 
-## Optional menu-control reuse
+## Optional dedicated menu navigation
+
+`[MenuControls]` exposes six independent controller bindings, all unbound by
+default: Menu Accept (`E`), Menu Cancel (`Esc`), and Menu Up/Down/Left/Right
+(arrow keys). They are profile-aware, operate only in a known suspended menu
+context, and release-arm when that context opens.
+
+These rows are the normal way to give a HOTAS menu controls. They intentionally
+do not reuse Select Target, Ship Cancel, or the four ship-system power bindings.
+
+## Optional flight-control reuse
 
 The **Menu Control Reuse** panel under **Flight Controls > Ship Buttons** can also
 reuse the currently bound Pitch axis for Up/Down, Yaw for Left/Right, and Primary
@@ -71,10 +82,8 @@ vertical and horizontal direction can be inverted independently, and axis engage
 and release thresholds are adjustable. The settings are serialized into profiles,
 so a menu-oriented layer can differ from a flight layer.
 
-Yaw reuse follows the same context-routed Navigation Left/Right service as the physical
-bindings, so it also drives `SelectLeft` / `SelectRight` in Targeting Mode. It
-neutral-arms on entry before selecting a component. Pitch and Primary Weapon reuse
-remain menu-only.
+Pitch, Yaw, and Primary Weapon reuse are menu-only. They never drive ship power
+or Targeting Mode component selection.
 
 This layer only acts when the runtime has a known suspended menu context. Each
 axis must return to neutral after entry, and Primary Weapon must be released after
@@ -89,8 +98,8 @@ test-track actions until both seated scenarios have been exercised in game.
 
 ## Raw custom bindings
 
-`[ShipButtonOutputs]` is retained for 4.x parsing but does not override native or
-universal named actions. Explicit raw passthroughs remain available for other
+`[ShipButtonOutputs]` is retained for 4.x parsing but does not override native
+named actions. Explicit raw passthroughs remain available for other
 menu helpers and non-ship commands:
 
 ```ini
@@ -101,6 +110,6 @@ iButton101 = mouse:3
 ```
 
 Raw `key:` and `mouse:` macro targets remain synthetic by design. Named macro
-targets follow the same native/context split as the physical bindings above.
+targets follow the native ship routes above.
 
 For raw output values, see [key-output-reference.md](key-output-reference.md).

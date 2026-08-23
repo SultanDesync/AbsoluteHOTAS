@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("5.0.1")
+set_version("5.1.0")
 set_languages("c++23")
 set_warnings("all")
 
@@ -7,11 +7,6 @@ add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN", "WINVER=0x0A00", "_WIN32_WINNT=0x
 
 add_rules("mode.debug", "mode.releasedbg")
 
--- Pin to 1.91.0: the version the old vcpkg build used. The DX12 backend changed
--- incompatibly after this (1.92 allocates multiple SRV descriptors at runtime),
--- which corrupts memory against UIHook's single-descriptor heap. Do not float.
-add_requires("imgui v1.91.0", {configs = {glfw = false, opengl = false, win32 = true, dx12 = true}})
-add_requires("minhook")
 add_requires("simpleini")
 
 add_ldflags("/MAP")
@@ -32,24 +27,44 @@ option_end()
 target("AbsoluteHOTAS")
     set_kind("shared")
 
-    add_packages("imgui", "minhook", "simpleini")
+    add_packages("simpleini")
 
     add_includedirs("include")
 
     add_files("src/**.cpp")
+    -- The legacy Dear ImGui/D3D12 workbench and embedded head tracker are
+    -- retained in source history only. Absolute Control is the sole in-game
+    -- configuration frontend and Absolute Head Tracking is the standalone
+    -- camera module, so neither retired path enters the shipping DLL.
+    remove_files(
+        "src/BindingWizard.cpp",
+        "src/HeadTracking.cpp",
+        "src/PowerModuleUI.cpp",
+        "src/UIHook.cpp",
+        "src/UIHookInput.cpp",
+        "src/UIHookRenderer.cpp",
+        "src/UIHookSwapChain.cpp",
+        "src/WizardAdvancedPages.cpp",
+        "src/WizardBindingDisplay.cpp",
+        "src/WizardBindingsPage.cpp",
+        "src/WizardFlightAxesPage.cpp",
+        "src/WizardProfileUI.cpp",
+        "src/WizardTunePages.cpp",
+        "src/WizardUICommon.cpp"
+    )
 
     set_pcxxheader("include/PCH.h")
 
     add_defines(
         "PLUGIN_VERSION_MAJOR=5",
-        "PLUGIN_VERSION_MINOR=0",
-        "PLUGIN_VERSION_PATCH=1",
+        "PLUGIN_VERSION_MINOR=1",
+        "PLUGIN_VERSION_PATCH=0",
         "PLUGIN_VERSION_STABLE"
     )
 
     -- shell32/ole32: SHGetKnownFolderPath + CoTaskMemFree (ControlMap path lookup).
     -- These were previously pulled in transitively by CommonLibSF.
-    add_syslinks("dinput8", "dxguid", "d3d12", "dxgi", "version", "shell32", "ole32")
+    add_syslinks("dinput8", "dxguid", "user32", "version", "shell32", "ole32")
 
     -- Post-build: stage into the in-repo release layout, then optionally deploy
     -- straight into a test mod's SFSE/Plugins folder for a fast build/test loop.
@@ -210,6 +225,7 @@ target("absolute_control_ship_buttons_composition_test")
     set_kind("binary")
     set_default(false)
     add_tests("binding_method_rows_and_full_control_coverage")
+    add_undefines("NDEBUG")
     add_includedirs("include")
     add_files("tests/absolute_control_ship_buttons_composition_test.cpp")
     add_files("src/AbsoluteControlShipButtonsComposition.cpp")
@@ -264,7 +280,7 @@ target("mouse_steering_policy_test")
     add_includedirs("include")
     add_files("tests/mouse_steering_policy_test.cpp")
 
--- Header-only parity tests shared by the legacy workbench and flight runtime.
+-- Header-only parity tests shared by the native provider and flight runtime.
 target("control_mode_policy_test")
     set_kind("binary")
     set_default(false)

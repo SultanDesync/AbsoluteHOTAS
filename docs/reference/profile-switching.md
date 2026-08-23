@@ -137,8 +137,8 @@ means; the engine only tracks the flag.
 (pitch/yaw/roll/throttle/strafe), source-object aim, head pose, and the native
 strafe/boost-zone movement requests. Discrete named ship buttons,
 `[ButtonExpansion]` custom keys, and macros/turbos remain available according to
-that profile. Ship-specific named actions use internal Starfield operations; the
-six universal context bindings and explicit raw targets use keyboard synthesis.
+that profile. Ship bindings remain gated to ship/targeting context. The six
+optional menu bindings and explicit raw targets use keyboard synthesis.
 
 This is the same memory-parking mechanism the pilot gate's `InjectionOnly` mode
 uses. The profile flag folds into the one `injectionAllowed` check, so landing on

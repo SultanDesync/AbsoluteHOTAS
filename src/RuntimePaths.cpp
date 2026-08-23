@@ -78,20 +78,6 @@ namespace RuntimePaths {
         return g_loggingEnabled.load(std::memory_order_acquire);
     }
 
-    bool IsWorkbenchEnabled()
-    {
-        wchar_t value[32]{};
-        GetPrivateProfileStringW(L"UI", L"bEnableWorkbench", L"1", value,
-                                 static_cast<DWORD>(std::size(value)), IniPath().c_str());
-        if (std::filesystem::exists(CustomIniPath())) {
-            wchar_t customValue[32]{};
-            GetPrivateProfileStringW(L"UI", L"bEnableWorkbench", value, customValue,
-                                     static_cast<DWORD>(std::size(customValue)), CustomIniPath().c_str());
-            std::copy(std::begin(customValue), std::end(customValue), std::begin(value));
-        }
-        return ParseIniBool(value, true);
-    }
-
     void InitLogging()
     {
         // Deliberately uses the Win32 GetPrivateProfile* API rather than SimpleIni:

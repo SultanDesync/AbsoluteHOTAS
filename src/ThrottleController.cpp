@@ -17,9 +17,7 @@
 #include "PilotState.h"
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
-#include "UIHook.h"
 #include "NativeShipControl.h"
-#include "HeadTracking.h"
 #include "MenuControlReuse.h"
 #include <windows.h>
 #define DIRECTINPUT_VERSION 0x0800
@@ -40,6 +38,8 @@ static bool s_turnAssistRuntimeActive = false;
 static MenuControlReuse::AxisState s_menuVerticalState;
 static MenuControlReuse::AxisState s_menuHorizontalState;
 static MenuControlReuse::ButtonState s_menuSelectState;
+static std::array<MenuControlReuse::ButtonState,
+                  kMenuNavigationCatalog.size()> s_menuBindingStates;
 
 // ---- Profile switching (see docs/reference/profile-switching.md) ----
 // Each slot holds a fully-resolved snapshot of the three things a swap replaces:
@@ -51,7 +51,7 @@ static MenuControlReuse::ButtonState s_menuSelectState;
 //   Toggle    — press flips in/out of the profile.
 //   Selector  — active while held, evaluated by LEVEL not edge: for a rotary/detent
 //               switch where each position keeps its button held. Self-syncs to the
-//               physical position at startup and after the overlay closes.
+//               physical position at startup and after the editor closes.
 enum class SwapMode { Momentary, Toggle, Selector };
 
 struct ProfileSlot {
@@ -98,9 +98,14 @@ static void ResetMenuControlReuse() {
     ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuLeft);
     ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuRight);
     ShipOutputSystem::ReleaseOwnerOutputs(OwnerMenuSelect);
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        ShipOutputSystem::ReleaseOwnerOutputs(
+            OwnerMenuBindingBase + static_cast<std::uint32_t>(index));
+    }
     s_menuVerticalState = {};
     s_menuHorizontalState = {};
     s_menuSelectState = {};
+    s_menuBindingStates = {};
 }
 
 static float NormalizeMenuAxis(const BindingRef& ref, bool invert) {
@@ -126,8 +131,27 @@ static float NormalizeMenuAxis(const BindingRef& ref, bool invert) {
     return std::clamp(normalized, -1.0f, 1.0f);
 }
 
-static void UpdateMenuControlReuse(bool menuContextAllowed,
-                                   bool targetingContextAllowed) {
+static ShipOutput MenuNavigationOutput(std::size_t index) {
+    const auto& action = kMenuNavigationCatalog[index];
+    return { ShipOutputKind::Keyboard, action.scanCode, action.extended };
+}
+
+static void UpdateDedicatedMenuNavigation(bool menuContextAllowed) {
+    const auto& cfg = ThrottleController::GetConfig();
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        const auto& binding = cfg.menuNavigationBindings[index];
+        const bool valid = binding.IsValid() && binding.value > 0;
+        const bool pressed = valid && DeviceManager::IsButtonPressed(binding);
+        const bool held = MenuControlReuse::UpdateButton(
+            s_menuBindingStates[index], menuContextAllowed, true,
+            valid, pressed);
+        ShipOutputSystem::SetOutputHeld(
+            MenuNavigationOutput(index),
+            OwnerMenuBindingBase + static_cast<std::uint32_t>(index), held);
+    }
+}
+
+static void UpdateMenuControlReuse(bool menuContextAllowed) {
     const auto& cfg = ThrottleController::GetConfig();
     const bool pitchValid = cfg.pitchAxis.IsValid() && cfg.pitchAxis.value > 0;
     const bool yawValid = cfg.yawAxis.IsValid() && cfg.yawAxis.value > 0;
@@ -137,19 +161,19 @@ static void UpdateMenuControlReuse(bool menuContextAllowed,
         NormalizeMenuAxis(cfg.pitchAxis, cfg.bInvertMenuVertical),
         cfg.fMenuAxisEngageThreshold, cfg.fMenuAxisReleaseThreshold);
     const int horizontalDirection = MenuControlReuse::UpdateAxis(
-        s_menuHorizontalState, menuContextAllowed || targetingContextAllowed,
+        s_menuHorizontalState, menuContextAllowed,
         cfg.bUseYawAxisForMenu, yawValid,
         NormalizeMenuAxis(cfg.yawAxis, cfg.bInvertMenuHorizontal),
         cfg.fMenuAxisEngageThreshold, cfg.fMenuAxisReleaseThreshold);
 
-    ShipOutputSystem::SetUniversalContextHeld(
-        "IncreaseSystemPower", OwnerMenuUp, verticalDirection < 0);
-    ShipOutputSystem::SetUniversalContextHeld(
-        "DecreaseSystemPower", OwnerMenuDown, verticalDirection > 0);
-    ShipOutputSystem::SetUniversalContextHeld(
-        "PreviousSystem", OwnerMenuLeft, horizontalDirection < 0);
-    ShipOutputSystem::SetUniversalContextHeld(
-        "NextSystem", OwnerMenuRight, horizontalDirection > 0);
+    ShipOutputSystem::SetOutputHeld(
+        MenuNavigationOutput(2), OwnerMenuUp, verticalDirection < 0);
+    ShipOutputSystem::SetOutputHeld(
+        MenuNavigationOutput(3), OwnerMenuDown, verticalDirection > 0);
+    ShipOutputSystem::SetOutputHeld(
+        MenuNavigationOutput(4), OwnerMenuLeft, horizontalDirection < 0);
+    ShipOutputSystem::SetOutputHeld(
+        MenuNavigationOutput(5), OwnerMenuRight, horizontalDirection > 0);
 
     const ShipButtonBinding* primary =
         ShipOutputSystem::FindShipButtonBinding("FireWeapon0");
@@ -159,8 +183,8 @@ static void UpdateMenuControlReuse(bool menuContextAllowed,
     const bool selectHeld = MenuControlReuse::UpdateButton(
         s_menuSelectState, menuContextAllowed, cfg.bUsePrimaryWeaponForMenuSelect,
         primaryValid, primaryPressed);
-    ShipOutputSystem::SetUniversalContextHeld(
-        "SelectTarget", OwnerMenuSelect, selectHeld);
+    ShipOutputSystem::SetOutputHeld(
+        MenuNavigationOutput(0), OwnerMenuSelect, selectHeld);
 }
 
 // ---- Axis Normalization ----
@@ -575,52 +599,6 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
                                      ini.GetBoolValue("Injection", "bHoldForBoost", true));
 
     s_config.bNativeShipControls = ini.GetBoolValue("NativeControls", "bEnabled", true);
-    s_config.headTracking.enabled = ini.GetBoolValue("HeadTracking", "bEnabled", false);
-    s_config.headTracking.openTrackEnabled = ini.GetBoolValue(
-        "HeadTracking", "bOpenTrackEnabled", true);
-    {
-        const char* source = ini.GetValue("HeadTracking", "sSource", "OpenTrack");
-        s_config.headTracking.source = _stricmp(source, "TobiiViaOpenTrack") == 0
-            ? HeadTracking::Source::TobiiViaOpenTrack
-            : HeadTracking::Source::OpenTrack;
-    }
-    s_config.headTracking.recenterButton = ParseBindingRef(
-        ini.GetValue("HeadTracking", "iRecenterButton", ""), -1);
-    s_config.headTracking.toggleButton = ParseBindingRef(
-        ini.GetValue("HeadTracking", "iToggleButton", ""), -1);
-    s_config.headTracking.yawAxis = ParseBindingRef(
-        ini.GetValue("HeadTracking", "iLookYawAxis", ""), -1);
-    s_config.headTracking.pitchAxis = ParseBindingRef(
-        ini.GetValue("HeadTracking", "iLookPitchAxis", ""), -1);
-    s_config.headTracking.rollAxis = ParseBindingRef(
-        ini.GetValue("HeadTracking", "iLookRollAxis", ""), -1);
-    s_config.headTracking.yawScale = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fYawScale", 1.0)), 0.05F, 10.0F);
-    s_config.headTracking.pitchScale = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fPitchScale", 1.0)), 0.05F, 10.0F);
-    s_config.headTracking.rollScale = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fRollScale", 1.0)), 0.05F, 10.0F);
-    s_config.headTracking.maxYawDegrees = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxYawDegrees", 85.0)), 1.0F, 180.0F);
-    s_config.headTracking.maxPitchDegrees = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxPitchDegrees", 60.0)), 1.0F, 180.0F);
-    s_config.headTracking.maxRollDegrees = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fMaxRollDegrees", 45.0)), 1.0F, 180.0F);
-    s_config.headTracking.deadzoneDegrees = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fDeadzoneDegrees", 0.0)), 0.0F, 20.0F);
-    s_config.headTracking.joystickDeadzone = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fJoystickDeadzone", 0.08)), 0.0F, 0.95F);
-    s_config.headTracking.smoothing = std::clamp(
-        static_cast<float>(ini.GetDoubleValue("HeadTracking", "fSmoothing", 0.15)), 0.0F, 0.99F);
-    s_config.headTracking.staleMilliseconds = std::clamp(
-        static_cast<int>(ini.GetLongValue("HeadTracking", "iStaleMilliseconds", 500)), 50, 5000);
-    s_config.headTracking.yawEnabled = ini.GetBoolValue("HeadTracking", "bYawEnabled", true);
-    s_config.headTracking.pitchEnabled = ini.GetBoolValue("HeadTracking", "bPitchEnabled", true);
-    s_config.headTracking.rollEnabled = ini.GetBoolValue("HeadTracking", "bRollEnabled", true);
-    s_config.headTracking.invertYaw = ini.GetBoolValue("HeadTracking", "bInvertYaw", false);
-    s_config.headTracking.invertPitch = ini.GetBoolValue("HeadTracking", "bInvertPitch", false);
-    s_config.headTracking.invertRoll = ini.GetBoolValue("HeadTracking", "bInvertRoll", false);
-
     // [Gate] live pilot-state gate. InjectionOnly + Auto is the safe 5.0 default:
     // flight writes park after leaving the seat while buttons/macros remain usable.
     {
@@ -651,6 +629,10 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.digitalStrafeValue = (float)ini.GetDoubleValue("DigitalAxes", "fDigitalStrafeValue", 1.0);
 
     s_config.shipButtonsEnabled = ini.GetBoolValue("ShipButtons", "bShipButtonsEnabled", true);
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        s_config.menuNavigationBindings[index] = ParseBindingRef(ini.GetValue(
+            "MenuControls", kMenuNavigationCatalog[index].iniKey.data(), ""), -1);
+    }
     s_config.bUsePitchAxisForMenu = ini.GetBoolValue(
         "MenuControls", "bUsePitchAxisForNavigation", false);
     s_config.bUseYawAxisForMenu = ini.GetBoolValue(
@@ -790,11 +772,8 @@ void ThrottleController::ResolveActiveDevices() {
     ResolveAndOpen(cfg.digitalAimCenterButton);
     ResolveAndOpen(cfg.toggleAimModeButton);
     ResolveAndOpen(cfg.turnAssistButton);
-    ResolveAndOpen(cfg.headTracking.recenterButton);
-    ResolveAndOpen(cfg.headTracking.toggleButton);
-    ResolveAndOpen(cfg.headTracking.yawAxis);
-    ResolveAndOpen(cfg.headTracking.pitchAxis);
-    ResolveAndOpen(cfg.headTracking.rollAxis);
+    for (auto& binding : cfg.menuNavigationBindings)
+        ResolveAndOpen(binding);
 
     int count = ShipOutputSystem::GetShipButtonCount();
     for (int i = 0; i < count; i++)
@@ -974,7 +953,7 @@ void ThrottleController::ActivateProfile(int slot) {
     s_activeSlot = slot;
     InputBus::SetActiveProfile(static_cast<std::uint32_t>(slot),
                                s_profiles[slot].profileId);
-    s_configGeneration.fetch_add(1, std::memory_order_release);  // refresh a clean wizard snapshot
+    s_configGeneration.fetch_add(1, std::memory_order_release);  // refresh a clean Control snapshot
     CtrlLog("Profile swap -> slot " + std::to_string(slot));
 }
 
@@ -1065,7 +1044,7 @@ void ThrottleController::ControlLoop() {
     bool injectionWasAllowed = true;  // pilot gate (InjectionOnly): tracks memory-injection arm state
     bool editorWasOpen = false;
     bool fullGateWasClosed = false;
-    bool resetOverlayEdges = false;
+    bool resetEditorEdges = false;
     auto lastLoopTime = std::chrono::steady_clock::now();
 
     while (s_running) {
@@ -1086,7 +1065,7 @@ void ThrottleController::ControlLoop() {
             PreloadProfiles();
             SuiteCommandBindings::Reload();
             sleepDuration = std::chrono::milliseconds(1000 / s_config.pollRateHz);
-            // Publish AFTER the new config is fully applied so a wizard reading a
+            // Publish AFTER the new config is fully applied so Control reading a
             // bumped generation is guaranteed to see the reloaded values, not a
             // half-applied state.
             s_configGeneration.fetch_add(1, std::memory_order_release);
@@ -1098,17 +1077,15 @@ void ThrottleController::ControlLoop() {
         SuiteCommandBindings::Poll();
 
         // ---- Control buttons (always processed, even while deactivated, so the
-        //      activate binding and wizard overlay can always be reached) ----
+        //      activate binding and Absolute Control menu can always be reached) ----
         bool curActivate    = DeviceManager::IsButtonPressed(s_config.activateButton);
         bool curStop        = DeviceManager::IsButtonPressed(s_config.stopButton);
         bool curToggleWizard = DeviceManager::IsButtonPressed(s_config.toggleWizardButton);
         static bool prevActivate = false, prevStop = false, prevToggleWizard = false;
 
-        // Own the recovery chord on the controller thread rather than inside a
-        // render callback. If another overlay temporarily bypasses our Present
-        // hook, the open request is still recorded and can initialize as soon as
-        // presentation returns. HookedWndProc receives only our posted message,
-        // preventing the keyboard event from toggling twice after initialization.
+        // Poll the menu chord on the controller thread. The request is routed
+        // through Absolute Control's optional host command and never synthesizes
+        // keyboard input or installs a renderer hook.
         const bool curWizardChord = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
             && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
             && (GetAsyncKeyState('B') & 0x8000) != 0;
@@ -1146,7 +1123,7 @@ void ThrottleController::ControlLoop() {
         if ((curToggleWizard && !prevToggleWizard) ||
             (curWizardChord && !prevWizardChord)) {
             if (!AbsoluteControlSubscriber::RequestHostPage("hotas-setup")) {
-                UIHook::ToggleUI();
+                CtrlLog("[Editor] Absolute Control is unavailable or cannot open the AbsoluteHOTAS page; no legacy overlay fallback is installed.");
             }
         }
 
@@ -1154,15 +1131,12 @@ void ThrottleController::ControlLoop() {
         prevStop         = curStop;
         prevToggleWizard = curToggleWizard;
         prevWizardChord  = curWizardChord;
-        const bool overlayOpen = UIHook::IsUIOpen();
-        const bool controlMenuOpen = AbsoluteControlSubscriber::IsHostOpen();
-        const bool editorOpen = overlayOpen || controlMenuOpen;
-        if (overlayOpen) HeadTracking::PollPreview(s_config.headTracking);
+        const bool editorOpen = AbsoluteControlSubscriber::IsHostOpen();
 
         // ---- Profile switch triggers ----
         // Three activation modes coexist (a rig may use any mix): momentary and
         // toggle are edge-driven; selector is level-driven for rotary/detent switches.
-        // Invariant: a switch profile is only active while armed and the overlay is
+        // Invariant: a switch profile is only active while armed and the editor is
         // closed. While suppressed we snap to base and keep trigger state current
         // without acting, so a release under suppression can't strand the user and
         // resuming can't fire a spurious swap; the selector re-syncs on resume.
@@ -1292,9 +1266,8 @@ void ThrottleController::ControlLoop() {
         const bool menuContext = pilotSnapshot.gameplayContextKnown &&
             !pilotSnapshot.gameplayContextActive;
         const bool contextReuseAllowed = active && !fullClosed && !editorOpen;
-        UpdateMenuControlReuse(
-            contextReuseAllowed && menuContext,
-            contextReuseAllowed && pilotSnapshot.targetingModeActive);
+        UpdateDedicatedMenuNavigation(contextReuseAllowed && menuContext);
+        UpdateMenuControlReuse(contextReuseAllowed && menuContext);
 
         // The controller thread prepares immutable, normalized telemetry even
         // while a frontend has parked gameplay output. Host callbacks only copy
@@ -1308,7 +1281,6 @@ void ThrottleController::ControlLoop() {
         if (!active) {
             if (wasActive) {
                 NativeShipControl::SetEnabled(false);
-                HeadTracking::Suspend();
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 SignalHunter::Disarm();
@@ -1329,7 +1301,6 @@ void ThrottleController::ControlLoop() {
             if (!fullGateWasClosed) {
                 CtrlLog("[PilotState] Full gate suspended plugin output outside the pilot seat.");
                 NativeShipControl::SetEnabled(false);
-                HeadTracking::Suspend();
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 SignalHunter::SuspendInjection();
@@ -1344,24 +1315,21 @@ void ThrottleController::ControlLoop() {
         }
         if (fullGateWasClosed) {
             fullGateWasClosed = false;
-            resetOverlayEdges = true;
+            resetEditorEdges = true;
             ShipOutputSystem::SeedDownButtonsConsumed();
             MacroEngine::SeedDownButtonsConsumed();
             lastInjectedHardwareValue = -999.0f;
             CtrlLog("[PilotState] Piloting resumed; full gate reopened.");
         }
 
-        // Both frontends are editing contexts, not second flight-input surfaces.
-        // Park every plugin-owned output while either one owns the user's input.
+        // Absolute Control is an editing context, not a second flight-input
+        // surface. Park every plugin-owned output while it owns the user's input.
         if (editorOpen) {
             if (!editorWasOpen) {
-                CtrlLog(controlMenuOpen ?
-                    "[AbsoluteControl] Parking gameplay injection and plugin-owned outputs." :
-                    "[Wizard] Parking gameplay injection and plugin-owned outputs.");
+                CtrlLog("[AbsoluteControl] Parking gameplay injection and plugin-owned outputs.");
                 ShipOutputSystem::ReleaseAllShipButtonOutputs();
                 MacroEngine::ReleaseAll();
                 NativeShipControl::SetEnabled(false);
-                HeadTracking::Suspend();
                 SignalHunter::SuspendInjection();
                 injectionWasAllowed = false;
                 s_resetCruiseEdges = true;
@@ -1372,7 +1340,7 @@ void ThrottleController::ControlLoop() {
         }
         if (editorWasOpen) {
             editorWasOpen = false;
-            resetOverlayEdges = true;
+            resetEditorEdges = true;
             s_resetCruiseEdges = true;
             ShipOutputSystem::SeedDownButtonsConsumed();
             MacroEngine::SeedDownButtonsConsumed();
@@ -1388,9 +1356,9 @@ void ThrottleController::ControlLoop() {
         const bool flightInjectionAllowed = s_config.bEnableInjection &&
             ((s_config.pilotGateMode == ThrottleController::GateMode::Off) || piloting);
 
-        // Ship action buttons are live only outside the wizard workbench.
+        // Ship action buttons are live only outside the Absolute Control menu.
         if (s_config.shipButtonsEnabled)
-            ShipOutputSystem::UpdateShipButtonBindings();
+            ShipOutputSystem::UpdateShipButtonBindings(nativeShipContextAllowed);
         else
             ShipOutputSystem::ReleaseShipButtonBindingOutputs();
 
@@ -1523,7 +1491,7 @@ void ThrottleController::ControlLoop() {
         // Raw bipolar normalization: maps the calibrated axis range to [-1,+1]
         // with center at 0. NO sensitivity/saturation/deadzone — that shaping is
         // done by ShapeAxis so the deadzone and saturation behave as ABSOLUTE
-        // positions on the physical axis, matching exactly what the wizard draws.
+        // positions on the physical axis, matching exactly what Control displays.
         auto NormRaw = [&](const BindingRef& ref, bool invert) -> float {
             if (!ref.IsValid() || ref.value <= 0) return 0.0f;
             float raw  = static_cast<float>(DeviceManager::GetRawAxis(ref));
@@ -1548,7 +1516,7 @@ void ThrottleController::ControlLoop() {
         //   dz < |n| < sat   -> linear ramp 0..1
         //   |n| >= sat       -> +/-1       (saturation edge sits at sat of the axis)
         // Because dz and sat are absolute axis fractions (no cross-multiplication),
-        // the wizard's drawn zones are literally where these activate in flight.
+        // Control's displayed zones are literally where these activate in flight.
         // Sensitivity is a final output gain.
         auto ShapeAxis = [](float n, float sens, float sat, float dz) -> float {
             return AxisShapingPolicy::Shape(n, sens, sat, dz);
@@ -1597,7 +1565,7 @@ void ThrottleController::ControlLoop() {
             static bool s_aimModeOverride = false;
             static bool s_toggleAimModePrev = false;
             bool curToggleAimMode = DeviceManager::IsButtonPressed(s_config.toggleAimModeButton);
-            if (resetOverlayEdges) s_toggleAimModePrev = curToggleAimMode;
+            if (resetEditorEdges) s_toggleAimModePrev = curToggleAimMode;
             if (curToggleAimMode && !s_toggleAimModePrev) {
                 s_aimModeOverride = !s_aimModeOverride;
                 RuntimePaths::Log("[Controller]",
@@ -1638,7 +1606,7 @@ void ThrottleController::ControlLoop() {
                     && s_config.turnAssistButton.value > 0
                     && s_config.turnAssistButton.value <= 128;
                 bool btnHeld = btnBound && DeviceManager::IsButtonPressed(s_config.turnAssistButton);
-                if (resetOverlayEdges) s_prevTurnAssistBtn = btnHeld;
+                if (resetEditorEdges) s_prevTurnAssistBtn = btnHeld;
                 if (s_config.iTurnAssistMode == 1) {
                     s_turnAssistRuntimeActive = btnHeld;
                 } else {
@@ -1650,14 +1618,14 @@ void ThrottleController::ControlLoop() {
                 // Mode 0 (Always): active whenever master switch is on
                 s_turnAssistRuntimeActive = assistMasterEnabled;
             }
-            resetOverlayEdges = false;
+            resetEditorEdges = false;
 
             // ---- SignalHunter / AimController (pilot-gated injection) ----
             // Discovery already ticked above regardless of gate state. InjectionOnly
-            // parks axis/head injection while leaving raw buttons and macros live.
+            // parks axis injection while leaving raw buttons and macros live.
             //
             // bEnableInjection is the per-profile switch for the same thing: a "parked"
-            // profile sets it false to disable flight-axis, aim, and head-pose injection
+            // profile sets it false to disable flight-axis and aim injection
             // while its buttons/macros keep working. It rides the config swap, so
             // landing on such a profile parks injection via the same transition path as
             // the pilot gate — no separate release logic. See profile-switching.md.
@@ -1670,13 +1638,10 @@ void ThrottleController::ControlLoop() {
                     hasSeparateAimInput, hasSeparateAimAxes, hasDigitalAimButtons,
                     mousePolicy.allowSourceObjectAim, dt);
             } else if (injectionWasAllowed) {
-                // Transition to parked: stop axis/head injection, keep discrete bindings live.
+                // Transition to parked: stop axis injection, keep discrete bindings live.
                 SignalHunter::SuspendInjection();
                 injectionWasAllowed = false;
             }
-            HeadTracking::Update(s_config.headTracking, s_config.axisCalibration,
-                                 dt, flightInjectionAllowed &&
-                                     pilotSnapshot.headTrackingAllowed);
         }
 
         std::this_thread::sleep_for(sleepDuration);
@@ -1685,7 +1650,6 @@ void ThrottleController::ControlLoop() {
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     MacroEngine::ReleaseAll();
     NativeShipControl::SetEnabled(false);
-    HeadTracking::Shutdown();
     SuiteCommandBindings::Shutdown();
     InputBus::Shutdown();
     AbsoluteControlTelemetry::MarkUnavailable();
@@ -1736,7 +1700,6 @@ void ThrottleController::Stop() {
     ShipOutputSystem::ReleaseAllShipButtonOutputs();
     MacroEngine::ReleaseAll();
     NativeShipControl::SetEnabled(false);
-    HeadTracking::Shutdown();
 }
 
 ThrottleController::Config& ThrottleController::GetConfig() { return s_config; }

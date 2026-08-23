@@ -41,7 +41,7 @@ struct Settings {
 
 using AxisCalibrationMap = std::unordered_map<int, std::pair<long, long>>;
 
-// Monitor-only tracker sample used by the workbench. Values are the centered
+// Monitor-only tracker sample retained for external diagnostics. Values are the centered
 // OpenTrack angles before AbsoluteHOTAS sensitivity, inversion, deadzone, and
 // maximum-angle shaping are applied.
 struct LiveInput {
@@ -54,7 +54,7 @@ struct LiveInput {
 // which is the dependency-free Tobii path shipped by AbsoluteHOTAS.
 void Update(const Settings& settings, const AxisCalibrationMap& calibration,
             float dt, bool eligible);
-// Keep the workbench readout live while camera injection is parked. This polls
+// Keep a diagnostic readout live while camera injection is parked. This polls
 // only the OpenTrack transport and never publishes a camera quaternion.
 void PollPreview(const Settings& settings);
 LiveInput GetLiveInput();

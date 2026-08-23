@@ -411,11 +411,15 @@ void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, boo
             NativeShipControl::SetActionHeld(target.nativeAction, ownerId, held);
             break;
         case ShipControlTargetKind::Context:
-            SetUniversalContextHeld(target.actionId, ownerId, held);
+            SetUniversalContextHeld(target.actionId, ownerId,
+                                    held && NativeShipControl::Enabled());
             break;
-        case ShipControlTargetKind::RawOutput:
-            SetOutputHeld(target.output, ownerId, held);
+        case ShipControlTargetKind::RawOutput: {
+            const bool namedShipAction = FindShipAction(target.actionId) != nullptr;
+            SetOutputHeld(target.output, ownerId,
+                          held && (!namedShipAction || NativeShipControl::Enabled()));
             break;
+        }
         case ShipControlTargetKind::None:
             break;
     }
@@ -484,17 +488,17 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
         ShipOutput finalOut = outputValue ? ParseShipOutput(outputValue, cmDefault) : cmDefault;
         KeyboardResolutionSource resolutionSource = ResolveKeyboardResolutionSource(
             controlMapPrimary, outputValue != nullptr);
-        if (def.recommendedMethod == ShipControlMethod::Context) {
+        const auto methodResolution = s_methodResolutions[index];
+        if (methodResolution.method == ShipControlMethod::Context) {
             const ShipOutput universal = UniversalContextOutput(def.actionId);
-            // Context actions deliberately represent fixed vanilla navigation,
-            // not the rebound ship-only action or a legacy output override.
+            // Context compatibility actions deliberately use the fixed vanilla
+            // ship key, not an independent optional menu-navigation binding.
             finalOut = universal;
             resolutionSource = KeyboardResolutionSource::FixedContext;
         }
 
         BindingRef bRef = ParseBindingRef(
             ini.GetValue("ShipButtons", def.sourceIniKey.data(), ""), -1);
-        const auto methodResolution = s_methodResolutions[index];
 
         ShipButtonBinding binding{
             def.actionId.data(),
@@ -578,13 +582,22 @@ void LoadShipButtonBindings(CSimpleIniA& ini) {
     }
 }
 
-void UpdateShipButtonBindings() {
+void UpdateShipButtonBindings(bool shipContextAllowed) {
     for (int i = 0; i < static_cast<int>(s_shipButtonBindings.size()); ++i) {
         auto& binding = s_shipButtonBindings[i];
         bool pressed  = DeviceManager::IsButtonPressed(binding.buttonRef);
         const uint32_t ownerId = ShipOwnerIdForIndex(i);
 
         const auto nativeAction = NativeShipControl::ActionFromId(binding.actionId);
+        if (!shipContextAllowed) {
+            if (nativeAction != NativeShipControl::Action::Invalid)
+                NativeShipControl::SetActionHeld(nativeAction, ownerId, false);
+            if (binding.method == ShipControlMethod::Context)
+                SetUniversalContextHeld(binding.actionId, ownerId, false);
+            ReleaseOwnerOutputs(ownerId);
+            binding.previousPressed = pressed;
+            continue;
+        }
         if (binding.method == ShipControlMethod::Context) {
             const auto* universalMapping = UniversalContextInput::Find(binding.actionId);
             // Targeting Mode consumes dedicated SelectLeft/SelectRight semantic

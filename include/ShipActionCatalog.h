@@ -5,7 +5,7 @@
 #include <string_view>
 
 // Pure, shared domain model for named ship controls. Runtime dispatch, macros,
-// diagnostics, and the workbench all consume this catalog so route defaults and
+// diagnostics and the Absolute Control provider consume this catalog so route defaults and
 // ControlMap metadata cannot drift into separate lists.
 
 enum class ShipControlMethod : std::uint8_t {
@@ -44,6 +44,9 @@ constexpr ShipControlMethodMask ShipControlMethodBit(ShipControlMethod method) n
 inline constexpr ShipControlMethodMask kDirectOnly =
     ShipControlMethodBit(ShipControlMethod::Direct);
 inline constexpr ShipControlMethodMask kContextOnly =
+    ShipControlMethodBit(ShipControlMethod::Context);
+inline constexpr ShipControlMethodMask kDirectOrContext =
+    ShipControlMethodBit(ShipControlMethod::Direct) |
     ShipControlMethodBit(ShipControlMethod::Context);
 inline constexpr ShipControlMethodMask kDirectOrKeyboard =
     ShipControlMethodBit(ShipControlMethod::Direct) |
@@ -84,19 +87,19 @@ inline constexpr std::array<ShipActionDefinition, 23> kShipActionCatalog{
     ShipActionDefinition{ "ShipAction1", "Ship Action 1", ShipActionGroup::FlightSystems,
         ShipControlMethod::Direct, kDirectOrKeyboard, "iShipAction1Button", "sShipAction1Output",
         "ShipHUD", "XButton", { ShipActionOutputKind::Keyboard, 0x13, false } },
-    ShipActionDefinition{ "SelectTarget", "Select / Accept", ShipActionGroup::NavigationContext,
-        ShipControlMethod::Context, kContextOnly, "iSelectTargetButton", "sSelectTargetOutput",
+    ShipActionDefinition{ "SelectTarget", "Select Target", ShipActionGroup::NavigationContext,
+        ShipControlMethod::Direct, kDirectOrContext, "iSelectTargetButton", "sSelectTargetOutput",
         "ShipHUD", "SelectTarget", { ShipActionOutputKind::Keyboard, 0x12, false } },
-    ShipActionDefinition{ "IncreaseSystemPower", "Navigation Up", ShipActionGroup::NavigationContext,
+    ShipActionDefinition{ "IncreaseSystemPower", "Increase System Power", ShipActionGroup::NavigationContext,
         ShipControlMethod::Context, kContextOnly, "iIncreaseSystemPowerButton", "sIncreaseSystemPowerOutput",
         "ShipHUD", "Up", { ShipActionOutputKind::Keyboard, 0x48, true } },
-    ShipActionDefinition{ "DecreaseSystemPower", "Navigation Down", ShipActionGroup::NavigationContext,
+    ShipActionDefinition{ "DecreaseSystemPower", "Decrease System Power", ShipActionGroup::NavigationContext,
         ShipControlMethod::Context, kContextOnly, "iDecreaseSystemPowerButton", "sDecreaseSystemPowerOutput",
         "ShipHUD", "Down", { ShipActionOutputKind::Keyboard, 0x50, true } },
-    ShipActionDefinition{ "PreviousSystem", "Navigation Left", ShipActionGroup::NavigationContext,
+    ShipActionDefinition{ "PreviousSystem", "Previous System", ShipActionGroup::NavigationContext,
         ShipControlMethod::Context, kContextOnly, "iPreviousSystemButton", "sPreviousSystemOutput",
         "ShipHUD", "Left", { ShipActionOutputKind::Keyboard, 0x4B, true } },
-    ShipActionDefinition{ "NextSystem", "Navigation Right", ShipActionGroup::NavigationContext,
+    ShipActionDefinition{ "NextSystem", "Next System", ShipActionGroup::NavigationContext,
         ShipControlMethod::Context, kContextOnly, "iNextSystemButton", "sNextSystemOutput",
         "ShipHUD", "Right", { ShipActionOutputKind::Keyboard, 0x4D, true } },
     ShipActionDefinition{ "OpenScanner", "Open Scanner", ShipActionGroup::FlightSystems,
@@ -111,7 +114,7 @@ inline constexpr std::array<ShipActionDefinition, 23> kShipActionCatalog{
     ShipActionDefinition{ "Cruise", "Cruise", ShipActionGroup::FlightSystems,
         ShipControlMethod::Direct, kDirectOrKeyboard, "iCruiseButton", "sCruiseOutput",
         "ShipHUD", "Cruise", { ShipActionOutputKind::Keyboard, 0x14, false } },
-    ShipActionDefinition{ "Cancel", "Back / Cancel", ShipActionGroup::NavigationContext,
+    ShipActionDefinition{ "Cancel", "Ship Cancel", ShipActionGroup::NavigationContext,
         ShipControlMethod::Context, kContextOnly, "iCancelButton", "sCancelOutput",
         "ShipHUD_Cancel", "Cancel", { ShipActionOutputKind::Keyboard, 0x01, false } },
     ShipActionDefinition{ "UndockTakeOff", "Undock / Take-Off", ShipActionGroup::CockpitDocking,
@@ -141,10 +144,68 @@ constexpr const ShipActionDefinition* FindShipAction(std::string_view actionId) 
     return nullptr;
 }
 
+// Canonical Ship Buttons order mirrors Starfield's native ship-control list.
+// Presentation never follows internal action names or dispatch implementation.
+inline constexpr std::array<std::string_view, 23> kNativeShipButtonActions{
+    "FireBoosters", "SwitchFlightModes", "TogglePov",
+    "FireWeapon0", "FireWeapon1", "FireWeapon2", "ShipAction1",
+    "SelectTarget", "IncreaseSystemPower", "DecreaseSystemPower",
+    "PreviousSystem", "NextSystem", "OpenScanner", "Repair",
+    "ShipAlternateControlHold", "Cruise", "Cancel", "UndockTakeOff",
+    "GetUp", "ExitShipFromCockpit", "ZoomCameraIn", "ZoomCameraOut",
+    "AutopilotOnOff",
+};
+
+template <std::size_t Size>
+constexpr std::size_t ShipButtonActionOccurrences(
+    const std::array<std::string_view, Size>& actions,
+    std::string_view actionId) noexcept
+{
+    std::size_t count{};
+    for (const auto candidate : actions)
+        if (candidate == actionId) ++count;
+    return count;
+}
+
+constexpr std::size_t ShipButtonActionOccurrences(
+    std::string_view actionId) noexcept
+{
+    return ShipButtonActionOccurrences(kNativeShipButtonActions, actionId);
+}
+
+constexpr bool ShipButtonLayoutCoversCatalogExactlyOnce() noexcept
+{
+    if (kNativeShipButtonActions.size() != kShipActionCatalog.size()) return false;
+
+    for (const auto& action : kShipActionCatalog)
+        if (ShipButtonActionOccurrences(action.actionId) != 1) return false;
+    return true;
+}
+
+static_assert(ShipButtonLayoutCoversCatalogExactlyOnce(),
+    "Every native ship-button action must appear in exactly one menu section");
+
 constexpr bool AllowsShipControlMethod(const ShipActionDefinition& definition,
                                        ShipControlMethod method) noexcept
 {
     return (definition.allowedMethods & ShipControlMethodBit(method)) != 0;
+}
+
+constexpr bool HasSelectableShipControlRoute(
+    const ShipActionDefinition& definition) noexcept
+{
+    return AllowsShipControlMethod(definition, ShipControlMethod::Direct) &&
+        (AllowsShipControlMethod(definition, ShipControlMethod::Context) ||
+         AllowsShipControlMethod(definition,
+                                 ShipControlMethod::KeyboardCompatibility));
+}
+
+constexpr ShipControlMethod AlternateShipControlMethod(
+    const ShipActionDefinition& definition) noexcept
+{
+    return AllowsShipControlMethod(definition, ShipControlMethod::Context)
+        ? ShipControlMethod::Context
+        : ShipControlMethod::KeyboardCompatibility;
 }
 
 constexpr std::string_view ShipControlMethodToken(ShipControlMethod method) noexcept

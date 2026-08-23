@@ -12,9 +12,9 @@
 // ShipOutput — native action ownership plus explicit raw-output management
 //
 // Named ship actions resolve through the shared Direct/Context/Keyboard
-// compatibility catalog. The six profile-stable context inputs (Select, Back,
-// Up, Down, Left, Right) retain fixed vanilla navigation behavior; explicit
-// ButtonExpansion and key:/mouse: macro targets remain raw as well.
+// compatibility catalog. Fixed-key ship-context routes remain distinct from
+// the optional dedicated menu-navigation bindings; explicit ButtonExpansion
+// and key:/mouse: macro targets remain raw as well.
 // Every path uses ownership so one owner cannot release another's hold.
 // ============================================================================
 
@@ -89,6 +89,7 @@ inline constexpr uint32_t OwnerMenuDown       = 0x00000011u;
 inline constexpr uint32_t OwnerMenuLeft       = 0x00000012u;
 inline constexpr uint32_t OwnerMenuRight      = 0x00000013u;
 inline constexpr uint32_t OwnerMenuSelect     = 0x00000014u;
+inline constexpr uint32_t OwnerMenuBindingBase = 0x00000020u;
 inline constexpr uint32_t OwnerShipButtonBase = 0x00001000u;
 inline constexpr uint32_t OwnerMacroBase      = 0x00002000u;  // + macro index
 
@@ -105,15 +106,15 @@ void RefreshRoutingInputs();
 void LoadShipButtonBindings(CSimpleIniA& ini);
 
 // Process button state each control-loop tick.
-// Call only when the UI overlay is NOT open.
-void UpdateShipButtonBindings();
+// Call only when the Absolute Control menu is NOT open.
+void UpdateShipButtonBindings(bool shipContextAllowed);
 
 // Release all held outputs (called on disarm or stop).
 void ReleaseAllShipButtonOutputs();
 
 // Release only outputs held by ship-button bindings (leaves axis-driven owners
 // such as the strafe modifier and boost zone intact). Used to suppress ship
-// buttons per-tick (wizard open, or bShipButtonsEnabled = false) without
+// buttons per-tick (Absolute Control open, or bShipButtonsEnabled = false) without
 // disturbing flight modifiers.
 void ReleaseShipButtonBindingOutputs();
 
@@ -121,9 +122,9 @@ void ReleaseShipButtonBindingOutputs();
 void SetOutputHeld(const ShipOutput& output, uint32_t ownerId, bool held);
 void ReleaseOwnerOutputs(uint32_t ownerId);
 
-// Request one of the six profile-stable context inputs. The vanilla key is
-// always retained; targeting-selector directions add their exact native lane
-// only while Targeting Mode is active.
+// Request one of the fixed ship-context inputs. Targeting-selector directions
+// add their exact native lane only while Targeting Mode is active. Callers are
+// responsible for applying the ship-context gate.
 void SetUniversalContextHeld(std::string_view actionId, uint32_t ownerId, bool held);
 
 // ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----
@@ -146,8 +147,9 @@ const ShipButtonBinding* FindShipButtonBinding(std::string_view actionId);
 ShipActionRouteInfo GetShipActionRouteInfo(std::string_view actionId);
 std::vector<ShipActionRouteInfo> GetShipActionRouteInfos();
 
-// Named ship actions resolve through their currently selected catalog method.
-// Explicit key:/mouse: tokens remain raw targets for general-purpose macros.
+// Named ship actions resolve through their currently selected catalog method
+// and remain ship-context gated even when invoked by a macro. Explicit
+// key:/mouse: tokens remain raw targets for general-purpose macros.
 ShipControlTarget ResolveControlTarget(std::string_view token);
 void SetControlTargetHeld(const ShipControlTarget& target, uint32_t ownerId, bool held);
 

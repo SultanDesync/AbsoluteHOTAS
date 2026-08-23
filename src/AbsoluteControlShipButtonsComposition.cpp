@@ -69,22 +69,16 @@ const HotasBindingCatalog::Target* ShipTarget(std::string_view actionId)
 }
 
 void AddShipAction(std::vector<Composition::NodeDescriptorV1>& nodes,
-                   std::string_view section, std::string_view actionId,
-                   bool outputChoice)
+                   std::string_view section, std::string_view actionId)
 {
     const auto* target = ShipTarget(actionId);
     if (!target) return;
-    if (outputChoice) {
-        const auto rowId = "ship-action-row-" + std::to_string(nodes.size());
-        const auto routeId = std::string{target->controlId} + "-route";
-        AddRow(nodes, rowId, section, {
-            {target->controlId, Composition::SemanticRole::Binding},
-            {routeId, Composition::SemanticRole::Secondary},
-        });
-    } else {
-        AddControl(nodes, section, target->controlId,
-                   Composition::SemanticRole::Binding);
-    }
+    const auto rowId = "ship-action-row-" + std::to_string(nodes.size());
+    const auto routeId = std::string{target->controlId} + "-route";
+    AddRow(nodes, rowId, section, {
+        {target->controlId, Composition::SemanticRole::Binding},
+        {routeId, Composition::SemanticRole::Secondary},
+    });
 }
 
 void AddSection(std::vector<Composition::NodeDescriptorV1>& nodes,
@@ -98,34 +92,23 @@ void AddSection(std::vector<Composition::NodeDescriptorV1>& nodes,
 std::vector<Composition::NodeDescriptorV1> BuildNodes()
 {
     std::vector<Composition::NodeDescriptorV1> nodes;
-    nodes.reserve(96);
+    nodes.reserve(100);
     nodes.push_back(Node(Composition::NodeKind::Root,
         "ship-bindings-root"));
 
-    AddSection(nodes, "axis-binding-section", "FLIGHT AXES",
-        "Bind the seven analog HOTAS lanes here. Response graphs and inversion remain on Flight Axes.");
-    for (std::size_t index = 0; index < kNumAxisSlots; ++index) {
-        AddControl(nodes, "axis-binding-section",
-            HotasBindingCatalog::kAxisControlIds[index],
-            Composition::SemanticRole::Binding);
-    }
-
-    AddSection(nodes, "primary-binding-section", "PRIMARY FLIGHT & COMBAT",
-        "The controller binding and its dispatch method share one row.");
-    for (const auto actionId : {
-             "FireWeapon0", "FireWeapon1", "FireWeapon2", "FireBoosters",
-             "SwitchFlightModes", "ShipAction1", "OpenScanner", "Repair",
-             "ShipAlternateControlHold", "Cruise", "AutopilotOnOff" }) {
-        AddShipAction(nodes, "primary-binding-section", actionId, true);
+    AddSection(nodes, "native-binding-section", "NATIVE SHIP CONTROLS",
+        "Complete controller equivalents for Starfield's native ship-button list, in native menu order. Analog flight lanes remain on Flight Axes.");
+    for (const auto actionId : kNativeShipButtonActions) {
+        AddShipAction(nodes, "native-binding-section", actionId);
         if (actionId == std::string_view{"FireBoosters"}) {
-            AddControl(nodes, "primary-binding-section",
+            AddControl(nodes, "native-binding-section",
                 "boost-throttle-authority", Composition::SemanticRole::Secondary);
         }
     }
 
     AddSection(nodes, "hotas-function-section",
-        "ABSOLUTEHOTAS THROTTLE FUNCTIONS",
-        "Plugin-owned functions operate directly on HOTAS state and never emit a keypress.");
+        "ABSOLUTEHOTAS HOTKEYS",
+        "Plugin-owned throttle and turn-assist functions operate directly on HOTAS state and never emit a keypress.");
     for (const auto& target : HotasBindingCatalog::kTargets) {
         if (target.pageId == HotasBindingCatalog::kShipButtonsPageId &&
             (target.family == HotasBindingCatalog::TargetFamily::FlightAssist ||
@@ -134,38 +117,27 @@ std::vector<Composition::NodeDescriptorV1> BuildNodes()
                        Composition::SemanticRole::Binding);
         }
     }
-
-    AddSection(nodes, "context-binding-section", "CONTEXT & NAVIGATION",
-        "These bindings automatically follow menu, targeting, and cockpit context.");
-    for (const auto actionId : {
-             "SelectTarget", "IncreaseSystemPower", "DecreaseSystemPower",
-             "PreviousSystem", "NextSystem", "Cancel" }) {
-        AddShipAction(nodes, "context-binding-section", actionId, false);
+    AddSection(nodes, "menu-navigation-section", "OPTIONAL MENU NAVIGATION",
+        "Dedicated controller bindings for ordinary menus. They are independent of native ship controls, release-arm on menu entry, and remain unbound by default.");
+    for (const auto& target : HotasBindingCatalog::kTargets) {
+        if (target.family == HotasBindingCatalog::TargetFamily::MenuNavigation) {
+            AddControl(nodes, "menu-navigation-section", target.controlId,
+                       Composition::SemanticRole::Binding);
+        }
     }
-
-    AddSection(nodes, "camera-binding-section", "CAMERA & COCKPIT",
-        "Camera, docking, and cockpit bindings with selectable native or compatibility output where supported.");
-    for (const auto actionId : {
-             "TogglePov", "ZoomCameraIn", "ZoomCameraOut", "UndockTakeOff",
-             "GetUp", "ExitShipFromCockpit" }) {
-        AddShipAction(nodes, "camera-binding-section", actionId, true);
-    }
-
-    AddSection(nodes, "menu-reuse-section", "MENU CONTROL REUSE",
-        "Reuse flight controls for menu navigation with neutral arming and hysteresis.");
     for (const auto control : {
              "menu-use-pitch", "menu-use-yaw", "menu-use-primary-weapon",
              "menu-invert-vertical", "menu-invert-horizontal",
              "menu-engage-threshold", "menu-release-threshold" }) {
-        AddControl(nodes, "menu-reuse-section", control,
+        AddControl(nodes, "menu-navigation-section", control,
                    Composition::SemanticRole::Secondary);
     }
 
-    AddSection(nodes, "shortcut-section", "CUSTOM KEYBOARD & MOUSE SHORTCUTS",
-        "Raw compatibility outputs and UI shortcuts; chords and sequences belong on Macros.");
+    AddSection(nodes, "shortcut-section", "CUSTOM SENDINPUT BINDINGS",
+        "Arbitrary keyboard and mouse outputs; chords and sequences belong on Macros.");
     for (const auto control : {
              "shortcut-records", "shortcut-trigger", "shortcut-output",
-             "shortcut-add", "shortcut-delete", "shortcut-menu-preset",
+             "shortcut-add", "shortcut-delete",
              "shortcut-macro-link", "shortcut-status" }) {
         AddControl(nodes, "shortcut-section", control,
                    Composition::SemanticRole::Secondary);

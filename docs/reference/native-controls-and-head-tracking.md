@@ -76,9 +76,9 @@ Native ship actions use the longer pilot-context latch even when automatic
 flight-axis parking is Off. A held action cannot queue while the native context is
 closed, so returning to the cockpit requires a genuine new button edge.
 
-The six universal context inputs are not native ship actions and remain available
-through menus, dialogue, and on-foot UI under `InjectionOnly`. `Full` mode still
-parks them with every plugin-owned output.
+Native ship bindings are also gated to ship/targeting context. Optional menu
+Accept, Cancel, and directional bindings are independent, remain unbound by
+default, and operate only while a known menu context is suspended.
 
 ## Camera-look transport
 

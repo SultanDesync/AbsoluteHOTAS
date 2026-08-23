@@ -1,10 +1,12 @@
 #pragma once
 
-// Slot definition structs and capture category encoding for the BindingWizard.
-// Extracted from BindingWizard.cpp to share across WizardCapture and WizardConfig.
+// Slot definition structs and capture category encoding shared by the
+// Absolute Control provider, WizardCapture, and WizardConfig.
 
 #include <string>
 #include <vector>
+
+#include "MenuNavigationCatalog.h"
 
 // --- Capture slot encoding ---
 // Each binding category gets a range of integer slot IDs so the capture system
@@ -25,6 +27,7 @@ namespace CaptureSlot {
     constexpr int kMacroBase       = 800;   // 800..899, one per macro trigger button
     constexpr int kProfileTrigger  = 900;
     constexpr int kControlExtensionBase = 920; // 920..935
+    constexpr int kMenuNavigationBase = 940; // 940..945
 
     inline bool IsAxis(int slot) {
         return (slot >= kAxisBase && slot < kButtonBase)
@@ -64,7 +67,7 @@ struct ButtonSlot {
 inline constexpr ButtonSlot kButtonSlots[] = {
     {"Activate",       "iActivateButtonId"},
     {"Stop",           "iStopButtonId"},
-    {"Toggle Wizard",  "iToggleWizardButton"},
+    {"Open Absolute Control", "iToggleWizardButton"},
 };
 inline constexpr int kNumButtonSlots = sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
 inline constexpr int kToggleWizardButtonSlot = 2;

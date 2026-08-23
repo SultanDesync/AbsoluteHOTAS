@@ -1,13 +1,13 @@
 # AbsoluteHOTAS INI Reference
 
-Complete reference for `AbsoluteHOTAS.ini` key=value pairs. Most users should configure the plugin via the in-game wizard (`Ctrl+Alt+B`).
+Complete reference for `AbsoluteHOTAS.ini` key=value pairs. Most users should configure the plugin through **MOD OPTIONS → AbsoluteHOTAS** in Absolute Control. `Ctrl+Alt+B` routes to the same native module.
 
 Managed profile files may also contain `[Profile] sKeyboardShortcut`. It accepts a
 Windows virtual-key chord such as `key:0x11+0x31` (Ctrl+1), operates independently
 of the profile's controller/custom activation, and can be set to `-1` to disable the
 keyboard shortcut.
 
-> **Tip**: The wizard saves to this INI on each **Save & Apply**, so manual edits and wizard changes coexist.
+> **Tip**: Absolute Control writes the user-owned `AbsoluteHOTAS_Custom.ini` on Apply, so manual edits and native-menu changes coexist.
 
 ---
 
@@ -16,21 +16,12 @@ keyboard shortcut.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `bEnabled` | bool | `true` | Master enable for the plugin. |
-| `bSyncShipOutputsFromControlMap` | bool | `true` | Legacy 4.x output reconciliation. Retained for configuration compatibility; native 5.0 actions ignore it and the six universal context inputs use fixed vanilla keys. |
+| `bSyncShipOutputsFromControlMap` | bool | `true` | Legacy 4.x output reconciliation retained for configuration compatibility. Native 5.x routes and the dedicated menu bindings do not depend on it. |
 
 ---
 
-## [UI]
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `bEnableWorkbench` | bool | `true` | Install the optional D3D12 in-game workbench. Set to `false` to bypass all renderer hooks while retaining flight controls and manual INI configuration. Requires a game restart. |
-
-If a graphics injector conflicts with the workbench, temporarily disable that
-injector, configure and save AbsoluteHOTAS, then set `bEnableWorkbench=false` in
-`AbsoluteHOTAS_Custom.ini` before restoring the graphics stack. A renderer failure
-also disables the workbench for the remainder of that game session without
-disabling the controller.
+The retired `[UI] bEnableWorkbench` key is accepted as unknown legacy data but has no effect.
+AbsoluteHOTAS no longer installs D3D12/DXGI hooks or embeds a renderer frontend.
 
 ---
 
@@ -125,7 +116,7 @@ Plugin control buttons. IDs 1–128 are physical DirectInput buttons and 129–1
 | `bAlwaysOn` | bool | `true` | Auto-arm discovery on DLL load. If `false`, requires manual Activate button press. |
 | `iActivateButtonId` | int | `-1` | Arms signal discovery / resets flight hooks. Also available via `Ctrl+Alt+F8`. |
 | `iStopButtonId` | int | `-1` | Force-disarms flight hooks. |
-| `iToggleWizardButton` | int | `-1` | Opens/closes the binding wizard overlay (alternative to `Ctrl+Alt+B`). |
+| `iToggleWizardButton` | int | `-1` | Opens Absolute Control at the AbsoluteHOTAS Administration page (alternative to `Ctrl+Alt+B`). The legacy key name is retained for profile compatibility. |
 
 ---
 
@@ -168,51 +159,24 @@ the hardware axis, and pressing another command changes the target.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `bEnabled` | bool | `true` | Master switch for 5.0 native ship actions, native boost/strafe modifier paths, and the first-person camera pose hook. It does not disable the six universal context inputs. A failed exact runtime gate disables the affected native operation. |
+| `bEnabled` | bool | `true` | Master switch for native ship actions and native boost/strafe modifier paths. Optional menu navigation is configured separately. A failed exact runtime gate disables the affected native operation. |
 
 ---
 
-## [HeadTracking]
+## Retired [HeadTracking] settings
 
-Rotational cockpit head tracking reads the FreeTrack 2.0 shared-memory output
-published by OpenTrack. For Tobii hardware, choose the Tobii tracker inside
-OpenTrack and enable FreeTrack 2.0 output. Translation is not implemented.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `bEnabled` | bool | `false` | Master switch for first-person cockpit camera look. |
-| `bOpenTrackEnabled` | bool | `true` | Consume OpenTrack FreeTrack output. Disable for joystick-only camera look. |
-| `sSource` | enum | `OpenTrack` | `OpenTrack` or `TobiiViaOpenTrack`. Both consume OpenTrack's FreeTrack output; the latter provides source-specific diagnostics. |
-| `iRecenterButton` | binding | `-1` | DirectInput button used to capture the current pose as center. |
-| `iToggleButton` | binding | `-1` | DirectInput button that toggles camera authority on or off. Re-enabling captures a fresh OpenTrack center. |
-| `iLookYawAxis` | axis binding | unbound | Optional absolute joystick yaw override. |
-| `iLookPitchAxis` | axis binding | unbound | Optional absolute joystick pitch override. |
-| `iLookRollAxis` | axis binding | unbound | Optional absolute joystick roll override. |
-| `bYawEnabled` | bool | `true` | Apply the yaw component from OpenTrack or a joystick override. |
-| `bPitchEnabled` | bool | `true` | Apply the pitch component from OpenTrack or a joystick override. |
-| `bRollEnabled` | bool | `true` | Apply the roll component from OpenTrack or a joystick override. Disable for two-axis camera look. |
-| `fYawScale` | float | `1.0` | Yaw gain for OpenTrack and a joystick yaw override, range `0.05..10.0`. |
-| `fPitchScale` | float | `1.0` | Pitch gain for OpenTrack and a joystick pitch override, range `0.05..10.0`. |
-| `fRollScale` | float | `1.0` | Roll gain for OpenTrack and a joystick roll override, range `0.05..10.0`. |
-| `fMaxYawDegrees` | float | `85.0` | Maximum absolute yaw applied to the cockpit camera. |
-| `fMaxPitchDegrees` | float | `60.0` | Maximum absolute pitch applied to the cockpit camera. |
-| `fMaxRollDegrees` | float | `45.0` | Maximum absolute roll applied to the cockpit camera. |
-| `fDeadzoneDegrees` | float | `0.0` | Angular deadzone subtracted from each rotational axis. |
-| `fJoystickDeadzone` | float | `0.08` | Center deadzone for optional joystick camera axes, normalized `0.0..0.95`. |
-| `fSmoothing` | float | `0.15` | Frame-rate-adjusted pose retention, `0.0` for raw input through `0.99` for maximum smoothing. |
-| `iStaleMilliseconds` | int | `500` | Clear camera authority when OpenTrack's frame ID has not advanced for this interval. |
-| `bInvertYaw` | bool | `false` | Invert OpenTrack or joystick yaw. |
-| `bInvertPitch` | bool | `false` | Invert OpenTrack or joystick pitch (vertical look). |
-| `bInvertRoll` | bool | `false` | Invert OpenTrack or joystick roll. |
+The `[HeadTracking]` section is no longer shipped or edited by AbsoluteHOTAS. Install
+[Absolute Head Tracking](https://www.nexusmods.com/starfield/mods/17872) for OpenTrack-compatible
+cockpit camera look and configure it through its own Absolute Control module. Legacy keys are left
+untouched during migration so installing the standalone module cannot destroy existing tuning.
 
 ---
 
 ## [ShipButtons]
 
-Map physical buttons to ship actions and universal context inputs. All use
+Map physical buttons to the complete native ship-control list. All use
 1-indexed DirectInput button IDs with an optional `DeviceName@` prefix. Set to
-`-1` to leave unbound. Ship-specific rows use native paths; the six compatibility
-rows emit fixed vanilla E, Esc, and arrow keys.
+`-1` to leave unbound. Every row is gated to ship or targeting context.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -224,16 +188,16 @@ rows emit fixed vanilla E, Esc, and arrow keys.
 | `iFireWeapon1Button` | `-1` | Fire secondary weapon |
 | `iFireWeapon2Button` | `-1` | Fire tertiary weapon |
 | `iShipAction1Button` | `-1` | Ship action 1 |
-| `iSelectTargetButton` | `-1` | Universal Select / Accept (`E`); Select Target in flight |
-| `iIncreaseSystemPowerButton` | `-1` | Universal Up; Increase System Power in flight |
-| `iDecreaseSystemPowerButton` | `-1` | Universal Down; Decrease System Power in flight |
-| `iPreviousSystemButton` | `-1` | Universal Left; Previous System in flight |
-| `iNextSystemButton` | `-1` | Universal Right; Next System in flight |
+| `iSelectTargetButton` | `-1` | Select Target. Defaults to the validated native function; Absolute Control can select a ship-context `E` compatibility route. |
+| `iIncreaseSystemPowerButton` | `-1` | Increase System Power (fixed Up in ship context) |
+| `iDecreaseSystemPowerButton` | `-1` | Decrease System Power (fixed Down in ship context) |
+| `iPreviousSystemButton` | `-1` | Previous System (fixed Left, or native SelectLeft in Targeting Mode) |
+| `iNextSystemButton` | `-1` | Next System (fixed Right, or native SelectRight in Targeting Mode) |
 | `iOpenScannerButton` | `-1` | Open scanner |
 | `iRepairButton` | `-1` | Repair |
 | `iShipAlternateControlHoldButton` | `-1` | Ship alternate control (hold) |
 | `iCruiseButton` | `-1` | Cruise |
-| `iCancelButton` | `-1` | Universal Back / Cancel (`Esc`) |
+| `iCancelButton` | `-1` | Ship Cancel (fixed `Esc` in ship context) |
 | `iUndockTakeOffButton` | `-1` | Undock / take off |
 | `iGetUpButton` | `-1` | Get up from seat |
 | `iExitShipFromCockpitButton` | `-1` | Exit ship from cockpit |
@@ -245,33 +209,38 @@ rows emit fixed vanilla E, Esc, and arrow keys.
 
 ## [MenuControls]
 
-Optional, profile-aware reuse of existing flight controls while Starfield reports
-a suspended menu context. All options default off. On entry, an enabled axis must
+Optional, profile-aware controller navigation while Starfield reports a suspended
+menu context. All dedicated bindings and reuse options default off. On entry, an enabled axis must
 first return inside the release threshold and Primary Weapon must first be
 released. This neutral arming prevents a carried flight input from immediately
 moving or accepting a menu prompt.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `iMenuAcceptButton` | binding | `-1` | Dedicated Menu Accept / Select (`E`) |
+| `iMenuCancelButton` | binding | `-1` | Dedicated Menu Cancel / Back (`Esc`) |
+| `iMenuUpButton` | binding | `-1` | Dedicated Menu Up (Up arrow) |
+| `iMenuDownButton` | binding | `-1` | Dedicated Menu Down (Down arrow) |
+| `iMenuLeftButton` | binding | `-1` | Dedicated Menu Left (Left arrow) |
+| `iMenuRightButton` | binding | `-1` | Dedicated Menu Right (Right arrow) |
 | `bUsePitchAxisForNavigation` | bool | `false` | Reuse the current Pitch axis for Up/Down arrow navigation |
-| `bUseYawAxisForNavigation` | bool | `false` | Reuse the current Yaw axis for Left/Right in menus and Targeting Mode component selection |
+| `bUseYawAxisForNavigation` | bool | `false` | Reuse the current Yaw axis for Left/Right in menus |
 | `bUsePrimaryWeaponForSelect` | bool | `false` | Reuse the current `iFireWeapon0Button` binding as vanilla Select/Accept (`E`) |
 | `bInvertVerticalNavigation` | bool | `false` | Reverse the Pitch-to-Up/Down mapping without changing flight inversion |
 | `bInvertHorizontalNavigation` | bool | `false` | Reverse the Yaw-to-Left/Right mapping without changing flight inversion |
 | `fAxisEngageThreshold` | float | `0.55` | Normalized deflection needed to hold a direction, clamped to `0.35..0.95` |
 | `fAxisReleaseThreshold` | float | `0.35` | Return threshold that releases the direction, clamped below Engage |
 
-The outputs use the same ref-counted `SendInput` path as universal context inputs
-and explicit raw custom bindings. They are parked while the AbsoluteHOTAS
-workbench is open and when `PilotGateMode=Full` closes the output gate.
+The outputs use the same ref-counted `SendInput` path as explicit raw custom
+bindings. They are parked while Absolute Control is open
+and when `PilotGateMode=Full` closes the output gate.
 
 ---
 
 ## [ShipButtonOutputs] (legacy)
 
 Retained so 4.x user files continue to parse and round-trip safely. Native actions
-ignore these values, and the six universal context inputs always use fixed vanilla
-E, Esc, and arrow keys. Use `[ButtonExpansion]` or an explicit `key:`/`mouse:` macro
+ignore these values. Use `[MenuControls]`, `[ButtonExpansion]`, or an explicit `key:`/`mouse:` macro
 target for other synthetic input.
 
 **Format**: `key:0xNN` (DirectInput scancode), `mouse:1..4` (mouse button), or `none` (disabled).

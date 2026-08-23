@@ -120,8 +120,8 @@ std::vector<Composition::NodeDescriptorV1> BuildNodes()
     nodes.push_back(Node(Composition::NodeKind::Section, "thrust-section",
         "flight-axes-root", {}, "Thrust"));
     AddAxisCard(nodes, "thrust-section", "axis-throttle-card", "Throttle",
-        "Invert here; bind on Bindings, while positional and rate behavior remains on Throttle Setup.",
-        "axis-throttle", {}, "throttle-inverted", {}, {}, {});
+        "Bind and invert here; positional and rate behavior remains on Throttle Setup.",
+        "axis-throttle", "bind-throttle-axis", "throttle-inverted", {}, {}, {});
     AddRow(nodes, "axis-throttle-mode", "axis-throttle-card", {
         {"flight-throttle-summary", Composition::SemanticRole::Status},
         {"flight-open-throttle", Composition::SemanticRole::Secondary},
@@ -130,15 +130,15 @@ std::vector<Composition::NodeDescriptorV1> BuildNodes()
     nodes.push_back(Node(Composition::NodeKind::Section, "rotation-section",
         "flight-axes-root", {}, "Rotation"));
     AddAxisCard(nodes, "rotation-section", "axis-pitch-card", "Pitch",
-        "Invert and tune the live center and full-authority edges; bind the source on the Bindings page.", "axis-pitch", {},
+        "Bind, invert, and tune the live center and full-authority edges.", "axis-pitch", "bind-pitch-axis",
         "pitch-inverted", "pitch-sensitivity", "pitch-saturation",
         "pitch-deadzone");
     AddAxisCard(nodes, "rotation-section", "axis-yaw-card", "Yaw",
-        "Invert and tune the live center and full-authority edges; bind the source on the Bindings page.", "axis-yaw", {},
+        "Bind, invert, and tune the live center and full-authority edges.", "axis-yaw", "bind-yaw-axis",
         "yaw-inverted", "yaw-sensitivity", "yaw-saturation", "yaw-deadzone");
     AddAxisCard(nodes, "rotation-section", "axis-roll-card", "Roll",
-        "Invert and tune the live center and full-authority edges; bind the source on the Bindings page.", "axis-roll",
-        {}, "roll-inverted", "roll-sensitivity",
+        "Bind, invert, and tune the live center and full-authority edges.", "axis-roll",
+        "bind-roll-axis", "roll-inverted", "roll-sensitivity",
         "roll-saturation", "roll-deadzone");
 
     nodes.push_back(Node(Composition::NodeKind::Section,
@@ -146,12 +146,12 @@ std::vector<Composition::NodeDescriptorV1> BuildNodes()
         "6-DOF Translation"));
     AddAxisCard(nodes, "translation-section", "axis-strafe-lateral-card",
         "Strafe Lateral", "Left and right translation.",
-        "axis-strafe-lateral", {},
+        "axis-strafe-lateral", "bind-strafe-lateral-axis",
         "strafe-lateral-inverted", "strafe-lateral-sensitivity",
         "strafe-lateral-saturation", "strafe-lateral-deadzone");
     AddAxisCard(nodes, "translation-section", "axis-strafe-vertical-card",
-        "Strafe Vertical", "Invert and tune here; bind on Bindings. Sensitivity is shared with lateral strafe.",
-        "axis-strafe-vertical", {},
+        "Strafe Vertical", "Bind, invert, and tune here. Sensitivity is shared with lateral strafe.",
+        "axis-strafe-vertical", "bind-strafe-vertical-axis",
         "strafe-vertical-inverted", {}, "strafe-vertical-saturation",
         "strafe-vertical-deadzone");
 
@@ -161,6 +161,7 @@ std::vector<Composition::NodeDescriptorV1> BuildNodes()
         "fallback-section", {}, "Reverse Authority",
         "Dedicated analog reverse and held digital reverse alternatives."));
     AddRow(nodes, "reverse-source", "reverse-card", {
+        {"bind-reverse-axis", Composition::SemanticRole::Binding},
         {"reverse-axis-inverted", Composition::SemanticRole::Secondary},
     });
     AddRow(nodes, "reverse-tuning", "reverse-card", {
@@ -238,7 +239,7 @@ std::vector<Composition::AssociationDescriptorV1> BuildAssociations()
 
 const auto g_nodes = BuildNodes();
 const auto g_associations = BuildAssociations();
-static_assert(Composition::kMaximumNodesPerPage >= 82);
+static_assert(Composition::kMaximumNodesPerPage >= 83);
 } // namespace
 
 namespace AbsoluteControlFlightAxesComposition {

@@ -1,0 +1,99 @@
+[center][img]https://staticdelivery.nexusmods.com/mods/4187/images/16668/16668-1782428954-1893709378.gif[/img]
+
+[size=6][color=#00ccff][b]AbsoluteHOTAS 5.1.0[/b][/color][/size]
+[size=4][b][color=#ffaa00]Native HOTAS/HOSAS flight control, now fully configured through Absolute Control.[/color][/b][/size][/center]
+
+AbsoluteHOTAS reads DirectInput hardware natively and drives Starfield ship controls without vJoy or Joystick Gremlin. Version 5.1.0 is the first public 5.x successor to the Nexus 4.0.2 stable release. It consolidates the native-control rewrite, a complete Absolute Control provider, independent menu controls, suite interoperability, and the final modular cleanup developed across the 5.0 fork.
+
+[line]
+
+[center][size=5][color=#ffcc00][b]Important: new menu requirement[/b][/color][/size][/center]
+
+[url=https://www.nexusmods.com/starfield/mods/18023][b]Absolute Control[/b][/url] is required for in-game configuration. Open the Pause Menu and choose [color=#ffaa00][b]MOD OPTIONS -> AbsoluteHOTAS[/b][/color]. [font=Courier New]Ctrl+Alt+B[/font] and the existing HOTAS menu binding open the same native module.
+
+The old Dear ImGui overlay has been retired. AbsoluteHOTAS no longer links ImGui or MinHook and no longer installs D3D12/DXGI presentation hooks. This removes an entire class of conflicts with overlays, capture tools, upscalers, frame generation, and graphics injectors.
+
+If Absolute Control is absent or incompatible, saved flight controls and manual INI configuration still load, but there is no fallback overlay.
+
+[line]
+
+[center][size=5][color=#ffcc00][b]Major changes since Nexus 4.0.2[/b][/color][/size][/center]
+
+[list]
+[*][b]Four clean Ship Buttons sections:[/b] [b]Native Ship Controls[/b] contains all 23 Starfield ship-button actions exactly once and in native menu order; [b]AbsoluteHOTAS Hotkeys[/b] contains throttle and Turn Assist commands; [b]Optional Menu Navigation[/b] contains the dedicated menu set; [b]Custom SendInput Bindings[/b] contains arbitrary keyboard/mouse passthroughs. Analog axes live only on the first [b]Flight Axes[/b] tab.[/*]
+[*][b]Select Target fixed:[/b] the native Select Target row now defaults to the validated injectable function. A ship-context SendInput E compatibility route remains selectable, but Menu Accept is an independent optional binding.[/*]
+[*][b]Native ship list completed:[/b] Ship Action 1, Ship Cancel, Increase/Decrease System Power, Previous/Next System, all weapon groups, camera/cockpit functions, and every other catalog action are present and correctly categorized.[/*]
+[*][b]Consistent route controls:[/b] every native action uses the same binding-plus-method row. Power Up/Down, Previous/Next, and Ship Cancel visibly report [b]Fixed ship-context SendInput[/b] with Direct injection locked unavailable until a validated native route exists.[/*]
+[*][b]Clear binding-record feedback:[/b] current Absolute Control builds display a prominent recording panel with the active binding, axis/button/POV guidance, navigation-lock state, and cancel input.[/*]
+[*][b]Native ship-control rewrite:[/b] seventeen ship-specific actions now use exact-gated internal Starfield routes, including weapons, boost, flight mode, scanner, repair, targeting, camera controls, seat/cockpit actions, cruise, and autopilot where validated. Native failures do not fall back to synthetic input.[/*]
+[*][b]Independent roll and strafe:[/b] the selected-handler output split preserves simultaneous roll plus lateral or vertical strafe for full six-degree-of-freedom control.[/*]
+[*][b]Independent menu navigation:[/b] six separate, profile-aware bindings provide E, Esc, and arrow navigation only in known menu context. They default unbound and never borrow Select Target, Ship Cancel, or ship power assignments.[/*]
+[*][b]Targeting-aware ship power:[/b] native Previous/Next System switch to Starfield's exact SelectLeft/SelectRight component selectors in Targeting Mode without changing ship power at the same time.[/*]
+[*][b]Optional menu-control reuse:[/b] per-profile Pitch-to-Up/Down, Yaw-to-Left/Right, and Primary-Weapon-to-Select include inversion, hysteresis, safe neutral/release arming, and are menu-only.[/*]
+[*][b]Automatic pilot context:[/b] live selected-handler cadence distinguishes Piloting, On Foot, and Suspended menu/loading states and parks output safely after leaving the seat.[/*]
+[*][b]Complete Absolute Control editor:[/b] native pages now cover flight axes, throttle and detents, ship buttons, aiming, profiles/layers, macros, devices/calibration, live telemetry, diagnostics, and safe Apply/Cancel transactions.[/*]
+[*][b]Profiles, macros, and capture hardening:[/b] provider-owned DirectInput capture, sparse inheritance, atomic persistence, conflict validation, dirty-close protection, and held-edge reseeding are shared across the runtime and native menu.[/*]
+[*][b]Absolute Input Bus and companion ownership:[/b] versioned device/capture/profile/context APIs support first-party modules while explicit arbitration prevents HOTAS, Absolute Zero, Absolute Head Tracking, and Absolute Power from competing for the same responsibilities.[/*]
+[*][b]Modular cleanup:[/b] the legacy Dear ImGui renderer and embedded head tracker were removed from the final shipping DLL. Absolute Control owns menu presentation and Absolute Head Tracking owns OpenTrack camera look.[/*]
+[/list]
+
+The packaged [b]CHANGELOG.txt[/b] contains the full chronological record for the 5.0.0-beta, 5.0.1, Absolute Control integration, and 5.1.0 milestones, including migration behavior, validation, and current known boundaries.
+
+[line]
+
+[center][size=5][color=#00ccff][b]Core features[/b][/color][/size][/center]
+
+[list]
+[*][b]Six-axis flight control:[/b] pitch, yaw, roll, lateral strafe, vertical strafe, and absolute or rate-based throttle.[/*]
+[*][b]Native ship actions:[/b] all 23 named ship-button functions, including weapons, boost, targeting, power management, POV/camera controls, and cockpit actions.[/*]
+[*][b]Native configuration:[/b] axes, buttons, throttle tuning, profiles, shift layers, macros, devices, calibration, live telemetry, and diagnostics through Absolute Control.[/*]
+[*][b]Profiles and layers:[/b] hot-swappable profiles, sparse inherited layers, macros, and device-specific calibration.[/*]
+[*][b]Automatic pilot context:[/b] flight output parks after leaving the pilot seat and remains suspended through menus and loading.[/*]
+[*][b]No graphics hooks:[/b] the shipping DLL contains no legacy menu renderer or swap-chain hook path.[/*]
+[*][b]Fail-closed native gates:[/b] a runtime mismatch disables the affected operation instead of guessing or emitting unsafe fallback input.[/*]
+[/list]
+
+[line]
+
+[center][size=5][color=#ffaa00][b]Compatible Absolute modules[/b][/color][/size][/center]
+
+[b][url=https://www.nexusmods.com/starfield/mods/18024]Absolute Power[/url]:[/b] compatible. Power remains authoritative for presets and activation; HOTAS supplies the optional Input Bus used for controller/POV preset capture.
+
+[b][url=https://www.nexusmods.com/starfield/mods/17872]Absolute Head Tracking[/url]:[/b] compatible. Head tracking has been removed from the main AbsoluteHOTAS plugin and now lives in this standalone OpenTrack-compatible module.
+
+[b][url=https://www.nexusmods.com/starfield/mods/17460]Absolute Zero[/url]:[/b] limited compatibility. While Absolute Zero is active, it owns native mouse pitch/yaw and HOTAS joystick pitch/yaw are unavailable. HOTAS retains roll, strafe, throttle, buttons, profiles, and the shared writer.
+
+[line]
+
+[center][size=5][color=#00ccff][b]Requirements and installation[/b][/color][/size][/center]
+
+[list]
+[*]Starfield 1.16.242 or 1.16.244[/*]
+[*][url=https://sfse.silverlock.org/]SFSE[/url] 0.2.20 or later[/*]
+[*][url=https://www.nexusmods.com/starfield/mods/18023]Absolute Control[/url] and the requirements listed on its page[/*]
+[*]No vJoy or Joystick Gremlin required[/*]
+[/list]
+
+Install normally with MO2 or Vortex, or place [font=Courier New]AbsoluteHOTAS.dll[/font] and [font=Courier New]AbsoluteHOTAS.ini[/font] in [font=Courier New]Data\SFSE\Plugins\[/font].
+
+[b]Updating:[/b] replace only the DLL and shipped default INI. Do not overwrite [font=Courier New]AbsoluteHOTAS_Custom.ini[/font] or the [font=Courier New]Profiles[/font] directory. Back up both user-owned locations first.
+
+[line]
+
+[center][size=5][color=#ffcc00][b]Quick start[/b][/color][/size][/center]
+
+[list=1]
+[*]Install Absolute Control and AbsoluteHOTAS with your mod manager.[/*]
+[*]Launch Starfield through SFSE.[/*]
+[*]Open the Pause Menu and choose [b]MOD OPTIONS -> AbsoluteHOTAS[/b].[/*]
+[*]Bind and tune the flight axes, ship buttons, throttle, profiles, and optional layers.[/*]
+[*]Apply the transaction. Changes take effect without restarting the game.[/*]
+[/list]
+
+[line]
+
+Please report reproducible crashes, configuration loss, stuck outputs, core-flight regressions, failed ship actions, hardware-specific mapping problems, or menu-registration issues. Include the AbsoluteHOTAS, Absolute Control, Starfield, and SFSE versions; device names; active profile/layer; reproduction steps; and a sanitized log with logging enabled.
+
+[center][url=https://github.com/SultanDesync/AbsoluteHOTAS#readme][color=#00ff88][b]Complete Guide[/b][/color][/url]
+
+[url=https://github.com/SultanDesync/AbsoluteHOTAS]Source[/url] · [url=https://github.com/SultanDesync/AbsoluteHOTAS/issues]Issue Tracker[/url] · [url=https://www.nexusmods.com/starfield/mods/18023]Absolute Control[/url] · [url=https://www.nexusmods.com/starfield/mods/18024]Absolute Power[/url] · [url=https://www.nexusmods.com/starfield/mods/17872]Absolute Head Tracking[/url] · [url=https://www.nexusmods.com/starfield/mods/17460]Absolute Zero[/url][/center]

@@ -13,8 +13,8 @@
 // Starfield stores keyboard/mouse binding *overrides* (deltas from the base
 // ControlMap.txt) in a small binary file confusingly given a .txt extension.
 // This module parses it as retained 4.x compatibility metadata and as a tested
-// reverse-engineering reference. In 5.0, native named actions and the six fixed
-// universal context inputs both bypass this output table.
+// reverse-engineering reference. Native ship routes and the six dedicated menu
+// navigation outputs both bypass this output table.
 //
 // Format (reverse-engineered; see docs/reference/control-map-ship-functions.md):
 //

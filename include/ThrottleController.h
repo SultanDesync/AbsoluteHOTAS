@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include "BindingRef.h"
+#include "MenuNavigationCatalog.h"
 #include "HeadTracking.h"
 
 // DirectInput polling, normalization, and memory injection.
@@ -97,7 +98,7 @@ public:
         int     throttleBurstMs = 250;    // Throttle authority window after movement; 0 = one frame
         bool    rollEnabled = true;       // Restored independently at the selected-handler output.
         bool    reverseAxisEnabled = true;
-        // Master switch for flight-axis, source-object aim, and head-pose injection.
+        // Master switch for flight-axis and source-object aim injection.
         // Discrete ship actions, raw custom bindings, and macros are unaffected. Default true;
         // a "parked" profile sets it false to disable flight injection on foot while
         // keeping its own button/macro mappings. See profile-switching.md.
@@ -108,12 +109,16 @@ public:
         // Patch 5.0 native control layer. Named ship operations fail closed at
         // their exact Starfield gates and never need a ControlMap/SendInput path.
         bool    bNativeShipControls = true;
+        // Retained only as a migration shape for legacy configuration. The
+        // standalone Absolute Head Tracking module owns camera behavior.
         HeadTracking::Settings headTracking;
         // [ShipButtons]
         bool    shipButtonsEnabled = true;
 
         // [MenuControls] — optional reuse of already-bound flight controls while
         // Starfield reports a suspended menu/loading context.
+        std::array<BindingRef, kMenuNavigationCatalog.size()>
+            menuNavigationBindings{};
         bool    bUsePitchAxisForMenu = false;
         bool    bUseYawAxisForMenu = false;
         bool    bUsePrimaryWeaponForMenuSelect = false;
@@ -126,7 +131,7 @@ public:
         GateMode    pilotGateMode = GateMode::InjectionOnly;
         PilotSignal pilotSignal = PilotSignal::Auto;
         int         pilotGateManualToggleKey = 0;        // VK to toggle the manual signal (0 = disabled)
-        int         pilotLatchMilliseconds = 5000;       // General flight context hysteresis; head pose uses 400 ms
+        int         pilotLatchMilliseconds = 5000;
 
         // [Aim] - Source-object reticle injection
         bool    bSourceObjectAim  = false;  // Enable HOTAS-driven aiming reticle
@@ -200,7 +205,7 @@ public:
     static void ReloadConfig();
 
     // Monotonic counter bumped after a reload or runtime profile swap has been fully
-    // applied to s_config. The wizard refreshes clean snapshots while preserving a
+    // applied to s_config. Absolute Control refreshes clean snapshots while preserving a
     // dirty working copy. A changed value guarantees GetConfig() reflects the new
     // runtime state. Thread-safe.
     static uint32_t ConfigGeneration();
@@ -209,7 +214,7 @@ public:
     // Called by SignalHunter to decide whether to apply the turn assist decay.
     static bool IsTurnAssistActive();
 
-    // Ship action info for the binding wizard
+    // Ship action info for Absolute Control and runtime diagnostics.
     struct ShipActionInfo {
         const char* label;
         const char* iniKey;

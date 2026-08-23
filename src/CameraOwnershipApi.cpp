@@ -3,14 +3,12 @@
 #define ABSOLUTE_HOTAS_EXPORTS
 #include "AbsoluteCameraOwnershipAPI.h"
 #include "AbsoluteControlSubscriber.h"
-#include "HeadTracking.h"
 #include "NativeShipControl.h"
 
 namespace {
 
 AbsoluteCameraOwnershipApi::Result __cdecl DeclareAbsoluteHeadTrackingOwner() noexcept
 {
-    HeadTracking::SetExternalOwner(true);
     NativeShipControl::SetExternalCameraOwner(true);
     AbsoluteControlSubscriber::SetExternalCameraOwner(true);
     return NativeShipControl::CameraHookInstalled()

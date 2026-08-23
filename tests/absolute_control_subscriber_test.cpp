@@ -28,7 +28,6 @@ AbsoluteControlSettings::ShipRouteState storedRoutes =
     AbsoluteControlSettings::DefaultShipRoutes();
 AbsoluteControlSettings::Revision revision{1, 11};
 AbsoluteControlDevices::CalibrationMap calibration{};
-bool canEdit{true};
 bool failLoad{};
 bool failApply{};
 std::string editTarget;
@@ -80,7 +79,7 @@ bool Apply(const ScalarState& state, const Revision& expected,
            ScalarState& readBack, Revision& revision,
            std::string& error) noexcept
 {
-    if (!TestSettings::canEdit || TestSettings::failApply ||
+    if (TestSettings::failApply ||
         expected != TestSettings::revision) {
         error = "test apply failure";
         return false;
@@ -100,7 +99,7 @@ bool ApplyWithBindings(
     HotasBindingCatalog::BindingState& bindingReadBack,
     Revision& revision, std::string& error) noexcept
 {
-    if (!TestSettings::canEdit || TestSettings::failApply ||
+    if (TestSettings::failApply ||
         expected != TestSettings::revision) {
         error = "test apply failure";
         return false;
@@ -124,7 +123,7 @@ bool ApplyWithBindingsAndRoutes(
     ShipRouteState& routeReadBack, Revision& revision,
     std::string& error) noexcept
 {
-    if (!TestSettings::canEdit || TestSettings::failApply ||
+    if (TestSettings::failApply ||
         expected != TestSettings::revision) {
         error = "test apply failure";
         return false;
@@ -182,7 +181,7 @@ bool ApplyDeviceState(
     AbsoluteControlDevices::CalibrationMap& calibrationReadBack,
     Revision& revision, std::string& error) noexcept
 {
-    if (!TestSettings::canEdit || TestSettings::failApply ||
+    if (TestSettings::failApply ||
         expected != TestSettings::revision) {
         error = "test apply failure";
         return false;
@@ -202,10 +201,6 @@ Revision CurrentRevision() noexcept
     return TestSettings::revision;
 }
 
-bool CanEdit() noexcept
-{
-    return TestSettings::canEdit;
-}
 } // namespace AbsoluteControlSettings
 
 namespace ShipOutputSystem {
@@ -369,8 +364,8 @@ namespace {
 using namespace AbsoluteControlPanelApi;
 
 inline constexpr std::array<const char*, 9> kExpectedPageIds{
-    "hotas-ship-buttons",
     "hotas-flight-axes",
+    "hotas-ship-buttons",
     "hotas-throttle",
     "hotas-aiming",
     "hotas-profiles",
@@ -542,7 +537,6 @@ void ResetFakeHost()
     TestSettings::storedRoutes = AbsoluteControlSettings::DefaultShipRoutes();
     TestSettings::revision = {1, 11};
     TestSettings::calibration.clear();
-    TestSettings::canEdit = true;
     TestSettings::failLoad = false;
     TestSettings::failApply = false;
     TestSettings::editTarget.clear();
@@ -620,7 +614,7 @@ int main()
     assert(std::strcmp(g_copiedComposition.moduleId, "absolute.hotas") == 0);
     assert(std::strcmp(g_copiedComposition.pageId,
                        "hotas-flight-axes") == 0);
-    assert(g_copiedComposition.nodeCount == 76);
+    assert(g_copiedComposition.nodeCount == 83);
     assert(g_copiedComposition.associationCount == 10);
     std::array<Composition::NodeStateV1, 9> compositionStates{};
     std::uint32_t compositionStateCount{};
@@ -667,23 +661,31 @@ int main()
         IsShipButtonsCompositionRegistered());
     assert(std::strcmp(g_copiedComposition.pageId,
                        "hotas-ship-buttons") == 0);
-    assert(g_copiedComposition.nodeCount == 93);
+    assert(g_copiedComposition.nodeCount == 100);
     assert(g_copiedComposition.associationCount == 0);
     assert(pageCount == kExpectedPageIds.size());
     assert(std::strcmp(AbsoluteControlSubscriber::Testing::Module().moduleId,
                        "absolute.hotas") == 0);
-    assert(std::string_view(pages[0].pageId) == "hotas-ship-buttons");
-    assert(std::string_view(pages[0].displayName) == "Bindings");
+    assert(std::string_view(pages[0].pageId) == "hotas-flight-axes");
+    assert(std::string_view(pages[0].displayName) == "Flight Axes");
     assert(std::string_view(pages[0].controls[0].controlId) ==
-           "bindings-edit-profile");
+           "flight-axes-edit-profile");
     assert((pages[0].controls[0].flags & kControlPinnedContext) != 0);
     assert(std::string_view(pages[0].controls[1].controlId) ==
-           "bindings-layer-mode");
+           "flight-axes-layer-mode");
     assert(std::string_view(pages[0].controls[2].controlId) ==
-           "bindings-layer-modifier");
-    assert(FindControl(pages[0], "ship-axis-bindings")->kind ==
-           ControlKind::GroupHeader);
+           "flight-axes-layer-modifier");
     assert(FindControl(pages[0], "bind-throttle-axis") != nullptr);
+    assert(std::string_view(pages[1].pageId) == "hotas-ship-buttons");
+    assert(std::string_view(pages[1].displayName) == "Ship Buttons");
+    assert(FindControl(pages[1], "ship-native-controls")->kind ==
+           ControlKind::GroupHeader);
+    assert(FindControl(pages[1], "ship-axis-bindings") == nullptr);
+    assert(FindControl(pages[1], "bind-throttle-axis") == nullptr);
+    assert(FindControl(pages[1], "bind-ship-select-accept") != nullptr);
+    assert(FindControl(pages[1], "bind-menu-accept") != nullptr);
+    assert(FindControl(pages[1], "bind-menu-cancel") != nullptr);
+    assert(FindControl(pages[1], "shortcut-menu-preset") == nullptr);
     assert(std::string_view(pages[8].pageId) == "hotas-setup");
     assert(std::string_view(pages[8].displayName) == "Administration");
     for (std::size_t index = 0; index < pageCount; ++index) {
@@ -745,40 +747,52 @@ int main()
                owner->cancelBindingCapture && owner->reassignBinding);
     }
     std::size_t routeStatusCount{};
+    std::size_t selectableRouteCount{};
+    std::size_t fixedRouteCount{};
     for (const auto& target : HotasBindingCatalog::kTargets) {
         if (target.family != HotasBindingCatalog::TargetFamily::ShipAction) continue;
         const auto routeId = std::string(target.controlId) + "-route";
-        const auto* control = FindControl(pages[0], routeId);
+        const auto* control = FindControl(pages[1], routeId);
         const auto* action = FindShipAction(target.actionId);
         assert(action);
-        if (action->allowedMethods != kDirectOrKeyboard) {
-            assert(!control);
-            continue;
-        }
         assert(control);
         ValueV1 routeValue{};
-        assert(pages[0].readValue(
-                   pages[0].context, routeId.c_str(), &routeValue) == Result::Ok);
+        assert(pages[1].readValue(
+                   pages[1].context, routeId.c_str(), &routeValue) == Result::Ok);
         assert(control->kind == ControlKind::Choice);
-        assert((control->flags & kControlReadOnly) == 0);
         assert(routeValue.kind == ValueKind::Integer);
-        assert(routeValue.integerValue ==
-            (action->recommendedMethod ==
-                 ShipControlMethod::KeyboardCompatibility ? 1 : 0));
+        if (HasSelectableShipControlRoute(*action)) {
+            assert((control->flags & kControlReadOnly) == 0);
+            assert(routeValue.integerValue ==
+                (action->recommendedMethod == ShipControlMethod::Direct ? 0 : 1));
+            ++selectableRouteCount;
+        } else {
+            assert((control->flags & kControlReadOnly) != 0);
+            assert(routeValue.integerValue == 1);
+            ++fixedRouteCount;
+        }
         std::array<ChoiceOptionV1, 2> choices{};
         std::uint32_t choiceCount{};
-        assert(pages[0].readChoiceOptions(
-                   pages[0].context, routeId.c_str(), choices.data(),
+        assert(pages[1].readChoiceOptions(
+                   pages[1].context, routeId.c_str(), choices.data(),
                    static_cast<std::uint32_t>(choices.size()),
                    &choiceCount) == Result::Ok);
         assert(choiceCount == 2);
-        assert(std::string_view(choices[0].label) == "Direct function");
+        assert(std::string_view(choices[0].label) ==
+            (HasSelectableShipControlRoute(*action)
+                ? "Direct function" : "Direct injection unavailable"));
         assert(std::string_view(choices[1].label) ==
-               "SendInput key / mouse");
+            (!HasSelectableShipControlRoute(*action)
+                ? "Fixed ship-context SendInput"
+                : AlternateShipControlMethod(*action) == ShipControlMethod::Context
+                    ? "Ship-context SendInput E"
+                    : "SendInput key / mouse"));
         ++routeStatusCount;
     }
-    assert(routeStatusCount == 17);
-    assert(pages[0].controlCount < kMaximumChoiceOptions);
+    assert(routeStatusCount == 23);
+    assert(selectableRouteCount == 18);
+    assert(fixedRouteCount == 5);
+    assert(pages[1].controlCount < kMaximumChoiceOptions);
     for (const auto id : {"profile-operation-name", "macro-name"}) {
         const auto* owner = FindPageForControl(pages, pageCount, id);
         assert(owner);
@@ -804,7 +818,7 @@ int main()
     assert(deviceClear && deviceReassign &&
            (deviceClear->flags & kControlRequiresConfirmation) != 0 &&
            (deviceReassign->flags & kControlRequiresConfirmation) != 0);
-    assert(pages[0].writeDraft && pages[0].apply && pages[0].cancel);
+    assert(pages[1].writeDraft && pages[1].apply && pages[1].cancel);
     assert(pages[2].writeDraft && pages[2].apply && pages[2].cancel);
     assert(pages[2].readChoiceOptions);
     assert(pages[3].writeDraft && pages[3].apply && pages[3].cancel);
@@ -818,21 +832,21 @@ int main()
     assert(FindControl(pages[5], "macro-step-records"));
     assert(FindControl(pages[5], "macro-target-records"));
     assert(FindControl(pages[5], "macro-step-amount"));
-    assert(FindControl(pages[0], "shortcut-records"));
-    assert(FindControl(pages[0], "shortcut-output"));
+    assert(FindControl(pages[1], "shortcut-records"));
+    assert(FindControl(pages[1], "shortcut-output"));
     const auto* throttleSummary = FindControl(
-        pages[1], "flight-throttle-summary");
-    const auto* bindingsLink = FindControl(pages[1], "flight-open-bindings");
-    const auto* throttleLink = FindControl(pages[1], "flight-open-throttle");
-    const auto* macroLink = FindControl(pages[0], "shortcut-macro-link");
+        pages[0], "flight-throttle-summary");
+    const auto* bindingsLink = FindControl(pages[0], "flight-open-bindings");
+    const auto* throttleLink = FindControl(pages[0], "flight-open-throttle");
+    const auto* macroLink = FindControl(pages[1], "shortcut-macro-link");
     assert(throttleSummary &&
            (throttleSummary->flags & kControlReadOnly) != 0);
     assert(throttleLink && throttleLink->kind == ControlKind::Action &&
-           pages[1].invokeAction);
+           pages[0].invokeAction);
     assert(bindingsLink && bindingsLink->kind == ControlKind::Action);
     assert(macroLink && macroLink->kind == ControlKind::Action &&
-           pages[0].invokeAction);
-    assert(!FindControl(pages[1], "rate-throttle-enabled"));
+           pages[1].invokeAction);
+    assert(!FindControl(pages[0], "rate-throttle-enabled"));
     const auto* profileRecords = FindControl(pages[4], "profile-records");
     assert(profileRecords && profileRecords->kind == ControlKind::RecordCollection);
     assert((profileRecords->flags & kControlTransientSelection) != 0);
@@ -956,16 +970,16 @@ int main()
            Result::Ok);
     assert(!AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
     assert(g_openPageCalls == 0);
-    assert(!FindControl(g_copiedPages[1], "flight-throttle-summary"));
-    assert(!FindControl(g_copiedPages[1], "flight-open-bindings"));
-    assert(!FindControl(g_copiedPages[1], "flight-open-throttle"));
+    assert(!FindControl(g_copiedPages[0], "flight-throttle-summary"));
+    assert(!FindControl(g_copiedPages[0], "flight-open-bindings"));
+    assert(!FindControl(g_copiedPages[0], "flight-open-throttle"));
     const auto* fallbackMacroLink = FindControl(
-        g_copiedPages[0], "shortcut-macro-link");
+        g_copiedPages[1], "shortcut-macro-link");
     assert(fallbackMacroLink &&
            fallbackMacroLink->kind == ControlKind::InputBinding &&
            (fallbackMacroLink->flags & kControlReadOnly) != 0);
-    assert(g_copiedPages[0].invokeAction(
-               g_copiedPages[0].context, "shortcut-macro-link") ==
+    assert(g_copiedPages[1].invokeAction(
+               g_copiedPages[1].context, "shortcut-macro-link") ==
            Result::NotFound);
 
     // Record collections and confirmed actions do not depend on provider input
@@ -999,7 +1013,7 @@ int main()
     g_resolvedApi = &recordlessCaptureApi;
     assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(g_copiedPages[1].beginBindingCapture != nullptr);
+    assert(g_copiedPages[0].beginBindingCapture != nullptr);
     assert(g_copiedPages[4].controlCount == 1);
     assert(FindControl(g_copiedPages[4], "profiles-scope"));
     assert(g_copiedPages[4].readRecordItems == nullptr);
@@ -1084,14 +1098,14 @@ int main()
     assert(g_openPageCalls == 1);
     assert(g_openModule == "absolute.hotas");
     assert(g_openPage == "hotas-setup");
-    assert(g_copiedPages[1].invokeAction(
-               g_copiedPages[1].context, "flight-open-throttle") == Result::Ok);
-    assert(g_openPageCalls == 2 && g_openPage == "hotas-throttle");
-    assert(g_copiedPages[1].invokeAction(
-               g_copiedPages[1].context, "flight-open-bindings") == Result::Ok);
-    assert(g_openPageCalls == 3 && g_openPage == "hotas-ship-buttons");
     assert(g_copiedPages[0].invokeAction(
-               g_copiedPages[0].context, "shortcut-macro-link") == Result::Ok);
+               g_copiedPages[0].context, "flight-open-throttle") == Result::Ok);
+    assert(g_openPageCalls == 2 && g_openPage == "hotas-throttle");
+    assert(g_copiedPages[0].invokeAction(
+               g_copiedPages[0].context, "flight-open-bindings") == Result::Ok);
+    assert(g_openPageCalls == 3 && g_openPage == "hotas-ship-buttons");
+    assert(g_copiedPages[1].invokeAction(
+               g_copiedPages[1].context, "shortcut-macro-link") == Result::Ok);
     assert(g_openPageCalls == 4 && g_openPage == "hotas-macros");
     g_openPageResult = Result::Rejected;
     assert(!AbsoluteControlSubscriber::RequestHostPage("hotas-diagnostics"));
@@ -1100,8 +1114,8 @@ int main()
     assert(!AbsoluteControlSubscriber::RequestHostPage(nullptr));
     assert(g_openPageCalls == 5);
 
-    const auto& axesPage = g_copiedPages[1];
-    const auto& shipPage = g_copiedPages[0];
+    const auto& axesPage = g_copiedPages[0];
+    const auto& shipPage = g_copiedPages[1];
     const auto& aimingPage = g_copiedPages[3];
     const auto& profilesPage = g_copiedPages[4];
 
@@ -1250,65 +1264,65 @@ int main()
     const auto* throttleBinding =
         HotasBindingCatalog::Find("bind-throttle-axis");
     assert(throttleBinding);
-    assert(shipPage.beginBindingCapture(
-               shipPage.context, throttleBinding->controlId.data()) == Result::Ok);
+    assert(axesPage.beginBindingCapture(
+               axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
     assert(TestCapture::beginSlot == throttleBinding->captureSlot);
     BindingCaptureV1 capture{};
-    assert(shipPage.pollBindingCapture(
-               shipPage.context, throttleBinding->controlId.data(), &capture) ==
+    assert(axesPage.pollBindingCapture(
+               axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
     assert(capture.state == BindingCaptureState::Capturing);
-    assert(shipPage.pollBindingCapture(
+    assert(axesPage.pollBindingCapture(
                aimingPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::InvalidArgument);
     TestCapture::nextState = HotasBindingCapture::PollState::Captured;
     TestCapture::nextBinding = "Test Stick@0x32";
     capture = {};
-    assert(shipPage.pollBindingCapture(
-               shipPage.context, throttleBinding->controlId.data(), &capture) ==
+    assert(axesPage.pollBindingCapture(
+               axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
     assert(capture.state == BindingCaptureState::Captured);
     assert(std::strcmp(capture.binding, "Test Stick@0x32") == 0);
     ValueV1 bindingEdit{};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, capture.binding);
-    assert(shipPage.writeDraft(
-               shipPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
+    assert(axesPage.writeDraft(
+               axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
     ValueV1 bindingValue{};
-    assert(shipPage.readValue(
-               shipPage.context, throttleBinding->controlId.data(), &bindingValue) ==
+    assert(axesPage.readValue(
+               axesPage.context, throttleBinding->controlId.data(), &bindingValue) ==
            Result::Ok);
     assert(std::strcmp(bindingValue.stringValue, "Test Stick@0x32") == 0);
-    shipPage.cancel(shipPage.context);
+    axesPage.cancel(axesPage.context);
     bindingValue = {};
-    assert(shipPage.readValue(
-               shipPage.context, throttleBinding->controlId.data(), &bindingValue) ==
+    assert(axesPage.readValue(
+               axesPage.context, throttleBinding->controlId.data(), &bindingValue) ==
            Result::Ok);
     assert(std::strcmp(bindingValue.stringValue, "(unbound)") == 0);
 
     TestCapture::nextState = HotasBindingCapture::PollState::Capturing;
-    assert(shipPage.beginBindingCapture(
-               shipPage.context, throttleBinding->controlId.data()) == Result::Ok);
+    assert(axesPage.beginBindingCapture(
+               axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, "Test Stick@0x31");
-    assert(shipPage.writeDraft(
-               shipPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
+    assert(axesPage.writeDraft(
+               axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
-    assert(shipPage.apply(shipPage.context) == Result::Ok);
+    assert(axesPage.apply(axesPage.context) == Result::Ok);
     capture = {};
-    assert(shipPage.pollBindingCapture(
-               shipPage.context, throttleBinding->controlId.data(), &capture) ==
+    assert(axesPage.pollBindingCapture(
+               axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
     assert(capture.state == BindingCaptureState::Cancelled);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, "(unbound)");
-    assert(shipPage.writeDraft(
-               shipPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
+    assert(axesPage.writeDraft(
+               axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
-    assert(shipPage.apply(shipPage.context) == Result::Ok);
+    assert(axesPage.apply(axesPage.context) == Result::Ok);
 
     const auto* previousBinding =
         HotasBindingCatalog::Find("bind-ship-fire-boosters");
@@ -1351,8 +1365,8 @@ int main()
            "Test Throttle@7");
 
     // Output method is part of the same provider-owned transaction as the
-    // controller binding. Direct/SendInput actions are editable; universal
-    // context actions remain fixed.
+    // controller binding. Select / Accept retains its context-aware E default
+    // but can opt into the validated native Select Target function.
     const std::string boostRouteId =
         std::string(previousBinding->controlId) + "-route";
     ValueV1 routeEdit{};
@@ -1367,14 +1381,22 @@ int main()
     assert(contextBinding);
     const std::string contextRouteId =
         std::string(contextBinding->controlId) + "-route";
+    ValueV1 directSelectEdit{};
+    directSelectEdit.kind = ValueKind::Integer;
+    directSelectEdit.integerValue = 0;
     assert(shipPage.writeDraft(shipPage.context, contextRouteId.c_str(),
-                               &routeEdit) == Result::Rejected);
+                               &directSelectEdit) == Result::Ok);
     assert(shipPage.apply(shipPage.context) == Result::Ok);
     const auto* boostAction = FindShipAction(previousBinding->actionId);
     assert(boostAction);
     assert(TestSettings::storedRoutes[static_cast<std::size_t>(
                boostAction - kShipActionCatalog.data())] ==
            ShipControlMethod::KeyboardCompatibility);
+    const auto* selectAction = FindShipAction(contextBinding->actionId);
+    assert(selectAction);
+    assert(TestSettings::storedRoutes[static_cast<std::size_t>(
+               selectAction - kShipActionCatalog.data())] ==
+           ShipControlMethod::Direct);
     ValueV1 routeReadBack{};
     assert(shipPage.readValue(shipPage.context, boostRouteId.c_str(),
                               &routeReadBack) == Result::Ok);
@@ -1382,13 +1404,13 @@ int main()
            routeReadBack.integerValue == 1);
 
     TestCapture::nextState = HotasBindingCapture::PollState::Capturing;
-    assert(shipPage.beginBindingCapture(
-               shipPage.context, throttleBinding->controlId.data()) == Result::Ok);
-    assert(shipPage.cancelBindingCapture(
-               shipPage.context, throttleBinding->controlId.data()) == Result::Ok);
+    assert(axesPage.beginBindingCapture(
+               axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
+    assert(axesPage.cancelBindingCapture(
+               axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
     capture = {};
-    assert(shipPage.pollBindingCapture(
-               shipPage.context, throttleBinding->controlId.data(), &capture) ==
+    assert(axesPage.pollBindingCapture(
+               axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
     assert(capture.state == BindingCaptureState::Idle);
 
@@ -1666,13 +1688,9 @@ int main()
     assert(AbsoluteControlSettings::Equivalent(
         TestSettings::stored, expectedRoundTrip));
 
-    TestSettings::canEdit = false;
     edit = {};
     edit.kind = ValueKind::Boolean;
     edit.booleanValue = 0;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Rejected);
-    TestSettings::canEdit = true;
-
     assert(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Ok);
     ++TestSettings::revision.sourceFingerprint;
     assert(axesPage.apply(axesPage.context) == Result::Rejected);

@@ -136,5 +136,27 @@ int main()
     const auto session = Read(root / "include/WizardSession.h");
     assert(session.find("enum class Page { Bind, Tune, Advanced, Power }") ==
            std::string::npos);
+
+    // The legacy workbench remains historical source reference only. The shipping
+    // plugin has one frontend: Absolute Control. Keep renderer hooks, ImGui,
+    // MinHook, D3D12, and DXGI out of the target so graphics stacks cannot share
+    // an interception surface with HOTAS.
+    const auto build = Read(root / "xmake.lua");
+    assert(build.find("add_requires(\"imgui") == std::string::npos);
+    assert(build.find("add_requires(\"minhook") == std::string::npos);
+    assert(build.find("add_packages(\"imgui") == std::string::npos);
+    assert(build.find("\"d3d12\"") == std::string::npos);
+    assert(build.find("\"dxgi\"") == std::string::npos);
+    assert(build.find("remove_files(") != std::string::npos);
+    assert(build.find("\"src/UIHook.cpp\"") != std::string::npos);
+    assert(build.find("\"src/BindingWizard.cpp\"") != std::string::npos);
+
+    const auto mainSource = Read(root / "src/Main.cpp");
+    assert(mainSource.find("UIHook") == std::string::npos);
+    assert(mainSource.find("BindingWizard") == std::string::npos);
+    const auto controller = Read(root / "src/ThrottleController.cpp");
+    assert(controller.find("UIHook") == std::string::npos);
+    assert(controller.find("RequestHostPage(\"hotas-setup\")") !=
+           std::string::npos);
     return 0;
 }

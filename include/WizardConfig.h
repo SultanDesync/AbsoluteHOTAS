@@ -31,6 +31,7 @@ struct WizardState {
     std::vector<ShipActionSlot> shipActionSlots;
 
     // Optional menu reuse of existing flight-control bindings.
+    std::string menuNavigationBindings[kMenuNavigationCatalog.size()];
     bool        usePitchAxisForMenu = false;
     bool        useYawAxisForMenu = false;
     bool        usePrimaryWeaponForMenuSelect = false;

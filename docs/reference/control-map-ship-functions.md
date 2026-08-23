@@ -89,6 +89,24 @@ Windows scancode the plugin emits.
 
 `*` extended key (`KEYEVENTF_EXTENDEDKEY`).
 
+## Absolute Control Ship Buttons coverage
+
+The 5.1 Ship Buttons menu was reconciled against every row above and covers all
+23 named actions exactly once. Analog pitch, yaw, roll, throttle, vertical,
+lateral, and reverse bindings are intentionally excluded here because they live
+on the separate Flight Axes tab.
+
+| Menu section | Contents |
+| --- | --- |
+| Native Ship Controls | All 23 rows above, exactly once and in Starfield's native menu order |
+| AbsoluteHOTAS Hotkeys | Hold Current Throttle, Full Stop, 50%, Max, and Turn Assist |
+| Optional Menu Navigation | Dedicated E, Esc, Up, Down, Left, and Right bindings; optional Pitch/Yaw/Primary-Weapon reuse |
+| Custom SendInput Bindings | Arbitrary keyboard or mouse passthrough rows |
+
+The native list follows the game's presentation rather than the internal
+dispatch taxonomy. Ship Action 1 still maps to `ShipHUD/XButton`, and Ship
+Cancel still uses `ShipHUD_Cancel/Cancel`.
+
 Two traps baked into this table:
 
 1. **The `Cancel` collision.** `action == "Cancel"` maps to two different

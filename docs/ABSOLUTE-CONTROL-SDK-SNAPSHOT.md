@@ -73,11 +73,14 @@ provider-owned dynamic workflows, and the page-open tail to route Toggle Wizard 
 strip exposes the shared edit target, activation behavior, and modifier binding on every rich page;
 older hosts receive the ordinary unpinned page set. Older hosts
 remain supported through descriptor-size and capability gates; an unavailable or rejected open
-command retains the embedded-workbench path and truthful read-only link guidance.
+command leaves gameplay running and reports that the required native host cannot open the page;
+there is no embedded-workbench fallback.
 
 The experimental composition snapshot is used for the Flight Axes and Ship Buttons enhancements.
-Flight Axes publishes 76 bounded nodes and 10 associations; Ship Buttons publishes 93 bounded
-nodes. Supporting hosts synthesize the three stable pinned-context controls into older complete
+Flight Axes publishes 83 bounded nodes and 10 associations; Ship Buttons publishes 100 bounded
+nodes. Flight Axes is registered first and exclusively owns all seven analog binding rows; Ship
+Buttons contains the four native/HOTAS/menu/custom sections and no duplicate axis controls. Supporting
+hosts synthesize the three stable pinned-context controls into older complete
 page compositions without requiring provider-specific layout nodes. HOTAS
 still owns values, capture, transactions, telemetry preparation, and persistence; Control owns
 layout, focus, scrolling, and rendering.

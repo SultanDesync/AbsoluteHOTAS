@@ -48,15 +48,15 @@ std::vector<Macro>& GetMacrosMutable();
 
 // Tick the macro state machines once per control-loop iteration: detect button
 // presses, advance active sequences, emit through logical ownership. Call only when
-// macros should be live (armed, overlay closed).
+// macros should be live (armed, Absolute Control closed).
 void Update();
 
 // Release every macro-held output and reset all runtime state. Call on disarm,
-// overlay open, stop, or config reload so no macro key is left stuck down.
+// editor open, stop, or config reload so no macro key is left stuck down.
 void ReleaseAll();
 
 // Mark physically held triggers as already consumed after a suppression window,
-// so closing the wizard cannot start a macro from a stale held button.
+// so closing Absolute Control cannot start a macro from a stale held button.
 void SeedDownButtonsConsumed();
 
 // ---- Profile snapshot / restore (see docs/reference/profile-switching.md) ----

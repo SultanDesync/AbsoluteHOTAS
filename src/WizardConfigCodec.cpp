@@ -214,6 +214,11 @@ void ApplyProfileScalars(const CSimpleIniA& ini, WizardState& s) {
             kControlExtensionSlots[i].iniKey, s.controlExtensionBindings[i], false);
     for (auto& action : s.shipActionSlots)
         action.binding = IniBinding(ini, "ShipButtons", action.iniKey.c_str(), action.binding, false);
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        s.menuNavigationBindings[index] = IniBinding(
+            ini, "MenuControls", kMenuNavigationCatalog[index].iniKey.data(),
+            s.menuNavigationBindings[index], false);
+    }
     APPLY_BOOL("MenuControls", "bUsePitchAxisForNavigation", usePitchAxisForMenu);
     APPLY_BOOL("MenuControls", "bUseYawAxisForNavigation", useYawAxisForMenu);
     APPLY_BOOL("MenuControls", "bUsePrimaryWeaponForSelect", usePrimaryWeaponForMenuSelect);
@@ -378,6 +383,13 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
     for (auto& sa : s.shipActionSlots) {
         const char* val = (sa.binding != "(unbound)") ? sa.binding.c_str() : "-1";
         ini.SetValue("ShipButtons", sa.iniKey.c_str(), val);
+    }
+
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        const auto& binding = s.menuNavigationBindings[index];
+        ini.SetValue("MenuControls", kMenuNavigationCatalog[index].iniKey.data(),
+            binding != "(unbound)" && !binding.empty()
+                ? binding.c_str() : "-1");
     }
 
     ini.SetBoolValue("MenuControls", "bUsePitchAxisForNavigation", s.usePitchAxisForMenu);

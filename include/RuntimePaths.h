@@ -12,7 +12,8 @@ namespace RuntimePaths {
     std::filesystem::path IniPath();
 
     // User-owned bindings, tuning, calibration, macros, and profile routing. Written
-    // by the wizard, never shipped, never overwritten. Overlays IniPath() at load.
+    // through Absolute Control, never shipped, never overwritten. Overlays IniPath()
+    // at load.
     std::filesystem::path CustomIniPath();
 
     // Directory for user-initiated profile snapshots (Export/Import). Created on first
@@ -25,11 +26,6 @@ namespace RuntimePaths {
     // is false the plugin writes no log at all (not even crashes), so a normal run
     // never leaves a file on disk.
     bool IsLoggingEnabled();
-
-    // Startup-only safety switch for the optional D3D12 workbench. When false,
-    // no renderer hooks are installed; controller polling and manual INI config
-    // remain fully active.
-    bool IsWorkbenchEnabled();
 
     // Read bEnableLog from the INI once at startup and cache the result.
     void InitLogging();

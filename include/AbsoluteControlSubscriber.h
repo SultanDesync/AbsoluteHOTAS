@@ -8,14 +8,12 @@
 namespace AbsoluteControlSubscriber {
 
 // Startup facts are copied into atomics before registration. Provider callbacks
-// read only these bounded values and never touch the INI, DirectInput, ImGui, or
+// read only these bounded values and never touch the INI, DirectInput, or
 // game objects from Absolute Control's UI thread.
 struct RuntimeStatus {
     bool throttleHookInstalled{};
     bool nativeControlsInitialized{};
     bool controllerStarted{};
-    bool legacyWorkbenchConfigured{};
-    bool legacyWorkbenchInstalled{};
 };
 
 void SetRuntimeStatus(const RuntimeStatus& status) noexcept;
@@ -31,7 +29,8 @@ void SetExternalCameraOwner(bool active) noexcept;
 [[nodiscard]] bool IsHostOpen() noexcept;
 [[nodiscard]] bool IsHostInputCaptureActive() noexcept;
 // Requests this provider's already-registered page through the optional host
-// ABI tail. False means the caller should retain its legacy configuration UI.
+// ABI tail. False means Absolute Control is absent, incompatible, or unable to
+// queue the route; there is intentionally no embedded renderer fallback.
 [[nodiscard]] bool RequestHostPage(const char* pageId) noexcept;
 
 namespace Testing {

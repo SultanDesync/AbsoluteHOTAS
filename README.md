@@ -1,37 +1,66 @@
-# AbsoluteHOTAS v5.0.1
+# AbsoluteHOTAS v5.1.0
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release status
 
-**5.0.1 is the current stable AbsoluteHOTAS release.** Seventeen named ship functions, the boost
-zone, strafe modifier, and six-axis flight output use validated Starfield control seams. Six
-profile-compatible context inputs retain vanilla E, Esc, and arrow behavior across menus, dialogue,
-power, and targeting.
+**5.1.0 is the current stable AbsoluteHOTAS release.** The complete 23-action native ship list,
+the boost zone, strafe modifier, and six-axis flight output are isolated from a new optional set of
+six dedicated menu bindings. A ship binding never silently becomes menu navigation.
 
-Version 5.0.1 is also the HOTAS module shipped in Absolute Suite `0.2.0-beta.1`. It provides the
-complete native Absolute Control menu while retaining the legacy Dear ImGui workbench as a
-standalone fallback. Version 4.0.2 remains available only as a rollback option for older setups.
-
-Renderer compatibility with third-party overlays, frame-generation layers, and Proton graphics
-stacks is best effort for the legacy workbench. The Absolute Control menu does not use HOTAS's
-renderer hook, and an explicit workbench bypass keeps flight controls and manual configuration
-available when a graphics utility conflicts with the fallback UI.
+Version 5.1.0 completes the native-menu cutover. [Absolute Control](https://www.nexusmods.com/starfield/mods/18023)
+is now the required in-game configuration frontend. AbsoluteHOTAS no longer links ImGui or MinHook,
+installs no D3D12/DXGI presentation hooks, and cannot conflict with graphics overlays through a
+legacy menu. Version 5.0.1 remains available as a rollback option for older setups.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
-[Reporting a 5.0 issue](#reporting-a-50-issue) for the information that makes a
+[Reporting a 5.x issue](#reporting-a-5x-issue) for the information that makes a
 report actionable.
 
 ## Changelog
 
+### v5.1.0
+
+- **Direct Select Target restored:** **Ship Buttons → Native Ship Controls → Select Target** now
+  defaults to the validated injectable function. A ship-context `SendInput E` compatibility route
+  remains selectable, but Menu Accept is a separate optional binding.
+- **Bindings hierarchy reviewed:** **Flight Axes** is now the first HOTAS tab and the sole home for
+  all seven analog-axis bindings. **Ship Buttons** has four clear sections: the complete native
+  ship list in Starfield order, AbsoluteHOTAS throttle/assist hotkeys, optional dedicated menu
+  navigation, and custom SendInput bindings.
+- **Consistent ship-action rows:** every native action uses the same binding-plus-method layout.
+  Actions without a validated injector retain a visible locked method selector identifying their
+  fixed ship-context SendInput route instead of silently omitting the control.
+- **Menu navigation separated:** Menu Accept, Cancel, Up, Down, Left, and Right are independent,
+  profile-aware bindings that default unbound. Pitch/Yaw/Primary-Weapon reuse remains an advanced
+  menu-only option with neutral arming and hysteresis.
+- **Visible recording state:** current Absolute Control builds show a centered recording panel with
+  the binding name, axis/button/POV guidance, navigation-lock state, and the cancel input while
+  HOTAS-owned capture is active.
+- **Absolute Control cutover:** The native **MOD OPTIONS → AbsoluteHOTAS** module is now the only
+  in-game editor. `Ctrl+Alt+B` and the existing `iToggleWizardButton` binding open its Administration
+  page.
+- **Legacy overlay retired:** The shipping DLL no longer compiles or links the Dear ImGui workbench,
+  UIHook, MinHook, D3D12, or DXGI paths. The obsolete `[UI] bEnableWorkbench` setting is ignored and
+  has been removed from the shipped defaults.
+- **Standalone gameplay preserved:** Absolute Control is required only for in-game editing. If it is
+  absent or outdated, flight controls and manual `AbsoluteHOTAS_Custom.ini` configuration continue;
+  there is deliberately no graphics-hook fallback.
+- **Head tracking extracted:** OpenTrack camera look is no longer a supported AbsoluteHOTAS feature.
+  Install [Absolute Head Tracking](https://www.nexusmods.com/starfield/mods/17872) as the compatible
+  standalone module; OpenTrack is no longer a requirement for the base HOTAS package.
+- **Complete 5.x history:** The [v5.1.0 changelog](docs/CHANGELOG-v5.1.0.md) reconstructs the full
+  native-control, context-input, Absolute Control, suite-integration, modularization, migration,
+  and validation work since the Nexus 4.0.2 stable release.
+
 ### v5.0.1
 
 - **Native Ship Functions and Universal Context Inputs:** Seventeen named ship actions use exact-gated Starfield control paths. The existing Select Target, Cancel, and four power-navigation profile slots preserve one assignment across contexts with vanilla E, Esc, and arrows; Targeting Mode switches Left/Right to its exact `SelectLeft`/`SelectRight` selector events so ship power is not changed simultaneously.
-- **Optional Menu Control Reuse:** The Ship Buttons workbench can independently reuse Pitch for Up/Down, Yaw for Left/Right, and the current Primary Weapon button for Select/Accept. Per-profile inversion and actuation/release thresholds preserve the workbench approach, while neutral/release arming prevents carried flight input from acting as a menu opens.
+- **Optional Menu Control Reuse:** The Bindings page can independently reuse Pitch for Up/Down, Yaw for Left/Right, and the current Primary Weapon button for Select/Accept. Per-profile inversion and actuation/release thresholds plus neutral/release arming prevent carried flight input from acting as a menu opens.
 - **Native Boost and Strafe:** Boost-zone activation and analog strafe use Starfield's internal ship-control paths. Roll and strafe remain independent and can be commanded simultaneously.
 - **Direct Weapons and Camera Controls:** Weapon groups call their validated per-weapon start/stop functions on the ship update thread. After a successful start, a compatible Absolute Power build is optionally notified through its size-gated API so weapon-fire automation sees the direct HOTAS path; Power remains entirely optional. POV and exterior zoom use the active camera-state handlers.
-- **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. The workbench exposes live per-axis output graphs, enable switches, inversion, sensitivity, limits, filtering, joystick overrides, toggle, and recenter controls.
+- **Camera Look:** First-person cockpit rotation consumes OpenTrack FreeTrack 2.0 output, validated with Tobii and NeuralNet webcam inputs. Absolute Head Tracking owns the current native configuration UI for camera behavior.
 - **Automatic Pilot Context:** Fresh selected flight-handler output identifies active piloting even when Starfield keeps the old ship object cached after getting up. Flight controls park automatically on foot by default; menus/loading suspend output without being classified as FPS, and Camera Look uses its own conservative 400 ms gate.
 - **Fail-Closed Runtime Gates:** Version-specific vtables, methods, objects, and function bytes are validated before use. A failed gate disables that native operation instead of falling back to synthetic input.
 - **Validated 4.x Migration:** One maintained 4.0.0 setup retained its bindings, profiles, and user data immediately after the 5.0.1 deployment with no rebinding. This is a successful real-install smoke test, not a guarantee for every device or mod stack.
@@ -89,7 +118,7 @@ report actionable.
 - **Codebase Hygiene:** Consolidated duplicate code, removed redundant imports, extracted shared utilities (`StringUtils.h`, `DeviceManager.h`), and removed the legacy `version.rc` resource.
 - **Signal Hunter Fallback:** The original Signal Hunter discovery method is preserved as a fallback via `bSignalHunterFallback = true` in the INI.
 
-This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle. It includes an in-game workbench, native bindings for all named ship actions, and explicit raw keyboard/mouse passthroughs for custom non-ship commands.
+This plugin reads DirectInput devices natively and provides direct authority for ship pitch, yaw, roll, strafe, and throttle. Its Absolute Control module provides the in-game editor, native bindings for all named ship actions, and explicit raw keyboard/mouse passthroughs for custom non-ship commands.
 
 ## Flight Control Discovery
 
@@ -101,7 +130,7 @@ If a Starfield update breaks detection before a plugin update is available, enab
 
 1. Set `bSignalHunterFallback = true` under `[Injection]` in
    `AbsoluteHOTAS_Custom.ini`, or in the shipped `AbsoluteHOTAS.ini` before the
-   first wizard save.
+   first Absolute Control save.
 2. Add the following to `Documents\My Games\Starfield\StarfieldCustom.ini`:
 
 ```ini
@@ -115,21 +144,22 @@ fThrottleAtEngineStart = 0.0314
 
 * **Direct HID Input** — Reads your HOTAS/HOSAS hardware directly via DirectInput. No vJoy or Joystick Gremlin dependency.
 * **Hot-Swappable Profiles** — Switch complete input layers during play, including bindings, axes, tuning, aim modes, and macros. Profiles support toggle, momentary, and selector-style activation.
-* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in the wizard. Named targets use native Starfield controls or the six universal context inputs as appropriate; explicit raw key/mouse targets remain available for general-purpose automation.
+* **Macro Builder** — Build chords, taps, timed holds, ordered sequences, and turbo actions in Absolute Control. Named ship targets use their ship routes; explicit raw key/mouse targets remain available for general-purpose automation.
 * **Zero-Config Discovery** — Automatically detects the flight control cluster using the engine's Setting system. No INI edits required.
 * **Game Deadzone Removal** — Zeros the engine's hidden `fRollDeadzone` (default 0.5!) that steals precision from flight sim hardware.
-* **In-Game Binding Wizard** — Press `Ctrl+Alt+B` to open the ImGui overlay. The opening **Flight Axes (Core)** page keeps every direct-flight binding, response control, calibration tool, and live input display together. Bind axes and buttons by moving/pressing them on your hardware in real-time.
-* **Frame Generation Support** — Supports Starfield's built-in FSR3 Frame Generation and reinitializes the overlay when the swap chain changes. Compatibility with third-party overlays, capture tools, and graphics injectors is best effort.
+* **Native Absolute Control Editor** — Open **MOD OPTIONS → AbsoluteHOTAS**, press `Ctrl+Alt+B`, or use the existing HOTAS menu binding. The native pages expose flight axes, bindings, throttle setup, profiles and layers, macros, devices/calibration, aiming, and diagnostics.
+* **No Graphics Hooks** — AbsoluteHOTAS does not link ImGui/MinHook or hook D3D12/DXGI, avoiding conflicts with frame generation, capture tools, overlays, and graphics injectors.
 * **Multi-Device Support** — Bind axes and buttons across multiple devices using `DeviceName@UsageID` syntax (e.g., `My Throttle@0x32`).
 * **Per-Axis Calibration & Tuning** — Calibrate physical axis limits in-game (compensating for low-resolution ADCs or worn pots) and tune inversion/sensitivity sliders on the fly.
-* **17 Native Ship Actions + 6 Universal Context Inputs** — Keep direct native control for ship-specific functions while existing Select, Back, and directional bindings work across menus, dialogue, power management, and targeting without profile migration.
+* **Complete Native Ship Controls** — All 23 Starfield ship-button actions appear once, in native menu order, and are gated to ship/targeting context.
+* **Dedicated Menu Navigation** — Optionally bind controller buttons independently to vanilla E, Esc, and arrow navigation without coupling them to Select Target, Ship Cancel, or power management.
 * **Menu Control Reuse** — Optionally use Pitch/Yaw for menu navigation and Primary Weapon for Select/Accept, with independent per-profile switches, direction inversion, hysteresis, and safe neutral arming.
-* **OpenTrack-Compatible Camera Look** — Apply rotational pose directly to the first-person cockpit camera. Validated with OpenTrack's Tobii and NeuralNet webcam inputs; the Camera Look workbench adds live per-axis output graphs, enable switches, inversion/sensitivity/limits, joystick-axis overrides, toggle, and recenter bindings.
+* **Modular Companion Support** — Use Absolute Power for power presets and Absolute Head Tracking for OpenTrack-compatible cockpit camera look. Each companion registers its own Absolute Control module.
 * **Automatic Pilot/FPS Detection** — Uses the live selected flight-handler cadence rather than a cached ship pointer. Flight controls park automatically after leaving the seat, while menus/loading remain a separate suspended state.
-* **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Includes a one-click "Add Menu Cluster" preset for quick menu navigation (WASD/Tab/E/Esc).
+* **Custom Bindings** — Map any controller button to emit any keyboard/mouse output. Chords and ordered sequences remain on the Macros tab.
 * **Button-based axes** — Use hat switches or buttons for roll, strafe, and reverse when analog axes are limited.
-* **Live Config Reload** — Bindings saved from the wizard take effect immediately without restarting the game.
-* **Safe Workbench Session** — Plugin-owned flight injection, native actions, raw custom outputs, macros, and profile switching are parked while the wizard is open. Open it from the main or pause menu for mouse interaction; keyboard navigation remains available during gameplay.
+* **Live Config Reload** — Bindings applied through Absolute Control take effect immediately without restarting the game.
+* **Safe Editing Session** — Plugin-owned flight injection, native actions, raw custom outputs, macros, and profile switching are parked while Absolute Control is open. Held edges are reseeded before gameplay resumes.
 * **Pilot Turn Assist** — Optionally re-enables the game's native rotation throttle assist for accumulator throttle users. When active during hard turns the game slows your ship to optimal maneuvering speed; when you stop turning (or release the button) your throttle resumes instantly. Supports Always, Hold, and Toggle activation modes.
 * **Silent by default** — No log file is written at all unless you opt in with `bEnableLog = true` in the INI. When enabled it logs device enumeration, hook installation, and errors/crashes — no runtime spam.
 
@@ -137,8 +167,7 @@ fThrottleAtEngineStart = 0.0314
 
 - Starfield 1.16.242 or 1.16.244
 - SFSE 0.2.20 or later
-- OpenTrack with FreeTrack 2.0 output only when using tracker-based camera look
-- Absolute Control is recommended for the shared native menu, but is not a flight dependency
+- [Absolute Control](https://www.nexusmods.com/starfield/mods/18023) for the in-game configuration menu
 - No Starfield Address Library required
 
 Install `AbsoluteHOTAS.dll` and `AbsoluteHOTAS.ini` to:
@@ -153,12 +182,12 @@ Or install via your mod manager using the provided archive.
 
 Version 4.0 is a fresh configuration baseline. Do **not** copy a 3.x
 `AbsoluteHOTAS.ini` into this release or attempt to import it as a 4.0 profile.
-Back it up for reference, install both new files, and rebuild the setup through the
-wizard. After the first save, user-owned settings live in
+Back it up for reference, install both new files, and rebuild the setup through
+Absolute Control. After the first save, user-owned settings live in
 `AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
 INI. Use full profile exports for backup, sharing, and migration going forward.
 
-When updating from 4.0.x to 5.0.1, replace only `AbsoluteHOTAS.dll` and the shipped
+When updating from 4.0.x or 5.0.x to 5.1.0, replace only `AbsoluteHOTAS.dll` and the shipped
 `AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles` directory. Back up both
 user-owned locations before any update.
 
@@ -171,44 +200,37 @@ configuration, live input, persistence, Apply, and Cancel behavior.
 
 The suite resolves overlapping gameplay responsibilities explicitly:
 
-- **AbsoluteZero:** when installed, it owns mouse pitch/yaw steering. HOTAS yields its pitch/yaw
-  stick bindings but retains roll, strafe, throttle, buttons, profiles, and the shared writer hook.
-- **Absolute Head Tracking:** when installed, it owns cockpit camera composition. HOTAS parks its
-  embedded legacy tracker while retaining flight controls and the Absolute Input Bus.
-- **Absolute Power:** remains the authority for power presets and activation. HOTAS supplies the
-  optional Input Bus used for controller/POV preset capture.
+- **[AbsoluteZero](https://www.nexusmods.com/starfield/mods/17460):** limited compatibility. While it
+  is active, it owns native mouse pitch/yaw and HOTAS joystick pitch/yaw are unavailable. HOTAS
+  retains roll, strafe, throttle, buttons, profiles, and the shared writer hook.
+- **[Absolute Head Tracking](https://www.nexusmods.com/starfield/mods/17872):** the extracted
+  OpenTrack-compatible camera module. Head tracking is no longer part of the main HOTAS plugin.
+- **[Absolute Power](https://www.nexusmods.com/starfield/mods/18024):** remains the authority for
+  power presets and activation. HOTAS supplies the optional Input Bus used for controller/POV
+  preset capture.
 
-When Absolute Control is absent, `Ctrl+Alt+B` opens the legacy HOTAS workbench and existing INI,
-profile, and hotkey workflows remain available.
+When Absolute Control is absent or incompatible, flight controls still initialize and existing INI,
+profile, and hotkey workflows still run. `Ctrl+Alt+B` and the HOTAS menu binding log that the native
+editor is unavailable; they do not install or open a fallback overlay.
 
 ## Quick Start
 
 1. Install the plugin files.
 2. Launch the game via SFSE.
-3. With Absolute Control installed, open the Pause Menu and select **MOD OPTIONS → AbsoluteHOTAS**.
-   Without it, open the main or pause menu and press `Ctrl+Alt+B` for the legacy workbench.
+3. Open the Pause Menu and select **MOD OPTIONS → AbsoluteHOTAS**. `Ctrl+Alt+B` or the configured
+   **Open Absolute Control** HOTAS binding routes to the same module.
 4. Bind and tune the six flight axes while watching their live input markers.
 5. Configure ship buttons, throttle behavior, profiles, and any optional shift layer.
 6. Apply/save the changes. Bindings take effect without restarting.
 
 `Ctrl+Alt+F8` is reserved as a keyboard fail-safe reset for the flight control hooks.
 
-## Legacy standalone workbench
+## Native configuration menu
 
-When Absolute Control is not installed, press `Ctrl+Alt+B` to toggle the retained Dear ImGui
-workbench. Use the Starfield main or pause menu for full mouse interaction. If opened during active
-gameplay, Starfield keeps the mouse locked for camera control; the workbench displays a warning and
-remains usable with `Tab`, arrow keys, `Enter`, and other standard keyboard-navigation keys.
-
-The workbench uses three built-in task groups and registers an optional fourth
-group when a compatible `AbsolutePower.dll` is detected:
-
-| Group | Pages | Purpose |
-|-----|---------|---------|
-| **Flight Controls** | Flight Axes (Core), Ship Buttons | The core setup path: visually grouped six-degree-of-freedom axes with binding, inversion, response, calibration, and live feedback in one place; plus reverse strategies, digital fallbacks, named ship actions, and custom outputs. |
-| **Flight Modes** | Aiming & Combat, Rate Throttle | Optional independent aiming, HOSAM support, self-centering throttle behavior, and pilot assists. |
-| **Advanced** | Macros, Plugin Controls, Devices | Macro construction, plugin activation and wizard-access controls, device inspection, calibration, reassignment, and profile management. |
-| **Power** *(when installed)* | Power Presets, Automation, Diagnostics | The Absolute Power preset/pip editor, priority rules, live allocation preview, and HOTAS preset-button capture. Power remains authoritative for configuration reload and runtime activation; AbsoluteHOTAS supplies the optional host tab and DirectInput bindings. |
+Absolute Control hosts the complete renderer-neutral editor. The provider keeps ownership of
+DirectInput capture, drafts, validation, atomic persistence, profile semantics, Apply/Cancel, live
+reload, and diagnostics; the host owns navigation, focus, presentation, and transaction dialogs.
+Opening the menu parks HOTAS outputs and capture safely, then reseeds held edges when it closes.
 
 ### Direct flight controls
 
@@ -222,16 +244,15 @@ simultaneously. This applies to both analog axes and button/POV-based strafe.
 
 Strafe and throttle boost-zone activation use Starfield's internal ship-control
 paths, so no keyboard bindings are required. Turning off **Flight controls
-enabled** parks flight axes, head pose, boost-zone, and strafe output together.
+enabled** parks flight axes, boost-zone, and strafe output together.
 
 By default, the same controls park automatically after the selected flight
 handler has remained inactive for five seconds during gameplay. The longer latch
-tolerates brief targeting-mode pauses. Camera Look is independently protected by
-a 400 ms freshness gate, so head pose may pause during targeting rather than ever
-following the player on foot. Menus and loading screens suspend output without
-being treated as an FPS transition.
+tolerates brief targeting-mode pauses. Menus and loading screens suspend output
+without being treated as an FPS transition.
 
-The profile selector in the fixed workbench header identifies the configuration being edited. **Save & Apply** commits without closing, **Save & Close** commits and exits, and **Close Without Saving** discards the current draft after confirmation.
+The pinned **Editing profile** context identifies the configuration being edited across pages.
+Absolute Control's Apply/Discard/Stay transaction protects dirty profile switches and menu close.
 
 ## Profiles and Runtime Input Layers
 
@@ -261,13 +282,13 @@ setup that was active beforehand.
 
 ### Creating and editing a profile
 
-1. Open **Advanced** and expand **Profile activation and management**.
-2. Create an overlay, or initialize the optional **FPS** and **Flight Aux** starters.
-3. Select the profile from **Editing profile** in the fixed workbench header.
+1. Open **Profiles & Layers** in Absolute Control.
+2. Create an inheriting sparse layer or export Main as an independent full profile.
+3. Select the profile from the pinned **Editing profile** context.
 4. Change any controls or tuning that should differ from Main Controls.
-5. Click **Save & Apply** to keep working or **Save & Close** to finish.
+5. Apply the transaction; closing with changes uses Absolute Control's Apply/Discard/Stay prompt.
 
-The selected profile is the destination of every workbench edit. Unsaved-change
+The selected profile is the destination of every Absolute Control edit. Unsaved-change
 guards prevent silently switching the editing target and losing the current draft.
 
 ### Activating profiles during play
@@ -279,7 +300,7 @@ trigger. Choose the activation behavior that matches the physical control:
 |---|---|---|
 | **Momentary** | Push button or shift paddle | Active while held; releasing returns to the previously active selection. |
 | **Toggle** | Push button | First press activates the profile; the next returns to the base selection. |
-| **Selector** | Maintained rotary/detent position | Active while that position's button is held. It synchronizes at startup and after closing the workbench. |
+| **Selector** | Maintained rotary/detent position | Active while that position's button is held. It synchronizes at startup and after closing Absolute Control. |
 
 A break-before-make selector keeps the last valid position while moving between
 detents instead of briefly falling back to Main Controls. Up to 16 runtime slots are
@@ -289,12 +310,11 @@ available, and swaps are preloaded so activation does not read from disk during 
 
 The default **Automatic pilot context** setting under **Advanced > Plugin
 Controls** parks flight axes after leaving the pilot seat. It can instead be set
-to park every plugin-owned output or disabled. The flight-control latch is
-adjustable; Camera Look always retains its separate 400 ms safety gate.
+to park every plugin-owned output or disabled. The flight-control latch is adjustable.
 
 Turning off **Flight controls enabled** under **Flight Controls > Flight Axes
-(Core)** creates a parked profile. Pitch, yaw, roll, throttle, strafe, aim, head
-pose, and boost-zone output stop, while that profile's discrete button outputs
+(Core)** creates a parked profile. Pitch, yaw, roll, throttle, strafe, aim, and
+boost-zone output stop, while that profile's discrete button outputs
 and macros remain available. This is intended for an on-foot or menu position on
 a hardware selector.
 
@@ -318,7 +338,7 @@ because they depend on the Main Controls from which they inherit.
 
 ## Macro Builder
 
-Open **Advanced → Macros** and choose **Add Macro**, or start with the
+Open **Macros** in Absolute Control and choose **Add Macro**, or start with the
 **Grav → Shields** example. A macro maps one controller button to an ordered list of
 steps:
 
@@ -335,32 +355,24 @@ keyboard and mouse outputs. `SelectTarget`, `Cancel`, `IncreaseSystemPower`,
 for fixed vanilla E, Esc, and arrow inputs; other named targets use native paths.
 
 Macros are fire-and-forget after their trigger press unless turbo is enabled. They
-are cancelled and all held outputs are released when the plugin is stopped, the
-workbench opens, configuration reloads, or the active profile changes. Macros belong
+are cancelled and all held outputs are released when the plugin is stopped, Absolute
+Control opens, configuration reloads, or the active profile changes. Macros belong
 to the profile being edited; save that profile to apply them.
 
 Begin with short, visible sequences. Starfield must observe a release between
 repeated inputs, so reducing tap or gap timing too aggressively can cause the game
 to miss actions even though the macro executed.
 
-## Frame Generation Support
+## Graphics and frame-generation compatibility
 
-Starfield's built-in FSR3 Frame Generation is supported. Enabling or disabling it
-in-game causes the overlay to discard its old swap-chain state and initialize again
-the next time it is opened. FSR3 upscaling without frame generation is unaffected.
-
-Third-party overlays, recording tools, frame-generation mods, and graphics injectors
-may hook the same DirectX entry points. AbsoluteHOTAS detects several common hook
-conflicts and records them when logging is enabled, but compatibility with every
-injector combination is best effort. If the cursor appears without the workbench—or
-the workbench does not appear at all—test once without other graphics injectors
-before filing a report. The workbench renderer initializes only when first opened;
-if it fails, it is disabled for that session while flight controls and manual
-configuration continue normally.
+AbsoluteHOTAS does not hook the swap chain or use a graphics API. Frame generation,
+recording tools, ReShade/Special K-style injectors, and third-party overlays no longer
+share a renderer-hook surface with this plugin. Menu rendering is owned entirely by
+Absolute Control's native Scaleform integration.
 
 ## Manual Configuration
 
-The wizard is the supported editor. Save once to create the user-owned
+Absolute Control is the supported editor. Apply once to create the user-owned
 `AbsoluteHOTAS_Custom.ini`, then edit that file if manual configuration is needed.
 Do not place personal bindings or tuning in the shipped `AbsoluteHOTAS.ini`; it is
 the mod-owned defaults file and is replaced during updates. Axes use HID Usage ID
@@ -387,7 +399,7 @@ Device names are matched case-insensitively against DirectInput instance or prod
 
 ### Finding Device Names and IDs
 
-The wizard's **Advanced → Devices** page is the easy way to read these off. If you can't use the overlay (it won't open on your system, or you prefer hand-editing), discover them two other ways:
+Absolute Control's **Devices & Calibration** page is the easy way to read these off. If the native menu is unavailable or you prefer hand-editing, discover them two other ways:
 
 - **Windows joystick panel** — press `Win+R`, run `joy.cpl`, select your device, and click **Properties**. Move an axis to see which one responds (X/Y/Z/…) and press a button to see which number lights up. Hat/POV directions usually appear as **high button numbers** (often around 129–132).
 - **The plugin log** — `AbsoluteHOTAS.log` (next to the plugin DLL) prints an `[DeviceManager] === Attached HID Devices ===` block at startup, listing every device's exact name and its axis/button counts.
@@ -407,10 +419,10 @@ iSelectTargetButton = VKB Gunfighter@2
 iIncreaseSystemPowerButton = -1
 ```
 
-Set an action to `-1` to disable it. In 5.0, ship-specific named actions call
-validated Starfield functions directly. The existing Select Target, Cancel, and
-four power-navigation keys instead form a universal E/Esc/arrow context cluster.
-Neither path uses `[ShipButtonOutputs]` overrides.
+Set an action to `-1` to disable it. These bindings are active only in ship or
+targeting context. Select Target defaults to its validated native function; the
+power and ship-cancel compatibility routes use fixed vanilla keys only while in
+that ship context. Dedicated menu buttons live under `[MenuControls]`.
 
 Raw keyboard/mouse passthroughs remain available under `[ButtonExpansion]` for
 menu helpers or other actions that are not native ship functions:
@@ -425,7 +437,7 @@ iButton100 = mouse:3
 
 AbsoluteHOTAS allows you to divide a single physical throttle axis into up to **seven distinct zones**, providing complete control over reverse thrust, precise speed plateaus, and engine boost without ever taking your hand off the throttle.
 
-When configured via the Binding Wizard (`Ctrl+Alt+B`), the graph provides a live, multi-colored visualization of your zones:
+Absolute Control's **Throttle Setup** page provides a live visualization of these zones:
 * **Reverse Zone (Red):** The bottom of your physical axis triggers reverse thrust.
 * **Dead Stop Range (Amber):** An absolute zero velocity point that is easy to find by feel.
 * **50% Cruise Plateau (Orange):** Locks your throttle to exactly 50% for consistent combat maneuverability.
@@ -436,7 +448,7 @@ Set `bInvertThrottle = true` if your throttle reports minimum as maximum thrust.
 
 ### Manual INI Configuration
 
-While the Binding Wizard is highly recommended for visual tuning, you can also manually configure the zones in `AbsoluteHOTAS_Custom.ini` after the wizard has created it:
+While Absolute Control is recommended for visual tuning, you can also manually configure the zones in `AbsoluteHOTAS_Custom.ini` after Control has created it:
 
 ```ini
 [Normalization]
@@ -469,16 +481,15 @@ To handle reverse thrust smoothly in Starfield's flight model, the accumulator u
 
 ### How to Bind and Configure
 
-#### Option A: In-Game Binding Wizard (Recommended)
-1. Press `Ctrl+Alt+B` to open the wizard.
-2. Under **Flight Controls → Flight Axes (Core)**, find **Throttle** and click **Bind Axis**. Move your self-centering joystick axis (for example, the left stick Y-axis).
-3. Enable **Self-centering / rate throttle (HOSAS)** on the Throttle card, then open **Flight Modes → Rate Throttle**.
-4. Enable **Use gamepad-style throttle**.
+#### Option A: Absolute Control (Recommended)
+1. Open **MOD OPTIONS → AbsoluteHOTAS** and select **Throttle Setup**.
+2. Bind the throttle axis on **Flight Axes** by moving your self-centering joystick axis (for example, the left stick Y-axis).
+3. Enable **Rate throttle** on **Throttle Setup**.
 5. Set the parameters to your preference:
    * **Ramp Rate**: How fast the throttle ramps up when the stick is fully deflected forward (in throttle units per second).
    * **Decay Rate**: How fast the throttle decays back to zero when you release the stick. Set to `0.0` to disable decay and lock your current throttle setting when the stick centers.
    * **Reverse Gate Velocity**: The HUD speed threshold below which backward stick deflection engages reverse thrusters.
-6. Click **Save & Apply** or **Save & Close**.
+5. Apply the transaction.
 
 ### Pilot Turn Assist
 
@@ -494,7 +505,7 @@ Three activation modes are available:
 | **Hold** | Assist is only active while a bound button is held. |
 | **Toggle** | A button press toggles assist on/off. |
 
-Configure via the wizard under **Flight Modes → Rate Throttle → Pilot Turn Assist**, or via INI:
+Configure via Absolute Control under **Throttle Setup → Pilot Turn Assist**, or via INI:
 
 ```ini
 [DualStick]
@@ -506,7 +517,7 @@ iTurnAssistButton = -1           ; Button binding for Hold/Toggle (DeviceName@N)
 > **How it works:** The plugin silences the game's writes to the throttle input target (+0x68) so the accumulator always owns your speed. When turn assist is active, it selectively un-silences the effective throttle lane (+0x6C), letting the game's native rotation assist write there while your input target is preserved. When the assist deactivates, a burst write pushes your original value back to both offsets.
 
 #### Option B: Manual INI Configuration
-Edit the wizard-created `AbsoluteHOTAS_Custom.ini` and configure the following sections:
+Edit the Absolute Control-created `AbsoluteHOTAS_Custom.ini` and configure the following sections:
 
 ```ini
 [Hardware]
@@ -548,16 +559,16 @@ Mice don't self-center like joysticks, so an optional **Alignment Assist** featu
 
 ### How to Bind and Configure
 
-#### Option A: In-Game Binding Wizard (Recommended)
-1. Press `Ctrl+Alt+B` to open the wizard.
-2. Under **Flight Controls → Flight Axes (Core)**, enable **Mouse steering (HOSAM)** in the Rotation group.
+#### Option A: Absolute Control (Recommended)
+1. Open **MOD OPTIONS → AbsoluteHOTAS**.
+2. Configure HOTAS flight axes while AbsoluteZero owns native mouse pitch/yaw.
 3. Bind your **Throttle** and optionally **Strafe** / **Roll** axes to your joystick.
 4. Leave **Pitch** and **Yaw** unbound; their cards remain visible but are marked as owned by mouse steering.
-5. Optionally enable **Alignment assist** on the same page and tune:
+5. Configure alignment assist in AbsoluteZero's own Control module:
     * **Radius**: How close to center the mouse must be before the assist activates (default: 130 of 200 units).
     * **Idle Time**: How long the mouse must be idle before decay starts (default: 50ms).
     * **Decay Speed**: How fast steering decays to center (default: 8.0; higher = faster).
-6. Click **Save & Apply** or **Save & Close**.
+6. Apply the transaction.
 
 #### Option B: Manual INI Configuration
 ```ini
@@ -587,7 +598,7 @@ Set `bEnableLog = true` to write `AbsoluteHOTAS.log`. It captures the things wor
 
 ## Mod Manager Compatibility
 
-If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual File System (VFS) hook mechanism (`usvfs_x64.dll`) intercepts file paths dynamically. Because AbsoluteHOTAS hooks DirectX and uses input injection (standard techniques for Direct HID input), the combination of virtualization and hooking can occasionally trigger false positives in antivirus heuristics or Windows Smart App Control, resulting in error `000011CC` or a silent load failure.
+If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual File System (VFS) hook mechanism (`usvfs_x64.dll`) intercepts file paths dynamically. Because AbsoluteHOTAS uses native input hooks and injection for Direct HID control, the combination can occasionally trigger false positives in antivirus heuristics or Windows Smart App Control, resulting in error `000011CC` or a silent load failure.
 
 **To resolve:**
 1. Right-click `AbsoluteHOTAS.dll` inside your mod manager's physical mods directory, select **Properties**, check **Unblock** at the bottom of the General tab, and click **Apply** / **OK**.
@@ -595,35 +606,27 @@ If you use a virtualizing mod manager (such as Mod Organizer 2), its Virtual Fil
 
 ## Troubleshooting
 
-### Wizard Crash / Overlay Doesn't Open
-If the overlay crashes or refuses to open on `Ctrl+Alt+B`:
+### Absolute Control Doesn't Open
 
-1. Check `Data\SFSE\Plugins\` for DLLs left behind by disabled or uninstalled mods.
-2. Temporarily disable third-party overlays, capture hooks, frame-generation mods,
-   ReShade/Special K-style injectors, and similar graphics layers.
-3. Test with only **AbsoluteHOTAS** and **SFSE** enabled.
-4. Enable logging and check for prior-hook or renderer initialization messages.
+If **MOD OPTIONS → AbsoluteHOTAS**, `Ctrl+Alt+B`, or the HOTAS menu binding does not open the page:
 
-Bindings load without opening the workbench, so a working
-`AbsoluteHOTAS_Custom.ini` can still be used while diagnosing an overlay-only issue.
-For a persistent conflict, disable the other graphics layer, open the workbench and
-save your bindings, then add this startup-only escape hatch to
-`AbsoluteHOTAS_Custom.ini` before restoring the graphics layer:
+1. Confirm a compatible `AbsoluteControlPanel.dll` and its menu assets are installed.
+2. Enable HOTAS logging and look for the post-data-load registration result.
+3. Update Absolute Control if HOTAS reports missing record, capture, confirmation, pinned-context,
+   or page-open capabilities.
+4. Existing `AbsoluteHOTAS_Custom.ini` settings and runtime profiles continue to load while the
+   menu is unavailable; manual edits remain possible.
 
-```ini
-[UI]
-bEnableWorkbench = false
-```
-
-This skips all AbsoluteHOTAS D3D12/DXGI hooks; it does not disable flight controls.
+Graphics overlays and frame generation are not part of this diagnostic path because AbsoluteHOTAS
+installs no D3D12/DXGI hooks.
 
 ### Logging & Diagnostic Data
 If you encounter hardware axis mapping or detection issues:
-1. Set `bEnableLog = true` under `[Injection]` in the wizard-created `AbsoluteHOTAS_Custom.ini` (or temporarily in the shipped defaults INI before first save).
+1. Set `bEnableLog = true` under `[Injection]` in the Control-created `AbsoluteHOTAS_Custom.ini` (or temporarily in the shipped defaults INI before first save).
 2. Re-test the issue in-game.
 3. Check `Data\SFSE\Plugins\AbsoluteHOTAS.log` for logs and report issues along with your hardware device names.
 
-### Reporting a 5.0 issue
+### Reporting a 5.x issue
 
 Open an issue in the
 [GitHub issue tracker](https://github.com/SultanDesync/AbsoluteHOTAS/issues) and
@@ -639,13 +642,12 @@ include:
   or unrelated bindings removed.
 
 For stuck inputs or configuration loss, say so in the title and describe how you
-recovered. For overlay problems, list other overlays, capture tools, graphics
-injectors, and frame-generation mods. Hardware-specific and cosmetic reports remain useful, but
-safety and core-flight regressions take priority.
+recovered. Hardware-specific and cosmetic reports remain useful, but safety and core-flight
+regressions take priority.
 
 ## Notes
 
-Axis enumeration varies across hardware — if an axis doesn't map correctly via the wizard, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bEnableLog = true`).
+Axis enumeration varies across hardware — if an axis doesn't map correctly through Absolute Control, you may need to manually adjust the usage ID in the INI. Report hardware-specific issues with your device names and the plugin log (`bEnableLog = true`).
 
 Development planning lives in the [full Control feature inventory](docs/ABSOLUTE-CONTROL-HOTAS-FEATURE-INVENTORY.md),
 the [workbench UX overhaul](docs/UX-OVERHAUL-HANDOFF.md), and the

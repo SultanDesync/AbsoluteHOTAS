@@ -132,6 +132,10 @@ void LoadCurrentBindings() {
     for (auto& sa : shipActions) {
         s.shipActionSlots.push_back({ sa.label, sa.iniKey, FormatBindingRef(sa.binding, false) });
     }
+    for (std::size_t index = 0; index < kMenuNavigationCatalog.size(); ++index) {
+        s.menuNavigationBindings[index] = FormatBindingRef(
+            cfg.menuNavigationBindings[index], false);
+    }
     s.usePitchAxisForMenu = cfg.bUsePitchAxisForMenu;
     s.useYawAxisForMenu = cfg.bUseYawAxisForMenu;
     s.usePrimaryWeaponForMenuSelect = cfg.bUsePrimaryWeaponForMenuSelect;

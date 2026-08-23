@@ -1,17 +1,17 @@
 # AbsoluteHOTAS legacy workbench feature inventory for Absolute Control
 
-> **Status:** UX/design input; implementation requirements, not a visual style guide
-> **Date:** 2026-08-17
+> **Status:** Historical parity ledger; native cutover accepted and legacy renderer retired
+> **Date:** 2026-08-22
 > **Scope:** Complete user-visible capability inventory of the embedded Dear ImGui
 > workbench, reconciled with the accepted AbsoluteHOTAS UX overhaul and the modular
 > Absolute Control suite boundary.
 
 ## 1. Purpose
 
-This document tells UX and implementation teams what the Absolute Control version of
-AbsoluteHOTAS must eventually do. It is the parity ledger between the existing embedded
-workbench and the target native menu. It also records features that are visible in the
-legacy HOTAS menu but belong to another suite module.
+This document records the parity ledger used to build the Absolute Control version of
+AbsoluteHOTAS. The embedded workbench sources are now historical reference only and are excluded
+from the shipping DLL; they are not a supported fallback. Features assigned to another suite
+module remain outside HOTAS ownership.
 
 Use this document to:
 
@@ -466,10 +466,10 @@ for resolved compatibility output where relevant.
 
 - Select / Accept
 - Back / Cancel
-- Navigation Up
-- Navigation Down
-- Navigation Left
-- Navigation Right
+- Increase System Power
+- Decrease System Power
+- Previous System
+- Next System
 
 **Cockpit & Docking Shortcuts**
 

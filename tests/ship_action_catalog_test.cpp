@@ -41,8 +41,31 @@ static void TestReviewedRecommendations()
         ShipControlMethod::KeyboardCompatibility);
     CHECK(FindShipAction("ExitShipFromCockpit")->recommendedMethod ==
         ShipControlMethod::KeyboardCompatibility);
-    CHECK(FindShipAction("SelectTarget")->recommendedMethod == ShipControlMethod::Context);
+    CHECK(FindShipAction("SelectTarget")->recommendedMethod == ShipControlMethod::Direct);
+    CHECK(FindShipAction("SelectTarget")->displayLabel == "Select Target");
+    CHECK(FindShipAction("ShipAction1")->displayLabel == "Ship Action 1");
+    CHECK(FindShipAction("Cancel")->displayLabel == "Ship Cancel");
+    CHECK(FindShipAction("IncreaseSystemPower")->displayLabel ==
+        "Increase System Power");
+    CHECK(FindShipAction("DecreaseSystemPower")->displayLabel ==
+        "Decrease System Power");
+    CHECK(FindShipAction("PreviousSystem")->displayLabel == "Previous System");
+    CHECK(FindShipAction("NextSystem")->displayLabel == "Next System");
+    CHECK(HasSelectableShipControlRoute(*FindShipAction("SelectTarget")));
+    CHECK(AlternateShipControlMethod(*FindShipAction("SelectTarget")) ==
+        ShipControlMethod::Context);
     CHECK(FindShipAction("PreviousSystem")->recommendedMethod == ShipControlMethod::Context);
+}
+
+static void TestShipButtonsLayoutCoverage()
+{
+    std::printf("ShipButtonsLayoutCoverage\n");
+    CHECK(ShipButtonLayoutCoversCatalogExactlyOnce());
+    CHECK(kNativeShipButtonActions.front() == "FireBoosters");
+    CHECK(kNativeShipButtonActions[7] == "SelectTarget");
+    CHECK(kNativeShipButtonActions[16] == "Cancel");
+    for (const auto& action : kShipActionCatalog)
+        CHECK(ShipButtonActionOccurrences(action.actionId) == 1);
 }
 
 static void TestOverridePolicy()
@@ -64,8 +87,14 @@ static void TestOverridePolicy()
     CHECK(!invalid.overrideAccepted);
 
     const auto& select = *FindShipAction("SelectTarget");
+    const auto directSelect = ResolveShipControlMethod(select, "direct");
+    CHECK(directSelect.method == ShipControlMethod::Direct);
+    CHECK(directSelect.overrideAccepted);
+    const auto contextSelect = ResolveShipControlMethod(select, "context");
+    CHECK(contextSelect.method == ShipControlMethod::Context);
+    CHECK(contextSelect.overrideAccepted);
     const auto forbiddenFallback = ResolveShipControlMethod(select, "keyboard");
-    CHECK(forbiddenFallback.method == ShipControlMethod::Context);
+    CHECK(forbiddenFallback.method == ShipControlMethod::Direct);
     CHECK(!forbiddenFallback.overrideAccepted);
 
     // Runtime unavailability is diagnostic state only. It never changes the
@@ -99,6 +128,7 @@ int main()
 {
     TestCatalogCompleteness();
     TestReviewedRecommendations();
+    TestShipButtonsLayoutCoverage();
     TestOverridePolicy();
     TestResolutionPrecedenceAndAvailability();
 

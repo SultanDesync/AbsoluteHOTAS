@@ -13,7 +13,7 @@ int main()
     const auto nodes = AbsoluteControlFlightAxesComposition::Nodes();
     const auto associations =
         AbsoluteControlFlightAxesComposition::Associations();
-    assert(nodes.size() == 76);
+    assert(nodes.size() == 83);
     assert(nodes.size() <= Composition::kMaximumNodesPerPage);
     assert(associations.size() == 10);
 
@@ -44,7 +44,7 @@ int main()
     assert(anchors == 6);
     assert(cards == 9);
     assert(liveSlots == 6);
-    assert(placedControls.size() == 36);
+    assert(placedControls.size() == 43);
 
     for (std::size_t index = 0;
          index <= static_cast<std::size_t>(
@@ -64,6 +64,11 @@ int main()
         if (target.pageId == HotasBindingCatalog::kFlightAxesPageId) {
             assert(placedControls.contains(target.controlId));
         }
+    }
+    for (const auto controlId : HotasBindingCatalog::kAxisControlIds) {
+        const auto* target = HotasBindingCatalog::Find(controlId);
+        assert(target && target->pageId == HotasBindingCatalog::kFlightAxesPageId);
+        assert(placedControls.contains(controlId));
     }
     assert(placedControls.contains("flight-throttle-summary"));
     assert(placedControls.contains("flight-open-throttle"));

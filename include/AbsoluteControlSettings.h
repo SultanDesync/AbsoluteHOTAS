@@ -33,7 +33,7 @@ struct Revision {
 
 // Loads Main controls (shipped defaults + user custom file), never the active
 // runtime profile overlay. The revision protects a dirty Control draft from a
-// concurrent legacy/manual save. The runtime generation independently tells a
+// concurrent manual save. The runtime generation independently tells a
 // clean session when to refresh after a completed controller reload.
 [[nodiscard]] bool Load(ScalarState& state, Revision& revision,
                         std::string& error) noexcept;
@@ -112,9 +112,5 @@ struct Revision {
     Revision& revision, std::string& error) noexcept;
 
 [[nodiscard]] Revision CurrentRevision() noexcept;
-
-// The embedded workbench and Absolute Control cannot own authoritative drafts
-// simultaneously. Reads remain available for diagnostics; writes fail closed.
-[[nodiscard]] bool CanEdit() noexcept;
 
 } // namespace AbsoluteControlSettings
