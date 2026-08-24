@@ -233,6 +233,7 @@ void ApplyProfileScalars(const CSimpleIniA& ini, WizardState& s) {
 
     APPLY_BOOL("Aim", "bSourceObjectAim", sourceObjectAim);
     APPLY_FLOAT("Aim", "fAimSensitivity", aimSensitivity);
+    APPLY_FLOAT("Aim", "fAimDeadzone", aimDeadzone);
     APPLY_FLOAT("Aim", "fAimSmoothing", aimSmoothing);
     for (int i = 0; i < kNumAimAxisSlots; ++i) {
         s.aimAxisBindings[i] = IniBinding(ini, "Aim", kAimAxisSlots[i].iniKey, s.aimAxisBindings[i], true);
@@ -414,6 +415,7 @@ void SerializeUserOwnedState(const WizardState& s, CSimpleIniA& ini) {
     // Aim
     ini.SetBoolValue("Aim", "bSourceObjectAim", s.sourceObjectAim);
     SetIniFloat(ini, "Aim", "fAimSensitivity", s.aimSensitivity);
+    SetIniFloat(ini, "Aim", "fAimDeadzone", s.aimDeadzone);
     ini.SetBoolValue("Aim", "bMirrorFlightToAim", true);
     for (int i = 0; i < kNumAimAxisSlots; i++) {
         const char* val = (s.aimAxisBindings[i] != "(unbound)") ? s.aimAxisBindings[i].c_str() : "";

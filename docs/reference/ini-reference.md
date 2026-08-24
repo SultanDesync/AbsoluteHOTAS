@@ -378,6 +378,7 @@ Bind a secondary analog input (thumbstick, analog hat) to independently drive th
 | `fAimPitchSensitivity` | float | `1.0` | Per-axis pitch sensitivity |
 | `bInvertAimYaw` | bool | `false` | Flip aim yaw direction |
 | `bInvertAimPitch` | bool | `false` | Flip aim pitch direction |
+| `fAimDeadzone` | float | `0.04` | Centered neutral gate for independent analog aim axes. Values inside the gate publish exact zero. |
 | `fAimSmoothing` | float | `0.0` | EMA smoothing filter for low-resolution analog sensors. `0.0` = off (raw input), up to `0.98` = maximum smoothing. |
 
 ### Digital Aim Override (5-Way)

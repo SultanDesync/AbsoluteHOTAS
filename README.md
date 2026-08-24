@@ -1,17 +1,18 @@
-# AbsoluteHOTAS v5.1.0
+# AbsoluteHOTAS v5.2.0
 
 Direct HID SFSE plugin for pure HOTAS/HOSAS ship flight in Starfield — no vJoy or Joystick Gremlin required.
 
 ## Release status
 
-**5.1.0 is the current stable AbsoluteHOTAS release.** The complete 23-action native ship list,
+**5.2.0 is the current stable AbsoluteHOTAS release.** The complete 23-action native ship list,
 the boost zone, strafe modifier, and six-axis flight output are isolated from a new optional set of
 six dedicated menu bindings. A ship binding never silently becomes menu navigation.
 
-Version 5.1.0 completes the native-menu cutover. [Absolute Control](https://www.nexusmods.com/starfield/mods/18023)
+Version 5.2.0 retains the native-menu cutover and adds a centered neutral gate for independent
+analog aim axes. [Absolute Control](https://www.nexusmods.com/starfield/mods/18023)
 is now the required in-game configuration frontend. AbsoluteHOTAS no longer links ImGui or MinHook,
 installs no D3D12/DXGI presentation hooks, and cannot conflict with graphics overlays through a
-legacy menu. Version 5.0.1 remains available as a rollback option for older setups.
+legacy menu. Version 5.1.0 remains available as a rollback option for older setups.
 
 Reports are welcome, with priority given to crashes, configuration loss, stuck
 inputs, and regressions in core flight controls. See
@@ -19,6 +20,17 @@ inputs, and regressions in core flight controls. See
 report actionable.
 
 ## Changelog
+
+### v5.2.0
+
+- **Independent aim deadzone:** Added `fAimDeadzone` for separately bound analog aim yaw and pitch
+  axes, defaulting to `0.04` and clamped to `0.0`–`0.5`.
+- **True centered reticle:** Values inside the neutral gate now publish exact zero before
+  sensitivity and optional smoothing, preventing small sensor bias from displacing the reticle.
+- **Consistent shaping:** Runtime aim injection and live Absolute Control telemetry use the same
+  axis-shaping policy.
+- **Native editor coverage:** The Aiming & Combat page exposes the new setting and preserves it in
+  profiles and user-owned configuration.
 
 ### v5.1.0
 
@@ -187,7 +199,7 @@ Absolute Control. After the first save, user-owned settings live in
 `AbsoluteHOTAS_Custom.ini`; future releases replace only the DLL and shipped default
 INI. Use full profile exports for backup, sharing, and migration going forward.
 
-When updating from 4.0.x or 5.0.x to 5.1.0, replace only `AbsoluteHOTAS.dll` and the shipped
+When updating from 4.0.x or 5.x to 5.2.0, replace only `AbsoluteHOTAS.dll` and the shipped
 `AbsoluteHOTAS.ini`. Keep `AbsoluteHOTAS_Custom.ini` and the `Profiles` directory. Back up both
 user-owned locations before any update.
 

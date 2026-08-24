@@ -27,7 +27,7 @@ enum class ScalarField : std::uint16_t {
     BoostZoneEnabled, BoostZoneCenter, BoostZoneDeadzone,
     RateThrottleEnabled, AccumulatorRate, AccumulatorDecay, ReverseGateVelocity,
     TurnAssistEnabled, TurnAssistMode, HoldForBoost,
-    AimEnabled, AimSensitivity, AimSmoothing,
+    AimEnabled, AimSensitivity, AimDeadzone, AimSmoothing,
     AimYawInvert, AimYawSensitivity, AimPitchInvert, AimPitchSensitivity,
     DigitalAimSpeed,
     MenuUsePitch, MenuUseYaw, MenuUsePrimaryWeapon,

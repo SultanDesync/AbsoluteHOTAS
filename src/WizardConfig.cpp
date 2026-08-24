@@ -164,6 +164,7 @@ void LoadCurrentBindings() {
     s.aimAxisSensitivity[0] = cfg.fAimYawSensitivity;
     s.aimAxisSensitivity[1] = cfg.fAimPitchSensitivity;
     s.aimSensitivity        = cfg.fAimSensitivity;
+    s.aimDeadzone           = cfg.fAimDeadzone;
     s.aimSmoothing          = cfg.fAimSmoothing;
     s.sourceObjectAim       = cfg.bSourceObjectAim;
 

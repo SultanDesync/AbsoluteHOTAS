@@ -83,6 +83,7 @@ constexpr std::array kDefinitions{
     Bool(Field::HoldForBoost, "boost-throttle-authority", "DualStick", "bHoldForBoost", true, Format::HoldForBoostAlias),
     Bool(Field::AimEnabled, "aim-enabled", "Aim", "bSourceObjectAim", true),
     Float(Field::AimSensitivity, "aim-steering-sensitivity", "Aim", "fAimSensitivity", 0.1, 3.0, 0.05, 1.0),
+    Float(Field::AimDeadzone, "aim-deadzone", "Aim", "fAimDeadzone", 0.0, 0.5, 0.01, 0.04),
     Float(Field::AimSmoothing, "aim-smoothing", "Aim", "fAimSmoothing", 0.0, 0.98, 0.01, 0.0),
     Bool(Field::AimYawInvert, "aim-yaw-inverted", "Aim", "bInvertAimYaw", false),
     Float(Field::AimYawSensitivity, "aim-yaw-sensitivity", "Aim", "fAimYawSensitivity", 0.1, 3.0, 0.05, 1.0),

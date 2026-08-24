@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "AimController.h"
+#include "AxisShapingPolicy.h"
 #include "ThrottleHook.h"
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
@@ -45,9 +46,8 @@ static float NormBipolar(const ThrottleController::Config& cfg,
     float halfRange = (aMax - aMin) / 2.0f;
     if (halfRange <= 0.0f) return 0.0f;
     float val = (raw - center) / halfRange;
-    val *= sens;
-    val  = invert ? -val : val;
-    return std::clamp(val, -1.0f, 1.0f);
+    val = invert ? -val : val;
+    return AxisShapingPolicy::Shape(val, sens, 1.0f, cfg.fAimDeadzone);
 }
 
 // ============================================================================

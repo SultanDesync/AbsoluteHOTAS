@@ -1,5 +1,5 @@
 set_project("AbsoluteHOTAS")
-set_version("5.1.0")
+set_version("5.2.0")
 set_languages("c++23")
 set_warnings("all")
 
@@ -57,7 +57,7 @@ target("AbsoluteHOTAS")
 
     add_defines(
         "PLUGIN_VERSION_MAJOR=5",
-        "PLUGIN_VERSION_MINOR=1",
+        "PLUGIN_VERSION_MINOR=2",
         "PLUGIN_VERSION_PATCH=0",
         "PLUGIN_VERSION_STABLE"
     )

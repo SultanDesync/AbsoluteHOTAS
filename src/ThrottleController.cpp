@@ -444,12 +444,12 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
             cfg.digitalAimUpButton.IsValid() ||
             cfg.digitalAimDownButton.IsValid();
         if (aimYawBound || aimPitchBound) {
-            const auto aimYaw = std::clamp(TelemetryNormRaw(
-                cfg, cfg.aimYawAxis, cfg.bInvertAimYaw) * cfg.fAimYawSensitivity,
-                -1.0F, 1.0F);
-            const auto aimPitch = std::clamp(TelemetryNormRaw(
-                cfg, cfg.aimPitchAxis, cfg.bInvertAimPitch) * cfg.fAimPitchSensitivity,
-                -1.0F, 1.0F);
+            const auto aimYaw = TelemetryShapeAxis(TelemetryNormRaw(
+                cfg, cfg.aimYawAxis, cfg.bInvertAimYaw),
+                cfg.fAimYawSensitivity, 1.0F, cfg.fAimDeadzone);
+            const auto aimPitch = TelemetryShapeAxis(TelemetryNormRaw(
+                cfg, cfg.aimPitchAxis, cfg.bInvertAimPitch),
+                cfg.fAimPitchSensitivity, 1.0F, cfg.fAimDeadzone);
             static float smoothYaw{};
             static float smoothPitch{};
             float outputYaw = aimYaw;
@@ -659,6 +659,7 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
     s_config.fAimPitchSensitivity = (float)ini.GetDoubleValue("Aim", "fAimPitchSensitivity", 1.0);
     s_config.bInvertAimYaw     = ini.GetBoolValue("Aim", "bInvertAimYaw",   false);
     s_config.bInvertAimPitch   = ini.GetBoolValue("Aim", "bInvertAimPitch", false);
+    s_config.fAimDeadzone      = std::clamp((float)ini.GetDoubleValue("Aim", "fAimDeadzone", 0.04), 0.0f, 0.5f);
     s_config.fAimSmoothing     = std::clamp((float)ini.GetDoubleValue("Aim", "fAimSmoothing", 0.0), 0.0f, 1.0f);
     s_config.bMirrorFlightToAim = ini.GetBoolValue("Aim", "bMirrorFlightToAim", true);
     s_config.digitalAimLeftButton   = ParseBindingRef(ini.GetValue("Aim", "iDigitalAimLeftButton",   nullptr), -1);

@@ -464,6 +464,7 @@ const std::array g_throttleControls{
 const std::array g_aimingControls{
     ScalarControl(AbsoluteControlSettings::ScalarField::AimEnabled, "Aim system enabled", "Enable HOTAS-owned reticle and aim injection."),
     ScalarControl(AbsoluteControlSettings::ScalarField::AimSensitivity, "Aim-driven steering sensitivity", "Scale flight-axis input when the aim system drives steering."),
+    ScalarControl(AbsoluteControlSettings::ScalarField::AimDeadzone, "Independent aim deadzone", "Hold centered analog aim axes at a true zero so sensor bias cannot displace the reticle."),
     ScalarControl(AbsoluteControlSettings::ScalarField::AimSmoothing, "Aim smoothing", "Apply bounded EMA smoothing to low-resolution aiming input."),
     ScalarControl(AbsoluteControlSettings::ScalarField::AimYawInvert, "Invert aim yaw", "Reverse independent analog aim-yaw direction."),
     ScalarControl(AbsoluteControlSettings::ScalarField::AimYawSensitivity, "Aim yaw sensitivity", "Scale independent analog aim-yaw input."),

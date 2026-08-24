@@ -50,6 +50,7 @@ struct WizardState {
     bool        aimAxisInvert[kNumAimAxisSlots];
     float       aimAxisSensitivity[kNumAimAxisSlots];
     float       aimSensitivity = 1.0f;
+    float       aimDeadzone = 0.04f;
     float       aimSmoothing = 0.0f;
     bool        sourceObjectAim = true;
 

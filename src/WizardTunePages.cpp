@@ -63,6 +63,11 @@ void DrawAimingTab(WizardState& s) {
     ImGui::Spacing();
     ImGui::Indent(180);
     ImGui::PushItemWidth(120);
+    ImGui::SliderFloat("Deadzone", &s.aimDeadzone, 0.0f, 0.5f, "%.2f");
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.7f, 1.0f), "Analog aim neutral gate");
+    ImGui::PushItemWidth(120);
     ImGui::SliderFloat("Smoothing", &s.aimSmoothing, 0.0f, 0.98f, "%.2f");
     ImGui::PopItemWidth();
     ImGui::SameLine();
