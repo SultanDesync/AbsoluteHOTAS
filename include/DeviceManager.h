@@ -4,6 +4,7 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <string>
+#include <optional>
 #include "BindingRef.h"
 
 struct DeviceInfo {
@@ -16,6 +17,7 @@ struct DeviceInfo {
     std::string vidpidString;     // "044F:B10A" format
     int         axisCount;
     int         buttonCount;
+    std::string persistentId;     // Canonical DirectInput instance GUID
 };
 
 class DeviceManager {
@@ -54,14 +56,12 @@ public:
     // Extract an axis value from DIJOYSTATE2 by HID usage ID (0x30-0x37)
     static long GetAxisFromState(const DIJOYSTATE2* st, int usageId);
 
-    // Read a raw axis value via BindingRef, returning 32768 (neutral) on failure.
-    static inline long GetRawAxis(const BindingRef& ref) {
-        if (ref.value > 0) {
-            const DIJOYSTATE2* st = GetCachedState(ref.deviceIndex);
-            if (st) return GetAxisFromState(st, ref.value);
-        }
-        return 32768;
-    }
+    // Physical samples remain available to capture/telemetry during recovery.
+    // Gameplay samples stay unavailable after loss until the configured axis
+    // reaches neutral. The controller supplies calibration-aware neutral tests.
+    static std::optional<long> GetPhysicalAxis(const BindingRef& ref);
+    static std::optional<long> GetRawAxis(const BindingRef& ref);
+    static void ObserveAxisNeutral(const BindingRef& ref, bool neutral);
 
     // Check if a button (1-128 physical, 129-144 POV virtual) is pressed via BindingRef.
     static bool IsButtonPressed(const BindingRef& ref);

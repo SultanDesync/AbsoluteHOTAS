@@ -5,7 +5,7 @@
 
 #include <array>
 #include <algorithm>
-#include <cassert>
+#include "TestCheck.h"
 #include <cstdio>
 #include <cstring>
 
@@ -92,12 +92,12 @@ int main()
 
     std::size_t controlCount{};
     const auto* controls = AbsoluteControlDeviceProvider::Controls(controlCount);
-    assert(controls && controlCount == 11);
-    assert(controls[0].kind == ControlKind::RecordCollection);
-    assert((controls[0].flags & kControlTransientSelection) != 0);
-    assert(controls[7].kind == ControlKind::Action);
-    assert((controls[7].flags & kControlRequiresConfirmation) != 0);
-    assert((controls[10].flags & kControlRequiresConfirmation) != 0);
+    REQUIRE(controls && controlCount == 11);
+    REQUIRE(controls[0].kind == ControlKind::RecordCollection);
+    REQUIRE((controls[0].flags & kControlTransientSelection) != 0);
+    REQUIRE(controls[7].kind == ControlKind::Action);
+    REQUIRE((controls[7].flags & kControlRequiresConfirmation) != 0);
+    REQUIRE((controls[10].flags & kControlRequiresConfirmation) != 0);
 
     std::array<AbsoluteInputBusApi::DeviceInfoV1, 3> infos{};
     std::array<AbsoluteInputBusApi::DeviceSnapshotV1, 3> snapshots{};
@@ -105,39 +105,39 @@ int main()
 
     std::array<RecordItemV1, kMaximumRecordItems> records{};
     std::uint32_t recordCount{};
-    assert(AbsoluteControlDeviceProvider::ReadRecordItems(
+    REQUIRE(AbsoluteControlDeviceProvider::ReadRecordItems(
         nullptr, "device-selection", records.data(),
         static_cast<std::uint32_t>(records.size()),
         &recordCount) == Result::Ok);
-    assert(recordCount == 3);
-    assert(std::strcmp(records[0].label, "Twin Stick") == 0);
-    assert(std::strstr(records[0].detail, "duplicate product"));
+    REQUIRE(recordCount == 3);
+    REQUIRE(std::strcmp(records[0].label, "Twin Stick") == 0);
+    REQUIRE(std::strstr(records[0].detail, "duplicate product"));
 
     ValueV1 selected;
-    assert(AbsoluteControlDeviceProvider::ReadValue(
+    REQUIRE(AbsoluteControlDeviceProvider::ReadValue(
         nullptr, "device-selection", &selected) == Result::Ok);
-    assert(std::strcmp(selected.stringValue, records[0].recordId) == 0);
+    REQUIRE(std::strcmp(selected.stringValue, records[0].recordId) == 0);
 
     // Target collection contains the matching non-adjacent duplicate only.
-    assert(AbsoluteControlDeviceProvider::ReadRecordItems(
+    REQUIRE(AbsoluteControlDeviceProvider::ReadRecordItems(
         nullptr, "reassignment-target", records.data(),
         static_cast<std::uint32_t>(records.size()),
         &recordCount) == Result::Ok);
-    assert(recordCount == 1);
+    REQUIRE(recordCount == 1);
     const auto target = String(records[0].recordId);
-    assert(AbsoluteControlDeviceProvider::WriteSelection(
+    REQUIRE(AbsoluteControlDeviceProvider::WriteSelection(
         nullptr, "reassignment-target", &target) == Result::Ok);
 
     for (std::size_t index = 0; index < g_bindings.size(); ++index) {
         g_bindings[index] = HotasBindingCatalog::kTargets[index].captureKind ==
             HotasBindingCatalog::CaptureKind::Axis ? "#0@0x30" : "#0@1";
     }
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "reassign-duplicate-device") == Result::Ok);
-    assert(g_applyCalls == 1);
-    assert(g_bindings[0] == "#2@0x30");
+    REQUIRE(g_applyCalls == 1);
+    REQUIRE(g_bindings[0] == "#2@0x30");
 
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "begin-device-calibration") == Result::Ok);
     Publish(infos, snapshots, 40000);
     std::size_t channelCount{};
@@ -149,30 +149,30 @@ int main()
             break;
         }
     }
-    assert(deviceChannel);
+    REQUIRE(deviceChannel);
     AbsoluteControlPanelExperimental::LiveFrameV1 frame;
-    assert(deviceChannel->readLiveFrame(deviceChannel->context, &frame) ==
+    REQUIRE(deviceChannel->readLiveFrame(deviceChannel->context, &frame) ==
            AbsoluteControlPanelExperimental::Result::Ok);
-    assert(frame.telemetryPlot.availableMask == 0xFFU);
-    assert(frame.telemetryPlot.values[1] > 0.2);
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(frame.telemetryPlot.availableMask == 0xFFU);
+    REQUIRE(frame.telemetryPlot.values[1] > 0.2);
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "commit-device-calibration") == Result::Ok);
-    assert(g_applyCalls == 2);
-    assert((g_calibration.at((0 << 8) | 0x31) ==
+    REQUIRE(g_applyCalls == 2);
+    REQUIRE((g_calibration.at((0 << 8) | 0x31) ==
             std::pair<long, long>(32768, 40000)));
 
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "clear-device-calibration") == Result::Ok);
-    assert(g_applyCalls == 3);
-    assert(g_calibration.empty());
+    REQUIRE(g_applyCalls == 3);
+    REQUIRE(g_calibration.empty());
 
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "begin-device-calibration") == Result::Ok);
-    assert(AbsoluteControlDeviceProvider::InvokeAction(
+    REQUIRE(AbsoluteControlDeviceProvider::InvokeAction(
         nullptr, "cancel-device-calibration") == Result::Ok);
     ValueV1 status;
-    assert(AbsoluteControlDeviceProvider::ReadValue(
+    REQUIRE(AbsoluteControlDeviceProvider::ReadValue(
         nullptr, "device-calibration-status", &status) == Result::Ok);
-    assert(std::strstr(status.stringValue, "cancelled"));
+    REQUIRE(std::strstr(status.stringValue, "cancelled"));
     return 0;
 }

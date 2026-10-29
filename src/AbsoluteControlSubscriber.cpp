@@ -12,6 +12,7 @@
 #include "HotasBindingCapture.h"
 #include "HotasBindingCatalog.h"
 #include "Plugin.h"
+#include "SupportReport.h"
 #include "ShipOutput.h"
 #include "WizardCapture.h"
 #include "WizardDefs.h"
@@ -597,6 +598,10 @@ const std::array g_diagnosticControls{
         "Absolute Control connection and confirmation that no HOTAS graphics frontend is installed."),
     ReadOnlyStatus("diagnostics-coordination", "Suite coordination",
         "Current standalone ownership and the deferred optional headless runtime boundary."),
+    Action("export-support-report", "Export support report",
+        "Save versions, devices, active profile, binding resolution, and native-control status to SFSE/Plugins/AbsoluteHOTAS-support.txt. Replaces the previous report."),
+    ReadOnlyStatus("support-report-status", "Support report",
+        "Location of the exported report or the reason it could not be saved."),
 };
 
 template <std::size_t N>
@@ -1174,6 +1179,8 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
     } else if (id == "devices-scope") {
         output = StringValue(
             "This Absolute Control build lacks the record and confirmation capabilities required for device calibration. Update Absolute Control.");
+    } else if (id == "support-report-status") {
+        output = StringValue(SupportReport::Status());
     } else if (id == "diagnostics-control-session") {
         std::scoped_lock lock(g_settingsMutex);
         if (!g_settings.lastError.empty()) {
@@ -1220,6 +1227,25 @@ Result ReadStatusValue(std::string_view id, ValueV1& output) noexcept
         return ReadShipRouteStatus(id, output);
     }
     return Result::Ok;
+}
+
+Result __cdecl InvokeDiagnosticAction(void*, const char* rawId) noexcept
+{
+    if (!rawId) return Result::InvalidArgument;
+    if (std::string_view(rawId) != "export-support-report") return Result::NotFound;
+    try {
+        std::string frontend;
+        for (const auto id : {"diagnostics-compatibility", "diagnostics-controller",
+                              "diagnostics-frontends", "diagnostics-coordination"}) {
+            ValueV1 value;
+            if (ReadStatusValue(id, value) == Result::Ok) {
+                frontend += std::format("{}: {}\n", id, value.stringValue);
+            }
+        }
+        return SupportReport::Export(frontend) ? Result::Ok : Result::Rejected;
+    } catch (...) {
+        return Result::Rejected;
+    }
 }
 
 Result __cdecl ReadValue(void*, const char* rawId, ValueV1* output) noexcept
@@ -3084,7 +3110,7 @@ const std::array g_unpinnedPages{
          "Pilot-context controls plus compatibility, frontend, and suite diagnostics.",
           g_diagnosticControlsWithBindings.data(),
           static_cast<std::uint32_t>(g_diagnosticControlsWithBindings.size()),
-          true, true, &g_diagnosticsContext, true),
+          true, true, &g_diagnosticsContext, true, &InvokeDiagnosticAction),
     Page("hotas-setup", "Administration",
          "Read-only readiness, ownership, and native-menu summary for the standalone HOTAS runtime.",
          g_setupControls.data(), static_cast<std::uint32_t>(g_setupControls.size()), false),
@@ -3210,7 +3236,8 @@ const std::array g_capturelessPages{
     Page("hotas-diagnostics", "Plugin & Compatibility",
          "Pilot-context controls plus compatibility, frontend, and suite diagnostics.",
          g_diagnosticControls.data(),
-         static_cast<std::uint32_t>(g_diagnosticControls.size()), true, true),
+         static_cast<std::uint32_t>(g_diagnosticControls.size()), true, true,
+         nullptr, false, &InvokeDiagnosticAction),
     Page("hotas-setup", "Administration",
          "Read-only readiness, ownership, and native-menu summary for the standalone HOTAS runtime.",
          g_setupControls.data(), static_cast<std::uint32_t>(g_setupControls.size()), false),

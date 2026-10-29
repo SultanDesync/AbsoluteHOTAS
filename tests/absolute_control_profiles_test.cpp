@@ -1,6 +1,6 @@
 #include "AbsoluteControlProfiles.h"
 
-#include <cassert>
+#include "TestCheck.h"
 #include <string>
 #include <utility>
 #include <vector>
@@ -103,7 +103,7 @@ const AbsoluteControlProfiles::Record& FindByName(
     for (const auto& record : session.Records()) {
         if (record.configurationName == name) return record;
     }
-    assert(false);
+    REQUIRE(false);
     return session.Records().front();
 }
 
@@ -116,105 +116,105 @@ int main()
     MemoryRepository repository;
     Session session(repository);
     std::string error;
-    assert(session.Open(error));
-    assert(error.empty());
-    assert(session.Records().size() == 3);
-    assert(session.SelectedRecordId() == kMainRecordId);
-    assert(!session.Dirty());
+    REQUIRE(session.Open(error));
+    REQUIRE(error.empty());
+    REQUIRE(session.Records().size() == 3);
+    REQUIRE(session.SelectedRecordId() == kMainRecordId);
+    REQUIRE(!session.Dirty());
 
     const auto& overlay = FindByName(session, "Flight Aux");
     const auto overlayId = overlay.recordId;
-    assert(overlay.inheritsMain);
-    assert(overlay.overrideCount == 4);
-    assert(overlay.keyboardShortcut == "key:0x11+0x32");
-    assert(overlay.activationTrigger == "#1@7");
-    assert(overlay.recordId.starts_with("profile-"));
-    assert(FindByName(session, "Independent").recordId != overlay.recordId);
+    REQUIRE(overlay.inheritsMain);
+    REQUIRE(overlay.overrideCount == 4);
+    REQUIRE(overlay.keyboardShortcut == "key:0x11+0x32");
+    REQUIRE(overlay.activationTrigger == "#1@7");
+    REQUIRE(overlay.recordId.starts_with("profile-"));
+    REQUIRE(FindByName(session, "Independent").recordId != overlay.recordId);
 
     // Stable record IDs survive a refresh and clean target switching edits the
     // selected WizardSession target directly.
-    assert(session.Select(overlayId, error) == SelectResult::Selected);
-    assert(repository.currentTarget == "Flight Aux");
-    assert(session.SelectedRecordId() == overlayId);
+    REQUIRE(session.Select(overlayId, error) == SelectResult::Selected);
+    REQUIRE(repository.currentTarget == "Flight Aux");
+    REQUIRE(session.SelectedRecordId() == overlayId);
 
     // Activation draft supports all legacy modes and detects conflicts across
     // Main, overlays, and independent profiles.
-    assert(session.SetActivationMode("selector"));
-    assert(!session.SetActivationMode("invalid"));
-    assert(session.SetActivationBinding("1") == BindingResult::Conflict);
-    assert(session.SetActivationBinding("#2@11") == BindingResult::Ok);
-    assert(session.Dirty());
+    REQUIRE(session.SetActivationMode("selector"));
+    REQUIRE(!session.SetActivationMode("invalid"));
+    REQUIRE(session.SetActivationBinding("1") == BindingResult::Conflict);
+    REQUIRE(session.SetActivationBinding("#2@11") == BindingResult::Ok);
+    REQUIRE(session.Dirty());
 
     const auto fullId = FindByName(session, "Independent").recordId;
-    assert(session.Select(fullId, error) == SelectResult::NeedsResolution);
-    assert(session.PendingRecordId() == fullId);
-    assert(session.ResolveSwitch(SwitchChoice::Cancel, error));
-    assert(session.SelectedRecordId() == overlayId);
-    assert(!session.HasPendingSwitch());
-    assert(session.Dirty());
+    REQUIRE(session.Select(fullId, error) == SelectResult::NeedsResolution);
+    REQUIRE(session.PendingRecordId() == fullId);
+    REQUIRE(session.ResolveSwitch(SwitchChoice::Cancel, error));
+    REQUIRE(session.SelectedRecordId() == overlayId);
+    REQUIRE(!session.HasPendingSwitch());
+    REQUIRE(session.Dirty());
 
     // Discard failure keeps both the draft and pending switch intact. A later
     // successful discard restores the saved activation before switching.
-    assert(session.Select(fullId, error) == SelectResult::NeedsResolution);
+    REQUIRE(session.Select(fullId, error) == SelectResult::NeedsResolution);
     repository.failDiscard = true;
     repository.editDirty = true;
-    assert(!session.ResolveSwitch(SwitchChoice::Discard, error));
-    assert(session.SelectedRecordId() == overlayId);
-    assert(session.HasPendingSwitch());
-    assert(session.Selected()->activationTrigger == "#2@11");
+    REQUIRE(!session.ResolveSwitch(SwitchChoice::Discard, error));
+    REQUIRE(session.SelectedRecordId() == overlayId);
+    REQUIRE(session.HasPendingSwitch());
+    REQUIRE(session.Selected()->activationTrigger == "#2@11");
     repository.failDiscard = false;
-    assert(session.ResolveSwitch(SwitchChoice::Discard, error));
-    assert(session.SelectedRecordId() == fullId);
-    assert(FindByName(session, "Flight Aux").activationTrigger == "#1@7");
-    assert(!session.Dirty());
+    REQUIRE(session.ResolveSwitch(SwitchChoice::Discard, error));
+    REQUIRE(session.SelectedRecordId() == fullId);
+    REQUIRE(FindByName(session, "Flight Aux").activationTrigger == "#1@7");
+    REQUIRE(!session.Dirty());
 
     // Save-before-switch persists the Wizard edit snapshot and all activation
     // changes as one repository batch.
-    assert(session.SetActivationBinding("#3@12") == BindingResult::Ok);
+    REQUIRE(session.SetActivationBinding("#3@12") == BindingResult::Ok);
     repository.editDirty = true;
-    assert(session.Select(kMainRecordId, error) == SelectResult::NeedsResolution);
-    assert(session.ResolveSwitch(SwitchChoice::Save, error));
-    assert(repository.saveEditCalls == 1);
-    assert(repository.activationSaveCalls == 1);
-    assert(repository.lastUpdates.size() == 1);
-    assert(repository.lastUpdates.front().profile == "Independent");
-    assert(repository.lastUpdates.front().trigger == "#3@12");
-    assert(session.SelectedRecordId() == kMainRecordId);
+    REQUIRE(session.Select(kMainRecordId, error) == SelectResult::NeedsResolution);
+    REQUIRE(session.ResolveSwitch(SwitchChoice::Save, error));
+    REQUIRE(repository.saveEditCalls == 1);
+    REQUIRE(repository.activationSaveCalls == 1);
+    REQUIRE(repository.lastUpdates.size() == 1);
+    REQUIRE(repository.lastUpdates.front().profile == "Independent");
+    REQUIRE(repository.lastUpdates.front().trigger == "#3@12");
+    REQUIRE(session.SelectedRecordId() == kMainRecordId);
 
     // Explicit reassignment clears the previous profile while ordinary writes
     // remain non-destructive.
-    assert(session.SetActivationBinding("#3@12") == BindingResult::Conflict);
-    assert(session.ReassignActivationBinding("#3@12") == BindingResult::Ok);
-    assert(FindByName(session, "Independent").activationTrigger == "(unbound)");
-    assert(session.ClearActivationBinding());
-    assert(session.Selected()->activationTrigger == "(unbound)");
-    assert(session.Cancel(error));
+    REQUIRE(session.SetActivationBinding("#3@12") == BindingResult::Conflict);
+    REQUIRE(session.ReassignActivationBinding("#3@12") == BindingResult::Ok);
+    REQUIRE(FindByName(session, "Independent").activationTrigger == "(unbound)");
+    REQUIRE(session.ClearActivationBinding());
+    REQUIRE(session.Selected()->activationTrigger == "(unbound)");
+    REQUIRE(session.Cancel(error));
 
     // Create/export/import/reset expose only the legacy operations requested by
     // the page adapter. There is intentionally no rename or delete operation.
     session.SetOperationName("Landing Layer");
-    assert(session.CreateOverlay(error));
-    assert(repository.created == std::vector<std::string>{"Landing Layer"});
-    assert(session.Selected()->configurationName == "Landing Layer");
-    assert(session.Selected()->inheritsMain);
+    REQUIRE(session.CreateOverlay(error));
+    REQUIRE(repository.created == std::vector<std::string>{"Landing Layer"});
+    REQUIRE(session.Selected()->configurationName == "Landing Layer");
+    REQUIRE(session.Selected()->inheritsMain);
 
-    assert(session.Select(kMainRecordId, error) == SelectResult::Selected);
+    REQUIRE(session.Select(kMainRecordId, error) == SelectResult::Selected);
     session.SetOperationName("Cruise Full");
-    assert(session.ExportMainFull(error));
-    assert(repository.exported == std::vector<std::string>{"Cruise Full"});
-    assert(session.SelectedRecordId() == kMainRecordId);
+    REQUIRE(session.ExportMainFull(error));
+    REQUIRE(repository.exported == std::vector<std::string>{"Cruise Full"});
+    REQUIRE(session.SelectedRecordId() == kMainRecordId);
 
     const auto exportedId = FindByName(session, "Cruise Full").recordId;
-    assert(session.Select(exportedId, error) == SelectResult::Selected);
-    assert(session.ImportSelectedFull(error));
-    assert(repository.imported == std::vector<std::string>{"Cruise Full"});
-    assert(session.SelectedRecordId() == kMainRecordId);
-    assert(session.ResetMain(error));
-    assert(repository.resets == 1);
-    assert(session.SelectedRecordId() == kMainRecordId);
+    REQUIRE(session.Select(exportedId, error) == SelectResult::Selected);
+    REQUIRE(session.ImportSelectedFull(error));
+    REQUIRE(repository.imported == std::vector<std::string>{"Cruise Full"});
+    REQUIRE(session.SelectedRecordId() == kMainRecordId);
+    REQUIRE(session.ResetMain(error));
+    REQUIRE(repository.resets == 1);
+    REQUIRE(session.SelectedRecordId() == kMainRecordId);
 
     // Invalid controller button references never enter the draft.
-    assert(session.SetActivationBinding("#0@145") == BindingResult::Invalid);
-    assert(session.SetActivationBinding("not-a-binding") == BindingResult::Invalid);
+    REQUIRE(session.SetActivationBinding("#0@145") == BindingResult::Invalid);
+    REQUIRE(session.SetActivationBinding("not-a-binding") == BindingResult::Invalid);
     return 0;
 }

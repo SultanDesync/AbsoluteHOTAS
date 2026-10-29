@@ -47,6 +47,9 @@ static volatile uint32_t g_sourceAimPitchBits = 0;
 // g_vertStrafeBits while this flag is set.
 static volatile uint8_t g_reverseOwnsVertStrafe = 0;
 
+// ---- Writer sync callback for AbsoluteZero ----
+static ThrottleHook::WriterSyncCallback s_writerSyncCallback{nullptr};
+
 
 // ---- Hook Registry for Persistent Silencing ----
 struct HookRecord {
@@ -134,6 +137,77 @@ static bool InstallRollGate(uintptr_t targetAddr) {
     uintptr_t clusterAddr = (uintptr_t)&g_capturedWriterCluster;
     memcpy(&trampMem[idx], &clusterAddr, 8); idx += 8;
     trampMem[idx++] = 0x48; trampMem[idx++] = 0x89; trampMem[idx++] = 0x01; // mov [rcx],rax
+
+    // Check if s_writerSyncCallback is set
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9; // mov rcx, imm64 (&s_writerSyncCallback)
+    uintptr_t cbAddr = (uintptr_t)&s_writerSyncCallback;
+    memcpy(&trampMem[idx], &cbAddr, 8); idx += 8;
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x83; trampMem[idx++] = 0x39; trampMem[idx++] = 0x00; // cmp qword ptr [rcx], 0
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x84; // jz near doneSync
+    int jzSyncOffset = idx;
+    idx += 4; // placeholder for 32-bit offset
+
+    // Callback is non-null:
+    // Pop initial flags and rcx so RSP matches function state
+    trampMem[idx++] = 0x9D; // popfq
+    trampMem[idx++] = 0x59; // pop rcx
+
+    // Save volatile integer registers
+    trampMem[idx++] = 0x50; // push rax
+    trampMem[idx++] = 0x51; // push rcx
+    trampMem[idx++] = 0x52; // push rdx
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x50; // push r8
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x51; // push r9
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x52; // push r10
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x53; // push r11
+
+    // Save XMM0-XMM5 (96 = 0x60 bytes)
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x83; trampMem[idx++] = 0xEC; trampMem[idx++] = 0x60; // sub rsp, 0x60
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x04; trampMem[idx++] = 0x24; // movups [rsp], xmm0
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x4C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x10; // movups [rsp+0x10], xmm1
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x54; trampMem[idx++] = 0x24; trampMem[idx++] = 0x20; // movups [rsp+0x20], xmm2
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x5C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x30; // movups [rsp+0x30], xmm3
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x64; trampMem[idx++] = 0x24; trampMem[idx++] = 0x40; // movups [rsp+0x40], xmm4
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x11; trampMem[idx++] = 0x6C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x50; // movups [rsp+0x50], xmm5
+
+    // Allocate 32 bytes shadow space + 8 bytes alignment = 40 (0x28) bytes
+    // (7 pushes * 8 = 56 bytes. 56 + 96 = 152 bytes. 152 + 40 = 192 bytes = 16 * 12)
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x83; trampMem[idx++] = 0xEC; trampMem[idx++] = 0x28; // sub rsp, 0x28
+
+    // Load s_writerSyncCallback address and call it
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0xB8; // mov rax, imm64 (&s_writerSyncCallback)
+    memcpy(&trampMem[idx], &cbAddr, 8); idx += 8;
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x8B; trampMem[idx++] = 0x00; // mov rax, [rax]
+    trampMem[idx++] = 0xFF; trampMem[idx++] = 0xD0; // call rax
+
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x83; trampMem[idx++] = 0xC4; trampMem[idx++] = 0x28; // add rsp, 0x28
+
+    // Restore XMM0-XMM5
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x04; trampMem[idx++] = 0x24; // movups xmm0, [rsp]
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x4C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x10; // movups xmm1, [rsp+0x10]
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x54; trampMem[idx++] = 0x24; trampMem[idx++] = 0x20; // movups xmm2, [rsp+0x20]
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x5C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x30; // movups xmm3, [rsp+0x30]
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x64; trampMem[idx++] = 0x24; trampMem[idx++] = 0x40; // movups xmm4, [rsp+0x40]
+    trampMem[idx++] = 0x0F; trampMem[idx++] = 0x10; trampMem[idx++] = 0x6C; trampMem[idx++] = 0x24; trampMem[idx++] = 0x50; // movups xmm5, [rsp+0x50]
+
+    trampMem[idx++] = 0x48; trampMem[idx++] = 0x83; trampMem[idx++] = 0xC4; trampMem[idx++] = 0x60; // add rsp, 0x60
+
+    // Restore volatile integer registers
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x5B; // pop r11
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x5A; // pop r10
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x59; // pop r9
+    trampMem[idx++] = 0x41; trampMem[idx++] = 0x58; // pop r8
+    trampMem[idx++] = 0x5A; // pop rdx
+    trampMem[idx++] = 0x59; // pop rcx
+    trampMem[idx++] = 0x58; // pop rax
+
+    // Re-push rcx and flags to match stack state expected by roll gate below
+    trampMem[idx++] = 0x51; // push rcx
+    trampMem[idx++] = 0x9C; // pushfq
+
+    // Label doneSync:
+    int32_t jzSyncDisp = (int32_t)(idx - (jzSyncOffset + 4));
+    memcpy(&trampMem[jzSyncOffset], &jzSyncDisp, 4);
 
     trampMem[idx++] = 0x48; trampMem[idx++] = 0xB9;
     uintptr_t activeAddr = (uintptr_t)&g_rollOverrideEnabled;
@@ -497,7 +571,25 @@ void ThrottleHook::SetExternalMouseSteeringOwner(bool active) {
         g_yawOverrideEnabled = 0;
         g_pitchOverrideEnabled = 0;
         g_sourceAimEnabled = 0;
+    } else {
+        s_writerSyncCallback = nullptr;
     }
+}
+
+void ThrottleHook::RegisterWriterSyncCallback(WriterSyncCallback cb) {
+    s_writerSyncCallback = cb;
+}
+
+void ThrottleHook::SetVirtualJoySteering(bool enabled, float yawNorm, float pitchNorm) {
+    if (!enabled) {
+        g_yawOverrideEnabled = 0;
+        g_pitchOverrideEnabled = 0;
+        return;
+    }
+    g_yawBits = FloatToBits(yawNorm);
+    g_pitchBits = FloatToBits(pitchNorm);
+    g_yawOverrideEnabled = 1;
+    g_pitchOverrideEnabled = 1;
 }
 
 bool ThrottleHook::ExternalMouseSteeringOwnerActive() {
@@ -556,13 +648,15 @@ void ThrottleHook::SetSilence6CEnabled(bool enabled) {
 
 void ThrottleHook::SetRotationalOverride(float lateral, float yaw, float pitch, bool enabled, bool lateralEnabled, float vertical, bool verticalEnabled, bool yawEnabled, bool pitchEnabled) {
     g_rollBits = FloatToBits(lateral);
-    g_yawBits = FloatToBits(yaw);
-    g_pitchBits = FloatToBits(pitch);
     g_rotOverrideEnabled = enabled ? 1 : 0;
     g_rollOverrideEnabled = (enabled && lateralEnabled) ? 1 : 0;
     const bool externalMouseOwner = ExternalMouseSteeringOwnerActive();
-    g_yawOverrideEnabled = (enabled && yawEnabled && !externalMouseOwner) ? 1 : 0;
-    g_pitchOverrideEnabled = (enabled && pitchEnabled && !externalMouseOwner) ? 1 : 0;
+    if (!externalMouseOwner) {
+        g_yawBits = FloatToBits(yaw);
+        g_pitchBits = FloatToBits(pitch);
+        g_yawOverrideEnabled = (enabled && yawEnabled) ? 1 : 0;
+        g_pitchOverrideEnabled = (enabled && pitchEnabled) ? 1 : 0;
+    }
 
     // Vertical strafe lane: skip if reverse override owns it.
     if (!g_reverseOwnsVertStrafe) {

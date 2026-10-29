@@ -2,7 +2,7 @@
 #include "AbsoluteMouseSteeringAPI.h"
 #include "AbsoluteCameraOwnershipAPI.h"
 
-#include <cassert>
+#include "TestCheck.h"
 #include <cstddef>
 
 int main()
@@ -11,6 +11,10 @@ int main()
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, readMouseAccumulator) == 16);
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, declareAbsoluteZeroOwner) == 40);
     static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV1, absoluteZeroOwnsPitchYaw) == 48);
+    static_assert(sizeof(AbsoluteMouseSteeringApi::ApiV2) == 80);
+    static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV2, extractMouseAccumulatorDelta) == 56);
+    static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV2, setVirtualJoySteering) == 64);
+    static_assert(offsetof(AbsoluteMouseSteeringApi::ApiV2, registerWriterSyncCallback) == 72);
     static_assert(sizeof(AbsoluteCameraOwnershipApi::ApiV1) == 48);
     static_assert(offsetof(AbsoluteCameraOwnershipApi::ApiV1,
                            declareAbsoluteHeadTrackingOwner) == 16);
@@ -80,6 +84,6 @@ int main()
         static_assert(!result.allowSourceObjectAim);
     }
 
-    assert(true);
+    REQUIRE(true);
     return 0;
 }

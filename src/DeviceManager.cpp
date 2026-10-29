@@ -2,10 +2,28 @@
 #include "DeviceManager.h"
 #include "RuntimePaths.h"
 #include "StringUtils.h"
+#include "InputRecoveryPolicy.h"
 
 static LPDIRECTINPUT8 g_pDI = nullptr;
 static std::vector<DeviceInfo> g_devices;
 static std::vector<LPDIRECTINPUTDEVICE8> g_openDevices;
+static std::vector<DIJOYSTATE2> g_cachedStates;
+static std::vector<bool> g_cachedValid;
+static std::vector<std::array<InputRecoveryPolicy::Axis, 8>> g_axisRecovery;
+static std::vector<std::array<InputRecoveryPolicy::Button, 144>> g_buttonRecovery;
+static std::vector<std::array<bool, 144>> g_buttonDown;
+static std::vector<std::chrono::steady_clock::time_point> g_reopenAt;
+
+static bool IsPovDirectionActive(const DIJOYSTATE2*, int, int);
+
+static void ClearCachedInput() {
+    g_cachedStates.clear();
+    g_cachedValid.clear();
+    g_axisRecovery.clear();
+    g_buttonRecovery.clear();
+    g_buttonDown.clear();
+    g_reopenAt.clear();
+}
 
 static void DevLog(const std::string& msg) {
     RuntimePaths::Log("[DeviceManager]", msg);
@@ -28,6 +46,12 @@ static BOOL CALLBACK EnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance,
     DeviceInfo info{};
     info.guidInstance = pdidInstance->guidInstance;
     info.guidProduct = pdidInstance->guidProduct;
+    const auto& guid = info.guidInstance;
+    info.persistentId = std::format(
+        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        guid.Data1, guid.Data2, guid.Data3,
+        guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+        guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
     info.instanceName = pdidInstance->tszInstanceName;
     info.productName = pdidInstance->tszProductName;
     
@@ -67,6 +91,7 @@ bool DeviceManager::Initialize() {
 }
 
 void DeviceManager::Shutdown() {
+    ClearCachedInput();
     for (size_t i = 0; i < g_openDevices.size(); i++) {
         CloseDevice(static_cast<int>(i));
     }
@@ -81,6 +106,7 @@ void DeviceManager::Shutdown() {
 }
 
 void DeviceManager::Refresh() {
+    ClearCachedInput();
     for (size_t i = 0; i < g_openDevices.size(); i++) {
         CloseDevice(static_cast<int>(i));
     }
@@ -170,27 +196,45 @@ int DeviceManager::ResolveDevice(const std::string& vidpid, const std::string& n
     return -1;
 }
 
-static std::vector<DIJOYSTATE2> g_cachedStates;
-static std::vector<bool> g_cachedValid;
-
 void DeviceManager::PollAll() {
     size_t count = g_openDevices.size();
     g_cachedStates.resize(count);
     g_cachedValid.resize(count, false);
+    g_axisRecovery.resize(count);
+    g_buttonRecovery.resize(count);
+    g_buttonDown.resize(count);
+    g_reopenAt.resize(count);
     
     for (size_t i = 0; i < count; ++i) {
-        if (!g_openDevices[i]) {
-            g_cachedValid[i] = false;
-            continue;
+        HRESULT hr = DIERR_NOTINITIALIZED;
+        if (g_openDevices[i]) {
+            g_openDevices[i]->Poll();
+            hr = g_openDevices[i]->GetDeviceState(sizeof(DIJOYSTATE2), &g_cachedStates[i]);
         }
-        
-        g_openDevices[i]->Poll();
-        HRESULT hr = g_openDevices[i]->GetDeviceState(sizeof(DIJOYSTATE2), &g_cachedStates[i]);
         if (FAILED(hr)) {
-            g_openDevices[i]->Acquire();
+            if (g_openDevices[i]) g_openDevices[i]->Acquire();
             g_cachedValid[i] = false;
+            for (auto& axis : g_axisRecovery[i]) axis.Lost();
+            for (auto& button : g_buttonRecovery[i]) button.Lost();
+            g_buttonDown[i].fill(false);
+            // A detached handle may never recover through Acquire alone. Retry
+            // the same instance GUID, on the poller thread, at most once/second.
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= g_reopenAt[i]) {
+                g_reopenAt[i] = now + std::chrono::seconds(1);
+                CloseDevice(static_cast<int>(i));
+                OpenDevice(static_cast<int>(i));
+            }
         } else {
             g_cachedValid[i] = true;
+            for (std::size_t button = 0; button < 144; ++button) {
+                const bool down = button < 128
+                    ? (g_cachedStates[i].rgbButtons[button] & 0x80) != 0
+                    : IsPovDirectionActive(&g_cachedStates[i],
+                        static_cast<int>((button - 128) / 4),
+                        static_cast<int>((button - 128) % 4));
+                g_buttonDown[i][button] = g_buttonRecovery[i][button].Observe(down);
+            }
         }
     }
 }
@@ -202,7 +246,32 @@ const DIJOYSTATE2* DeviceManager::GetCachedState(int deviceIndex) {
 }
 
 int DeviceManager::ResolveByName(const std::string& name) {
+    if (name.starts_with("guid:")) {
+        std::vector<std::string_view> ids;
+        for (const auto& device : g_devices) ids.push_back(device.persistentId);
+        return DeviceIdentity::Resolve(name, ids);
+    }
     return ResolveDevice("", name, -1);
+}
+
+std::optional<long> DeviceManager::GetPhysicalAxis(const BindingRef& ref) {
+    if (ref.value < 0x30 || ref.value > 0x37) return std::nullopt;
+    const auto* state = GetCachedState(ref.deviceIndex);
+    if (!state) return std::nullopt;
+    return GetAxisFromState(state, ref.value);
+}
+
+std::optional<long> DeviceManager::GetRawAxis(const BindingRef& ref) {
+    const auto sample = GetPhysicalAxis(ref);
+    if (!sample) return std::nullopt;
+    return g_axisRecovery[ref.deviceIndex][ref.value - 0x30].Read(sample);
+}
+
+void DeviceManager::ObserveAxisNeutral(const BindingRef& ref, bool neutral) {
+    if (ref.deviceIndex < 0 || ref.deviceIndex >= static_cast<int>(g_axisRecovery.size()) ||
+        ref.value < 0x30 || ref.value > 0x37) return;
+    g_axisRecovery[ref.deviceIndex][ref.value - 0x30].Observe(
+        GetPhysicalAxis(ref).has_value(), neutral);
 }
 
 void DeviceManager::LogDeviceManifest() {
@@ -255,15 +324,6 @@ static bool IsPovDirectionActive(const DIJOYSTATE2* state, int povIndex, int dir
 }
 
 bool DeviceManager::IsButtonPressed(const BindingRef& ref) {
-    if (ref.value < 1) return false;
-    const DIJOYSTATE2* st = GetCachedState(ref.deviceIndex);
-    if (!st) return false;
-    if (ref.value <= 128) return (st->rgbButtons[ref.value - 1] & 0x80) != 0;
-    if (ref.value <= 144) {
-        int povIndex  = (ref.value - 129) / 4;
-        int direction = (ref.value - 129) % 4;
-        return IsPovDirectionActive(st, povIndex, direction);
-    }
-    return false;
+    if (ref.value < 1 || ref.value > 144 || !GetCachedState(ref.deviceIndex)) return false;
+    return g_buttonDown[ref.deviceIndex][ref.value - 1];
 }
-

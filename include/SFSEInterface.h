@@ -143,6 +143,9 @@ namespace SFSE
     class LoadInterface
     {
     public:
+        [[nodiscard]] std::uint32_t RuntimeVersion() const noexcept { return GetProxy().runtimeVersion; }
+        [[nodiscard]] std::uint32_t SfseVersion() const noexcept { return GetProxy().sfseVersion; }
+
         [[nodiscard]] PluginHandle GetPluginHandle() const noexcept
         {
             return GetProxy().getPluginHandle ? GetProxy().getPluginHandle() : 0;

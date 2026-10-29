@@ -1,6 +1,6 @@
 #include "AbsoluteControlMacros.h"
 
-#include <cassert>
+#include "TestCheck.h"
 #include <string>
 
 namespace {
@@ -53,63 +53,63 @@ int main()
 
     AbsoluteControlMacros::Session session(repository);
     std::string error;
-    assert(session.Open(error));
-    assert(repository.loads == 1);
-    assert(!session.Dirty());
-    assert(session.MacroRecords().size() == 3);
-    assert(session.MacroRecords()[0].label == "First (0)");
-    assert(session.MacroRecords()[2].label == "First (1)");
-    assert(session.StepRecords().size() == 2);
-    assert(session.TargetRecords().size() == 2);
+    REQUIRE(session.Open(error));
+    REQUIRE(repository.loads == 1);
+    REQUIRE(!session.Dirty());
+    REQUIRE(session.MacroRecords().size() == 3);
+    REQUIRE(session.MacroRecords()[0].label == "First (0)");
+    REQUIRE(session.MacroRecords()[2].label == "First (1)");
+    REQUIRE(session.StepRecords().size() == 2);
+    REQUIRE(session.TargetRecords().size() == 2);
 
     // Ordered steps and chord source tokens survive edits without resolution.
     const auto secondStep = session.StepRecords()[1].recordId;
-    assert(session.SelectStep(secondStep));
-    assert(session.MoveStep(-1));
-    assert(session.SetStepGap(99));
-    assert(session.AddTarget(0));
-    assert(session.SelectedStep()->targets.back() == "FireBoosters");
+    REQUIRE(session.SelectStep(secondStep));
+    REQUIRE(session.MoveStep(-1));
+    REQUIRE(session.SetStepGap(99));
+    REQUIRE(session.AddTarget(0));
+    REQUIRE(session.SelectedStep()->targets.back() == "FireBoosters");
 
     const auto incomplete = session.MacroRecords()[1].recordId;
-    assert(session.SelectMacro(incomplete));
-    assert(session.SelectedMacro()->steps.empty());
-    assert(session.SetMacroName("Still Incomplete"));
-    assert(session.SetMacroTrigger("-1"));
-    assert(session.SelectedMacro()->buttonBinding == "(unbound)");
+    REQUIRE(session.SelectMacro(incomplete));
+    REQUIRE(session.SelectedMacro()->steps.empty());
+    REQUIRE(session.SetMacroName("Still Incomplete"));
+    REQUIRE(session.SetMacroTrigger("-1"));
+    REQUIRE(session.SelectedMacro()->buttonBinding == "(unbound)");
 
     // The Control surface deliberately exposes no power-system preset.
-    assert(session.AddMacro());
-    assert(session.SelectedMacro()->name == "Macro1");
-    assert(session.SelectedMacro()->steps.size() == 1);
-    assert(session.SelectedMacro()->steps[0].targets[0] == "NextSystem");
+    REQUIRE(session.AddMacro());
+    REQUIRE(session.SelectedMacro()->name == "Macro1");
+    REQUIRE(session.SelectedMacro()->steps.size() == 1);
+    REQUIRE(session.SelectedMacro()->steps[0].targets[0] == "NextSystem");
 
     // Raw unknown shortcut outputs remain visible until the user explicitly picks
     // a catalog output; incomplete rows are retained in the page transaction.
-    assert(session.ShortcutRecords().size() == 2);
+    REQUIRE(session.ShortcutRecords().size() == 2);
     const auto incompleteShortcut = session.ShortcutRecords()[1].recordId;
-    assert(session.SelectShortcut(incompleteShortcut));
-    assert(session.SetShortcutTrigger("Stick@9"));
-    assert(session.SetShortcutOutput(0));
-    assert(session.SelectedShortcut()->output == "mouse:1");
-    assert(session.AddMenuNavigationPreset());
-    assert(session.ShortcutRecords().size() == 9);
+    REQUIRE(session.SelectShortcut(incompleteShortcut));
+    REQUIRE(session.SetShortcutTrigger("Stick@9"));
+    REQUIRE(session.SetShortcutOutput(0));
+    REQUIRE(session.SelectedShortcut()->output == "mouse:1");
+    REQUIRE(session.AddMenuNavigationPreset());
+    REQUIRE(session.ShortcutRecords().size() == 9);
 
-    assert(session.Dirty());
-    assert(session.Apply(error));
-    assert(repository.saves == 1); // one atomic configuration write/reload seam
-    assert(!session.Dirty());
-    assert(repository.stored.macros[0].steps[0].targets[0] == "PreviousSystem");
-    assert(repository.stored.macros[0].steps[0].gapMs == 99);
+    REQUIRE(session.Dirty());
+    REQUIRE(session.Apply(error));
+    REQUIRE(repository.saves == 1); // one atomic configuration write/reload seam
+    REQUIRE(!session.Dirty());
+    REQUIRE(repository.stored.macros[0].steps[0].targets[0] == "PreviousSystem");
+    REQUIRE(repository.stored.macros[0].steps[0].gapMs == 99);
 
-    assert(session.DeleteShortcut());
-    assert(session.Dirty());
+    REQUIRE(session.DeleteShortcut());
+    REQUIRE(session.Dirty());
     session.Cancel();
-    assert(!session.Dirty());
-    assert(session.ShortcutRecords().size() == 9);
+    REQUIRE(!session.Dirty());
+    REQUIRE(session.ShortcutRecords().size() == 9);
 
     repository.failSave = true;
-    assert(session.AddStep());
-    assert(!session.Apply(error));
-    assert(session.Dirty());
-    assert(repository.saves == 2);
+    REQUIRE(session.AddStep());
+    REQUIRE(!session.Apply(error));
+    REQUIRE(session.Dirty());
+    REQUIRE(repository.saves == 2);
 }

@@ -254,8 +254,17 @@ ReassignResult Session::ReassignDuplicate(
 
     for (std::size_t index = 0; index < bindings.size(); ++index) {
         auto binding = ParseBindingRef(bindings[index].c_str(), -1);
-        if (!binding.HasIndex()) continue;
-        if (binding.deviceIndex == static_cast<int>(source->deviceIndex)) {
+        if (binding.HasDevice()) {
+            if (binding.deviceName == DeviceIdentity::Selector(source->persistentId)) {
+                binding.deviceName = DeviceIdentity::Selector(target->persistentId);
+            } else if (binding.deviceName == DeviceIdentity::Selector(target->persistentId)) {
+                binding.deviceName = DeviceIdentity::Selector(source->persistentId);
+            } else {
+                continue;
+            }
+        } else if (!binding.HasIndex()) {
+            continue;
+        } else if (binding.deviceIndex == static_cast<int>(source->deviceIndex)) {
             binding.deviceIndex = static_cast<int>(target->deviceIndex);
         } else if (binding.deviceIndex == static_cast<int>(target->deviceIndex)) {
             binding.deviceIndex = static_cast<int>(source->deviceIndex);

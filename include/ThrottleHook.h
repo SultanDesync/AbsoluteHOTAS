@@ -25,6 +25,10 @@ public:
     static bool ExternalMouseSteeringOwnerActive();
     static bool RotationalWriterHookInstalled();
 
+    using WriterSyncCallback = void(__cdecl*)() noexcept;
+    static void RegisterWriterSyncCallback(WriterSyncCallback cb);
+    static void SetVirtualJoySteering(bool enabled, float yawNorm, float pitchNorm);
+
     // Get all captured candidate pointers
     static constexpr int MAX_CANDIDATES = 2048;
     static uintptr_t GetCandidate(int index);

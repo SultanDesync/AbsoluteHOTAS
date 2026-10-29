@@ -125,26 +125,9 @@ static void TakeSnapshots() {
     }
 }
 
-static bool HasDuplicateName(int devIdx) {
-    const auto& name = DeviceManager::GetDevice(devIdx).productName;
-    for (int d = 0; d < DeviceManager::GetDeviceCount(); d++) {
-        if (d != devIdx && DeviceManager::GetDevice(d).productName == name)
-            return true;
-    }
-    return false;
-}
-
 static std::string FormatCapturedBinding(int deviceIndex, int value, bool hex) {
     const auto& info = DeviceManager::GetDevice(deviceIndex);
-    char buf[256];
-    if (HasDuplicateName(deviceIndex)) {
-        if (hex) std::snprintf(buf, sizeof(buf), "#%d@0x%02X", deviceIndex, value);
-        else     std::snprintf(buf, sizeof(buf), "#%d@%d", deviceIndex, value);
-    } else {
-        if (hex) std::snprintf(buf, sizeof(buf), "%s@0x%02X", info.productName.c_str(), value);
-        else     std::snprintf(buf, sizeof(buf), "%s@%d", info.productName.c_str(), value);
-    }
-    return buf;
+    return FormatBindingRef({DeviceIdentity::Selector(info.persistentId), value, -1}, hex);
 }
 
 // --- Public API ---

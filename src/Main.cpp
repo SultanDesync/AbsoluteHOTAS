@@ -7,6 +7,7 @@
 #include "SettingBeacon.h"
 #include "NativeShipControl.h"
 #include "SFSEInterface.h"
+#include "SupportReport.h"
 #include <windows.h>
 #include <format>
 #include <filesystem>
@@ -189,6 +190,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
         .nativeControlsInitialized = nativeControlsInitialized,
         .controllerStarted = controllerStarted,
     });
+
+    SupportReport::SetStartup(std::format(
+        "AbsoluteHOTAS: {}\nStarfield: {}\nSFSE: {}\nThrottle hook: {}\nNative controls initialized: {}\nController started: {}\n",
+        Plugin::VersionString,
+        a_sfse ? REL::Version::unpack(a_sfse->RuntimeVersion()).string() : "unavailable",
+        a_sfse ? REL::Version::unpack(a_sfse->SfseVersion()).string() : "unavailable",
+        hookOk, nativeControlsInitialized, controllerStarted));
 
     if (!RegisterSfseListener(a_sfse)) {
         MainLog("WARNING: SFSE lifecycle messaging is unavailable; Absolute Control discovery is disabled for this session, while standalone HOTAS operation continues.");

@@ -27,10 +27,10 @@ static float NormBipolar(const ThrottleController::Config& cfg,
                          const BindingRef& ref, float sens, bool invert)
 {
     if (!ref.IsValid() || ref.value <= 0) return 0.0f;
-    const DIJOYSTATE2* st = DeviceManager::GetCachedState(ref.deviceIndex);
-    if (!st) return 0.0f;
+    const auto sample = DeviceManager::GetRawAxis(ref);
+    if (!sample) return 0.0f;
 
-    float raw  = static_cast<float>(DeviceManager::GetAxisFromState(st, ref.value));
+    float raw  = static_cast<float>(*sample);
     float aMin = 0.0f, aMax = 65535.0f;
 
     if (ref.deviceIndex >= 0) {
@@ -133,6 +133,8 @@ void Update(const ThrottleController::Config& cfg,
             float smoothPow   = std::pow(cfg.fAimSmoothing, dt * 60.0f);
             s_smoothYaw   = s_smoothYaw   * smoothPow + aimYaw   * (1.0f - smoothPow);
             s_smoothPitch = s_smoothPitch * smoothPow + aimPitch * (1.0f - smoothPow);
+            if (!DeviceManager::GetRawAxis(cfg.aimYawAxis)) s_smoothYaw = 0.0F;
+            if (!DeviceManager::GetRawAxis(cfg.aimPitchAxis)) s_smoothPitch = 0.0F;
             aimYaw   = s_smoothYaw;
             aimPitch = s_smoothPitch;
         }

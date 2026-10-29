@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DeviceIdentity.h"
+
 #include <string>
 #include <string_view>
 #include <algorithm>
@@ -10,7 +12,7 @@
 #include <limits>
 
 // Represents a parsed INI binding reference.
-// Format: "DeviceName@0x32" or "#0@0x32" or just "0x32" / "42"
+// Format: "guid:{INSTANCE-GUID}@0x32", "DeviceName@0x32", "#0@0x32", or "42"
 // The '@' delimiter separates an optional device name (or #N index) from the axis/button value.
 struct BindingRef {
     std::string deviceName;   // Empty = use legacy default device from [InputDevices]
@@ -111,7 +113,12 @@ inline BindingRef ParseBindingRef(const char* iniValue, int defaultValue) {
         // Parse as hex (0x...) or decimal
         int value = -1;
         if (!devPart.empty() && BindingRefDetail::ParseInt(valPart, 0, value)) {
-            ref.deviceName = std::string(devPart);
+            if (devPart.starts_with("guid:")) {
+                ref.deviceName = DeviceIdentity::Selector(devPart.substr(5));
+                if (ref.deviceName.empty()) return ref;
+            } else {
+                ref.deviceName = std::string(devPart);
+            }
             ref.value = value;
         }
     } else {

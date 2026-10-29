@@ -21,6 +21,26 @@ report actionable.
 
 ## Changelog
 
+### Unreleased reliability update
+
+- Failed axis reads remain unavailable instead of becoming a numeric midpoint.
+  After reconnection, return sticks to center, throttle to idle/zero thrust, and
+  reverse to rest; held buttons must be released before they can fire again.
+  The poller retries the same device instance once per second. A device absent
+  at game startup still requires a restart to enter the device list.
+- New HOTAS and suite-command recordings store DirectInput instance GUIDs.
+  Existing name/index bindings remain readable; re-record a binding to adopt
+  persistent identity. Windows device replacement or driver changes may require
+  rebinding. Existing indexed calibration retains its current format and should
+  be checked if Windows changes device order.
+- **Plugin & Compatibility → Export support report** writes
+  `SFSE/Plugins/AbsoluteHOTAS-support.txt`, even with logging disabled. It includes
+  versions, device identities, active profile, binding resolution, recovery state,
+  and native-action availability. Each export replaces the previous report;
+  MO2 may place it in Overwrite. No report is written automatically.
+- Test checks execute in optimized builds. Windows CI builds and tests Debug and
+  Release with debug information, then verifies the DLL/INI archive and hashes.
+
 ### v5.2.0
 
 - **Independent aim deadzone:** Added `fAimDeadzone` for separately bound analog aim yaw and pitch
@@ -409,6 +429,11 @@ fYawSensitivity = 1.0
 
 Device names are matched case-insensitively against DirectInput instance or product names. If no device name is prefixed, the plugin uses the first device with that usage.
 
+New recordings use `guid:{INSTANCE-GUID}@0x32` for axes and
+`guid:{INSTANCE-GUID}@17` for buttons. These identify a particular controller,
+including two controllers with the same product name. The Devices & Calibration
+page and support report show the matching device identity.
+
 ### Finding Device Names and IDs
 
 Absolute Control's **Devices & Calibration** page is the easy way to read these off. If the native menu is unavailable or you prefer hand-editing, discover them two other ways:
@@ -649,6 +674,8 @@ include:
 - controller, throttle, pedal, or button-box names;
 - whether the issue occurs on Main Controls, a named profile, or a shift layer;
 - the smallest repeatable sequence that triggers the problem;
+- `AbsoluteHOTAS-support.txt`, exported from **Plugin & Compatibility** when the
+  installed build offers that action;
 - `AbsoluteHOTAS.log` with `bEnableLog = true`;
 - the relevant `AbsoluteHOTAS_Custom.ini` and profile file, with any personal paths
   or unrelated bindings removed.

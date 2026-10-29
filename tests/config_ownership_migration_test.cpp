@@ -2,7 +2,7 @@
 
 #include <SimpleIni.h>
 
-#include <cassert>
+#include "TestCheck.h"
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,7 +19,7 @@ const char* Value(const CSimpleIniA& ini, const char* section, const char* key)
 std::string Read(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
-    assert(input.is_open());
+    REQUIRE(input.is_open());
     return {std::istreambuf_iterator<char>(input),
             std::istreambuf_iterator<char>()};
 }
@@ -29,13 +29,13 @@ std::string Read(const std::filesystem::path& path)
 int main()
 {
     using namespace ConfigOwnershipPolicy;
-    assert(IsStandaloneOwned("HeadTracking", "bEnabled"));
-    assert(IsStandaloneOwned("Aim", "bHOSAMMode"));
-    assert(IsStandaloneOwned("Aim", "fAlignmentDecayRate"));
-    assert(IsStandaloneOwned("AbsoluteZero", "unknown"));
-    assert(IsStandaloneOwned("Power", "preset"));
-    assert(!IsStandaloneOwned("Aim", "fAimSensitivity"));
-    assert(!IsStandaloneOwned("ShipButtons", "iIncreaseSystemPowerButton"));
+    REQUIRE(IsStandaloneOwned("HeadTracking", "bEnabled"));
+    REQUIRE(IsStandaloneOwned("Aim", "bHOSAMMode"));
+    REQUIRE(IsStandaloneOwned("Aim", "fAlignmentDecayRate"));
+    REQUIRE(IsStandaloneOwned("AbsoluteZero", "unknown"));
+    REQUIRE(IsStandaloneOwned("Power", "preset"));
+    REQUIRE(!IsStandaloneOwned("Aim", "fAimSensitivity"));
+    REQUIRE(!IsStandaloneOwned("ShipButtons", "iIncreaseSystemPowerButton"));
 
     CSimpleIniA current;
     current.SetUnicode(false);
@@ -66,24 +66,24 @@ int main()
     managed.SetValue("Aim", "fAimSensitivity", "");
     ReplaceManagedPayload(current, incoming, managed);
 
-    assert(std::strcmp(Value(current, "Hardware", "iThrottleAxis"),
+    REQUIRE(std::strcmp(Value(current, "Hardware", "iThrottleAxis"),
                        "#2@0x32") == 0);
-    assert(std::strcmp(Value(current, "Aim", "fAimSensitivity"), "2.0") == 0);
-    assert(std::strcmp(Value(current, "Aim", "bHOSAMMode"), "true") == 0);
-    assert(std::strcmp(Value(current, "Aim", "externalFutureKey"),
+    REQUIRE(std::strcmp(Value(current, "Aim", "fAimSensitivity"), "2.0") == 0);
+    REQUIRE(std::strcmp(Value(current, "Aim", "bHOSAMMode"), "true") == 0);
+    REQUIRE(std::strcmp(Value(current, "Aim", "externalFutureKey"),
                        "preserve-aim") == 0);
-    assert(std::strcmp(Value(current, "HeadTracking", "bEnabled"), "true") == 0);
-    assert(std::strcmp(Value(current, "HeadTracking", "futureKey"),
+    REQUIRE(std::strcmp(Value(current, "HeadTracking", "bEnabled"), "true") == 0);
+    REQUIRE(std::strcmp(Value(current, "HeadTracking", "futureKey"),
                        "preserve-head") == 0);
-    assert(std::strcmp(Value(current, "Power", "futureKey"),
+    REQUIRE(std::strcmp(Value(current, "Power", "futureKey"),
                        "preserve-power") == 0);
-    assert(std::strcmp(Value(current, "Foreign", "opaque"),
+    REQUIRE(std::strcmp(Value(current, "Foreign", "opaque"),
                        "preserve-foreign") == 0);
-    assert(!current.GetValue("Calibration", "iCalib_0_0x30", nullptr));
-    assert(std::strcmp(Value(current, "Calibration", "iCalib_2_0x30"),
+    REQUIRE(!current.GetValue("Calibration", "iCalib_0_0x30", nullptr));
+    REQUIRE(std::strcmp(Value(current, "Calibration", "iCalib_2_0x30"),
                        "10,65000") == 0);
-    assert(!current.GetValue("Macro:Old", "Step0", nullptr));
-    assert(std::strcmp(Value(current, "Macro:New", "Step0"),
+    REQUIRE(!current.GetValue("Macro:Old", "Step0", nullptr));
+    REQUIRE(std::strcmp(Value(current, "Macro:New", "Step0"),
                        "New tap 1 0") == 0);
 
     CSimpleIniA exported;
@@ -93,48 +93,48 @@ int main()
     exported.SetValue("HeadTracking", "bEnabled", "true");
     exported.SetValue("Power", "futureKey", "external");
     RemoveStandaloneOwned(exported);
-    assert(std::strcmp(Value(exported, "Aim", "fAimSensitivity"), "2.0") == 0);
-    assert(!exported.GetValue("Aim", "bAlignmentAssist", nullptr));
-    assert(!exported.GetValue("HeadTracking", "bEnabled", nullptr));
-    assert(!exported.GetValue("Power", "futureKey", nullptr));
+    REQUIRE(std::strcmp(Value(exported, "Aim", "fAimSensitivity"), "2.0") == 0);
+    REQUIRE(!exported.GetValue("Aim", "bAlignmentAssist", nullptr));
+    REQUIRE(!exported.GetValue("HeadTracking", "bEnabled", nullptr));
+    REQUIRE(!exported.GetValue("Power", "futureKey", nullptr));
 
     // Codec and UI boundary regression: the legacy serializer has no writer for
     // moved fields; device reassignment/capture omit Head Tracking; the remaining
     // legacy tabs compile only read-only ownership status for these modules.
     const auto root = std::filesystem::current_path();
     const auto codec = Read(root / "src/WizardConfigCodec.cpp");
-    assert(codec.find("ini.SetBoolValue(\"HeadTracking\"") == std::string::npos);
-    assert(codec.find("ini.SetBoolValue(\"Aim\", \"bHOSAMMode\"") ==
+    REQUIRE(codec.find("ini.SetBoolValue(\"HeadTracking\"") == std::string::npos);
+    REQUIRE(codec.find("ini.SetBoolValue(\"Aim\", \"bHOSAMMode\"") ==
            std::string::npos);
-    assert(codec.find("ini.SetBoolValue(\"Aim\", \"bAlignmentAssist\"") ==
+    REQUIRE(codec.find("ini.SetBoolValue(\"Aim\", \"bAlignmentAssist\"") ==
            std::string::npos);
 
     const auto devices = Read(root / "src/WizardAdvancedPages.cpp");
-    assert(devices.find("allBindings.push_back(&s.headLook") ==
+    REQUIRE(devices.find("allBindings.push_back(&s.headLook") ==
            std::string::npos);
     const auto capture = Read(root / "src/WizardProfileUI.cpp");
-    assert(capture.find("s.headLookRecenterBinding = binding") ==
+    REQUIRE(capture.find("s.headLookRecenterBinding = binding") ==
            std::string::npos);
-    assert(capture.find("s.headLookToggleBinding = binding") ==
+    REQUIRE(capture.find("s.headLookToggleBinding = binding") ==
            std::string::npos);
     const auto axesUi = Read(root / "src/WizardFlightAxesPage.cpp");
-    assert(axesUi.find("ImGui::Checkbox(\"Mouse steering (HOSAM)\"") ==
+    REQUIRE(axesUi.find("ImGui::Checkbox(\"Mouse steering (HOSAM)\"") ==
            std::string::npos);
-    assert(axesUi.find("ImGui::Checkbox(\"Alignment assist\"") ==
+    REQUIRE(axesUi.find("ImGui::Checkbox(\"Alignment assist\"") ==
            std::string::npos);
     const auto cameraUi = Read(root / "src/WizardTunePages.cpp");
-    assert(cameraUi.find("legacy HOTAS fallback is read-only") !=
+    REQUIRE(cameraUi.find("legacy HOTAS fallback is read-only") !=
            std::string::npos);
-    assert(cameraUi.find("ImGui::Checkbox(\"Enable camera look\"") ==
+    REQUIRE(cameraUi.find("ImGui::Checkbox(\"Enable camera look\"") ==
            std::string::npos);
-    assert(cameraUi.find("CaptureSlot::kHeadLook") == std::string::npos);
+    REQUIRE(cameraUi.find("CaptureSlot::kHeadLook") == std::string::npos);
 
     const auto workbench = Read(root / "src/BindingWizard.cpp");
-    assert(workbench.find("PowerModuleUI") == std::string::npos);
-    assert(workbench.find("Page::Power") == std::string::npos);
-    assert(workbench.find("Power##Primary") == std::string::npos);
+    REQUIRE(workbench.find("PowerModuleUI") == std::string::npos);
+    REQUIRE(workbench.find("Page::Power") == std::string::npos);
+    REQUIRE(workbench.find("Power##Primary") == std::string::npos);
     const auto session = Read(root / "include/WizardSession.h");
-    assert(session.find("enum class Page { Bind, Tune, Advanced, Power }") ==
+    REQUIRE(session.find("enum class Page { Bind, Tune, Advanced, Power }") ==
            std::string::npos);
 
     // The legacy workbench remains historical source reference only. The shipping
@@ -142,21 +142,21 @@ int main()
     // MinHook, D3D12, and DXGI out of the target so graphics stacks cannot share
     // an interception surface with HOTAS.
     const auto build = Read(root / "xmake.lua");
-    assert(build.find("add_requires(\"imgui") == std::string::npos);
-    assert(build.find("add_requires(\"minhook") == std::string::npos);
-    assert(build.find("add_packages(\"imgui") == std::string::npos);
-    assert(build.find("\"d3d12\"") == std::string::npos);
-    assert(build.find("\"dxgi\"") == std::string::npos);
-    assert(build.find("remove_files(") != std::string::npos);
-    assert(build.find("\"src/UIHook.cpp\"") != std::string::npos);
-    assert(build.find("\"src/BindingWizard.cpp\"") != std::string::npos);
+    REQUIRE(build.find("add_requires(\"imgui") == std::string::npos);
+    REQUIRE(build.find("add_requires(\"minhook") == std::string::npos);
+    REQUIRE(build.find("add_packages(\"imgui") == std::string::npos);
+    REQUIRE(build.find("\"d3d12\"") == std::string::npos);
+    REQUIRE(build.find("\"dxgi\"") == std::string::npos);
+    REQUIRE(build.find("remove_files(") != std::string::npos);
+    REQUIRE(build.find("\"src/UIHook.cpp\"") != std::string::npos);
+    REQUIRE(build.find("\"src/BindingWizard.cpp\"") != std::string::npos);
 
     const auto mainSource = Read(root / "src/Main.cpp");
-    assert(mainSource.find("UIHook") == std::string::npos);
-    assert(mainSource.find("BindingWizard") == std::string::npos);
+    REQUIRE(mainSource.find("UIHook") == std::string::npos);
+    REQUIRE(mainSource.find("BindingWizard") == std::string::npos);
     const auto controller = Read(root / "src/ThrottleController.cpp");
-    assert(controller.find("UIHook") == std::string::npos);
-    assert(controller.find("RequestHostPage(\"hotas-setup\")") !=
+    REQUIRE(controller.find("UIHook") == std::string::npos);
+    REQUIRE(controller.find("RequestHostPage(\"hotas-setup\")") !=
            std::string::npos);
     return 0;
 }

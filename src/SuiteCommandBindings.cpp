@@ -76,46 +76,30 @@ bool IsPovActive(DWORD pov, int direction) {
 }
 
 bool IsHeld(int deviceIndex, int value) {
-    const auto* state = DeviceManager::GetCachedState(deviceIndex);
-    if (!state) return false;
-    if (value >= 1 && value <= 128) return (state->rgbButtons[value - 1] & 0x80) != 0;
-    if (value >= 129 && value <= 144) {
-        const int pov = (value - 129) / 4;
-        const int direction = (value - 129) % 4;
-        return IsPovActive(state->rgdwPOV[pov], direction);
-    }
-    return false;
+    return DeviceManager::IsButtonPressed({"", value, deviceIndex});
 }
 
 void ResolveBinding(Entry& entry) {
     auto& ref = entry.binding;
     if (!ref.IsValid() || ref.value < 1 || ref.value > 144) return;
     int deviceIndex = -1;
-    if (ref.HasIndex()) {
-        deviceIndex = ref.deviceIndex < DeviceManager::GetDeviceCount() ? ref.deviceIndex : -1;
-    } else if (ref.HasDevice()) {
+    if (ref.HasDevice()) {
         deviceIndex = DeviceManager::ResolveByName(ref.deviceName);
+    } else if (ref.HasIndex()) {
+        deviceIndex = ref.deviceIndex < DeviceManager::GetDeviceCount() ? ref.deviceIndex : -1;
     } else if (DeviceManager::GetDeviceCount() > 0) {
         deviceIndex = 0;
     }
+    if (ref.HasDevice()) ref.deviceIndex = deviceIndex;
     if (deviceIndex >= 0) {
         ref.deviceIndex = deviceIndex;
         DeviceManager::OpenDevice(deviceIndex);
     }
 }
 
-bool HasDuplicateName(int deviceIndex) {
-    const auto& name = DeviceManager::GetDevice(deviceIndex).productName;
-    for (int index = 0; index < DeviceManager::GetDeviceCount(); ++index) {
-        if (index != deviceIndex && DeviceManager::GetDevice(index).productName == name) return true;
-    }
-    return false;
-}
-
 std::string FormatCaptured(int deviceIndex, int value) {
     const auto& device = DeviceManager::GetDevice(deviceIndex);
-    if (HasDuplicateName(deviceIndex)) return std::format("#{}@{}", deviceIndex, value);
-    return std::format("{}@{}", device.productName, value);
+    return FormatBindingRef({DeviceIdentity::Selector(device.persistentId), value, -1}, false);
 }
 
 Entry* FindEntry(std::string_view commandId) {

@@ -4,6 +4,7 @@
 #include "ShipOutput.h"
 #include "RuntimePaths.h"
 #include "NativeShipControl.h"
+#include "DeviceManager.h"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -291,8 +292,10 @@ void Inject(float throttle, float pitch, float yaw, float roll,
 
     // HOSAM mode: release yaw/pitch gates so the game's native mouse pipeline
     // owns steering.  All other rotational lanes (roll, strafe) stay active.
-    bool yawGateEnabled   = !suppressPitchYaw;
-    bool pitchGateEnabled = !suppressPitchYaw;
+    bool yawGateEnabled = !suppressPitchYaw &&
+        (!cfg.yawAxis.IsValid() || DeviceManager::GetRawAxis(cfg.yawAxis).has_value());
+    bool pitchGateEnabled = !suppressPitchYaw &&
+        (!cfg.pitchAxis.IsValid() || DeviceManager::GetRawAxis(cfg.pitchAxis).has_value());
 
     ThrottleHook::SetRotationalOverride(
         lateral, yaw, pitch, true,
@@ -303,6 +306,19 @@ void Inject(float throttle, float pitch, float yaw, float roll,
     NativeShipControl::SetSplitFlightAxes(
         cfg.rollEnabled ? roll : 0.0F, strafeX,
         rollOverrideActive || strafeLatOverrideActive);
+
+    if (cfg.throttleAxis.IsValid() && cfg.throttleAxis.value > 0 &&
+        !DeviceManager::GetRawAxis(cfg.throttleAxis)) {
+        ThrottleHook::SetSilenceEnabled(false);
+        ThrottleHook::SetSilence6CEnabled(false);
+        ThrottleHook::SetReverseOverride(false);
+        s_throttleBurstFrames = 0;
+        s_lastInjectedThrottle = -999.0F;
+        s_lastAccumBurstValue = -999.0F;
+        s_accumulatorThrottle = 0.0F;
+        s_prevBoostHeld = false;
+        return;
+    }
 
     // --- BOOST GUARD & CANCEL LOGIC ---
     const bool boostHeld = cfg.bHoldForBoost && ShipOutputSystem::IsBoostRequested();

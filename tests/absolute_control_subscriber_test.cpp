@@ -6,10 +6,11 @@
 #include "HotasBindingCapture.h"
 #include "SFSEInterface.h"
 #include "ShipOutput.h"
+#include "SupportReport.h"
 
 #include <algorithm>
 #include <array>
-#include <cassert>
+#include "TestCheck.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,16 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+
+namespace SupportReport {
+bool failExport{};
+std::string lastFrontend;
+bool Export(std::string_view frontend) noexcept {
+    lastFrontend = frontend;
+    return !failExport;
+}
+std::string Status() { return failExport ? "Report failed" : "Report saved"; }
+}
 
 namespace TestSettings {
 AbsoluteControlSettings::ScalarState stored = AbsoluteControlSettings::DefaultState();
@@ -607,94 +618,94 @@ int main()
     static_assert(offsetof(SFSE::Impl::SFSEMessagingInterface, registerListener) == 8);
 
     ResetFakeHost();
-    assert(AbsoluteControlSubscriber::Testing::RegisterFlightAxesComposition(
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterFlightAxesComposition(
                &g_compositionApi) == Result::Ok);
-    assert(AbsoluteControlSubscriber::Testing::
+    REQUIRE(AbsoluteControlSubscriber::Testing::
         IsFlightAxesCompositionRegistered());
-    assert(std::strcmp(g_copiedComposition.moduleId, "absolute.hotas") == 0);
-    assert(std::strcmp(g_copiedComposition.pageId,
+    REQUIRE(std::strcmp(g_copiedComposition.moduleId, "absolute.hotas") == 0);
+    REQUIRE(std::strcmp(g_copiedComposition.pageId,
                        "hotas-flight-axes") == 0);
-    assert(g_copiedComposition.nodeCount == 83);
-    assert(g_copiedComposition.associationCount == 10);
+    REQUIRE(g_copiedComposition.nodeCount == 83);
+    REQUIRE(g_copiedComposition.associationCount == 10);
     std::array<Composition::NodeStateV1, 9> compositionStates{};
     std::uint32_t compositionStateCount{};
-    assert(g_copiedComposition.readNodeStates(
+    REQUIRE(g_copiedComposition.readNodeStates(
                g_copiedComposition.context, "absolute.hotas",
                "hotas-flight-axes", compositionStates.data(),
                static_cast<std::uint32_t>(compositionStates.size()),
                &compositionStateCount) == Result::Ok);
-    assert(compositionStateCount == compositionStates.size());
-    assert(std::strcmp(compositionStates[0].nodeId, "flight-summary") == 0);
-    assert(std::strcmp(compositionStates[0].value, "0 / 6 AXES BOUND") == 0);
-    assert(std::strcmp(compositionStates[1].value, "NEEDS BINDING") == 0);
+    REQUIRE(compositionStateCount == compositionStates.size());
+    REQUIRE(std::strcmp(compositionStates[0].nodeId, "flight-summary") == 0);
+    REQUIRE(std::strcmp(compositionStates[0].value, "0 / 6 AXES BOUND") == 0);
+    REQUIRE(std::strcmp(compositionStates[1].value, "NEEDS BINDING") == 0);
 
     std::size_t pageCount{};
     const auto* pages = AbsoluteControlSubscriber::Testing::Pages(pageCount);
     ValueV1 compositionBindingEdit{};
     compositionBindingEdit.kind = ValueKind::String;
     strcpy_s(compositionBindingEdit.stringValue, "Test Stick@0x31");
-    assert(pages[0].writeDraft(pages[0].context, "bind-throttle-axis",
+    REQUIRE(pages[0].writeDraft(pages[0].context, "bind-throttle-axis",
                &compositionBindingEdit) == Result::Ok);
     compositionStates = {};
     compositionStateCount = 0;
-    assert(g_copiedComposition.readNodeStates(
+    REQUIRE(g_copiedComposition.readNodeStates(
                g_copiedComposition.context, "absolute.hotas",
                "hotas-flight-axes", compositionStates.data(),
                static_cast<std::uint32_t>(compositionStates.size()),
                &compositionStateCount) == Result::Ok);
-    assert(std::strcmp(compositionStates[0].value, "1 / 6 AXES BOUND") == 0);
-    assert(std::strcmp(compositionStates[0].sourceLabel,
+    REQUIRE(std::strcmp(compositionStates[0].value, "1 / 6 AXES BOUND") == 0);
+    REQUIRE(std::strcmp(compositionStates[0].sourceLabel,
                        "UNAPPLIED DRAFT") == 0);
-    assert(std::strcmp(compositionStates[1].value, "BOUND") == 0);
+    REQUIRE(std::strcmp(compositionStates[1].value, "BOUND") == 0);
     pages[0].cancel(pages[0].context);
     compositionStates = {};
     compositionStateCount = 0;
-    assert(g_copiedComposition.readNodeStates(
+    REQUIRE(g_copiedComposition.readNodeStates(
                g_copiedComposition.context, "absolute.hotas",
                "hotas-flight-axes", compositionStates.data(),
                static_cast<std::uint32_t>(compositionStates.size()),
                &compositionStateCount) == Result::Ok);
-    assert(std::strcmp(compositionStates[1].value, "NEEDS BINDING") == 0);
-    assert(AbsoluteControlSubscriber::Testing::RegisterShipButtonsComposition(
+    REQUIRE(std::strcmp(compositionStates[1].value, "NEEDS BINDING") == 0);
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterShipButtonsComposition(
                &g_compositionApi) == Result::Ok);
-    assert(AbsoluteControlSubscriber::Testing::
+    REQUIRE(AbsoluteControlSubscriber::Testing::
         IsShipButtonsCompositionRegistered());
-    assert(std::strcmp(g_copiedComposition.pageId,
+    REQUIRE(std::strcmp(g_copiedComposition.pageId,
                        "hotas-ship-buttons") == 0);
-    assert(g_copiedComposition.nodeCount == 100);
-    assert(g_copiedComposition.associationCount == 0);
-    assert(pageCount == kExpectedPageIds.size());
-    assert(std::strcmp(AbsoluteControlSubscriber::Testing::Module().moduleId,
+    REQUIRE(g_copiedComposition.nodeCount == 100);
+    REQUIRE(g_copiedComposition.associationCount == 0);
+    REQUIRE(pageCount == kExpectedPageIds.size());
+    REQUIRE(std::strcmp(AbsoluteControlSubscriber::Testing::Module().moduleId,
                        "absolute.hotas") == 0);
-    assert(std::string_view(pages[0].pageId) == "hotas-flight-axes");
-    assert(std::string_view(pages[0].displayName) == "Flight Axes");
-    assert(std::string_view(pages[0].controls[0].controlId) ==
+    REQUIRE(std::string_view(pages[0].pageId) == "hotas-flight-axes");
+    REQUIRE(std::string_view(pages[0].displayName) == "Flight Axes");
+    REQUIRE(std::string_view(pages[0].controls[0].controlId) ==
            "flight-axes-edit-profile");
-    assert((pages[0].controls[0].flags & kControlPinnedContext) != 0);
-    assert(std::string_view(pages[0].controls[1].controlId) ==
+    REQUIRE((pages[0].controls[0].flags & kControlPinnedContext) != 0);
+    REQUIRE(std::string_view(pages[0].controls[1].controlId) ==
            "flight-axes-layer-mode");
-    assert(std::string_view(pages[0].controls[2].controlId) ==
+    REQUIRE(std::string_view(pages[0].controls[2].controlId) ==
            "flight-axes-layer-modifier");
-    assert(FindControl(pages[0], "bind-throttle-axis") != nullptr);
-    assert(std::string_view(pages[1].pageId) == "hotas-ship-buttons");
-    assert(std::string_view(pages[1].displayName) == "Ship Buttons");
-    assert(FindControl(pages[1], "ship-native-controls")->kind ==
+    REQUIRE(FindControl(pages[0], "bind-throttle-axis") != nullptr);
+    REQUIRE(std::string_view(pages[1].pageId) == "hotas-ship-buttons");
+    REQUIRE(std::string_view(pages[1].displayName) == "Ship Buttons");
+    REQUIRE(FindControl(pages[1], "ship-native-controls")->kind ==
            ControlKind::GroupHeader);
-    assert(FindControl(pages[1], "ship-axis-bindings") == nullptr);
-    assert(FindControl(pages[1], "bind-throttle-axis") == nullptr);
-    assert(FindControl(pages[1], "bind-ship-select-accept") != nullptr);
-    assert(FindControl(pages[1], "bind-menu-accept") != nullptr);
-    assert(FindControl(pages[1], "bind-menu-cancel") != nullptr);
-    assert(FindControl(pages[1], "shortcut-menu-preset") == nullptr);
-    assert(std::string_view(pages[8].pageId) == "hotas-setup");
-    assert(std::string_view(pages[8].displayName) == "Administration");
+    REQUIRE(FindControl(pages[1], "ship-axis-bindings") == nullptr);
+    REQUIRE(FindControl(pages[1], "bind-throttle-axis") == nullptr);
+    REQUIRE(FindControl(pages[1], "bind-ship-select-accept") != nullptr);
+    REQUIRE(FindControl(pages[1], "bind-menu-accept") != nullptr);
+    REQUIRE(FindControl(pages[1], "bind-menu-cancel") != nullptr);
+    REQUIRE(FindControl(pages[1], "shortcut-menu-preset") == nullptr);
+    REQUIRE(std::string_view(pages[8].pageId) == "hotas-setup");
+    REQUIRE(std::string_view(pages[8].displayName) == "Administration");
     for (std::size_t index = 0; index < pageCount; ++index) {
-        assert(std::strcmp(pages[index].pageId, kExpectedPageIds[index]) == 0);
-        assert(pages[index].beginBindingCapture != nullptr);
-        assert(pages[index].pollBindingCapture != nullptr);
-        assert(pages[index].cancelBindingCapture != nullptr);
-        assert(pages[index].reassignBinding != nullptr);
-        assert(pages[index].context != nullptr);
+        REQUIRE(std::strcmp(pages[index].pageId, kExpectedPageIds[index]) == 0);
+        REQUIRE(pages[index].beginBindingCapture != nullptr);
+        REQUIRE(pages[index].pollBindingCapture != nullptr);
+        REQUIRE(pages[index].cancelBindingCapture != nullptr);
+        REQUIRE(pages[index].reassignBinding != nullptr);
+        REQUIRE(pages[index].context != nullptr);
     }
     std::uint32_t editableControlCount{};
     std::uint32_t pinnedControlCount{};
@@ -709,15 +720,15 @@ int main()
                 (control.flags & kControlPinnedContext) != 0 ? 1 : 0;
         }
     }
-    assert(pinnedControlCount == 27);
-    assert(editableControlCount ==
+    REQUIRE(pinnedControlCount == 27);
+    REQUIRE(editableControlCount ==
            AbsoluteControlSettings::Definitions().size() +
-           HotasBindingCatalog::kTargetCount + 90);
+           HotasBindingCatalog::kTargetCount + 91);
     for (const auto& definition : AbsoluteControlSettings::Definitions()) {
         const auto* owner = FindPageForControl(pages, pageCount, definition.controlId);
-        assert(owner);
+        REQUIRE(owner);
         const auto* control = FindControl(*owner, definition.controlId);
-        assert(control);
+        REQUIRE(control);
         const auto expectedKind =
             definition.type == AbsoluteControlSettings::ScalarType::Boolean ?
                 ControlKind::Toggle :
@@ -725,25 +736,25 @@ int main()
                 ControlKind::IntegerSlider :
             definition.type == AbsoluteControlSettings::ScalarType::Choice ?
                 ControlKind::Choice : ControlKind::FloatSlider;
-        assert(control->kind == expectedKind);
+        REQUIRE(control->kind == expectedKind);
         if (definition.type != AbsoluteControlSettings::ScalarType::Boolean) {
-            assert(control->minimumValue == definition.minimum);
-            assert(control->maximumValue == definition.maximum);
-            assert(control->stepValue == definition.step);
+            REQUIRE(control->minimumValue == definition.minimum);
+            REQUIRE(control->maximumValue == definition.maximum);
+            REQUIRE(control->stepValue == definition.step);
         }
-        assert((control->flags & kControlReadOnly) == 0);
-        assert(owner->writeDraft && owner->apply && owner->cancel);
+        REQUIRE((control->flags & kControlReadOnly) == 0);
+        REQUIRE(owner->writeDraft && owner->apply && owner->cancel);
     }
     for (const auto& target : HotasBindingCatalog::kTargets) {
         const auto* owner = FindPageForControl(pages, pageCount, target.controlId);
-        assert(owner && std::string_view(owner->pageId) == target.pageId);
+        REQUIRE(owner && std::string_view(owner->pageId) == target.pageId);
         const auto* control = FindControl(*owner, target.controlId);
-        assert(control && control->kind == ControlKind::InputBinding);
-        assert((control->flags & kBindingController) != 0);
-        assert((control->flags & kBindingClearable) != 0);
-        assert((control->flags & kControlReadOnly) == 0);
-        assert(owner->writeDraft && owner->apply && owner->cancel);
-        assert(owner->beginBindingCapture && owner->pollBindingCapture &&
+        REQUIRE(control && control->kind == ControlKind::InputBinding);
+        REQUIRE((control->flags & kBindingController) != 0);
+        REQUIRE((control->flags & kBindingClearable) != 0);
+        REQUIRE((control->flags & kControlReadOnly) == 0);
+        REQUIRE(owner->writeDraft && owner->apply && owner->cancel);
+        REQUIRE(owner->beginBindingCapture && owner->pollBindingCapture &&
                owner->cancelBindingCapture && owner->reassignBinding);
     }
     std::size_t routeStatusCount{};
@@ -754,34 +765,34 @@ int main()
         const auto routeId = std::string(target.controlId) + "-route";
         const auto* control = FindControl(pages[1], routeId);
         const auto* action = FindShipAction(target.actionId);
-        assert(action);
-        assert(control);
+        REQUIRE(action);
+        REQUIRE(control);
         ValueV1 routeValue{};
-        assert(pages[1].readValue(
+        REQUIRE(pages[1].readValue(
                    pages[1].context, routeId.c_str(), &routeValue) == Result::Ok);
-        assert(control->kind == ControlKind::Choice);
-        assert(routeValue.kind == ValueKind::Integer);
+        REQUIRE(control->kind == ControlKind::Choice);
+        REQUIRE(routeValue.kind == ValueKind::Integer);
         if (HasSelectableShipControlRoute(*action)) {
-            assert((control->flags & kControlReadOnly) == 0);
-            assert(routeValue.integerValue ==
+            REQUIRE((control->flags & kControlReadOnly) == 0);
+            REQUIRE(routeValue.integerValue ==
                 (action->recommendedMethod == ShipControlMethod::Direct ? 0 : 1));
             ++selectableRouteCount;
         } else {
-            assert((control->flags & kControlReadOnly) != 0);
-            assert(routeValue.integerValue == 1);
+            REQUIRE((control->flags & kControlReadOnly) != 0);
+            REQUIRE(routeValue.integerValue == 1);
             ++fixedRouteCount;
         }
         std::array<ChoiceOptionV1, 2> choices{};
         std::uint32_t choiceCount{};
-        assert(pages[1].readChoiceOptions(
+        REQUIRE(pages[1].readChoiceOptions(
                    pages[1].context, routeId.c_str(), choices.data(),
                    static_cast<std::uint32_t>(choices.size()),
                    &choiceCount) == Result::Ok);
-        assert(choiceCount == 2);
-        assert(std::string_view(choices[0].label) ==
+        REQUIRE(choiceCount == 2);
+        REQUIRE(std::string_view(choices[0].label) ==
             (HasSelectableShipControlRoute(*action)
                 ? "Direct function" : "Direct injection unavailable"));
-        assert(std::string_view(choices[1].label) ==
+        REQUIRE(std::string_view(choices[1].label) ==
             (!HasSelectableShipControlRoute(*action)
                 ? "Fixed ship-context SendInput"
                 : AlternateShipControlMethod(*action) == ShipControlMethod::Context
@@ -789,108 +800,118 @@ int main()
                     : "SendInput key / mouse"));
         ++routeStatusCount;
     }
-    assert(routeStatusCount == 23);
-    assert(selectableRouteCount == 18);
-    assert(fixedRouteCount == 5);
-    assert(pages[1].controlCount < kMaximumChoiceOptions);
+    REQUIRE(routeStatusCount == 23);
+    REQUIRE(selectableRouteCount == 18);
+    REQUIRE(fixedRouteCount == 5);
+    REQUIRE(pages[1].controlCount < kMaximumChoiceOptions);
     for (const auto id : {"profile-operation-name", "macro-name"}) {
         const auto* owner = FindPageForControl(pages, pageCount, id);
-        assert(owner);
+        REQUIRE(owner);
         const auto* text = FindControl(*owner, id);
-        assert(text && text->kind == ControlKind::TextInput);
-        assert(text->minimumValue == 0.0);
-        assert(text->maximumValue == kStringValueCapacity - 1);
-        assert(text->stepValue == 1.0);
+        REQUIRE(text && text->kind == ControlKind::TextInput);
+        REQUIRE(text->minimumValue == 0.0);
+        REQUIRE(text->maximumValue == kStringValueCapacity - 1);
+        REQUIRE(text->stepValue == 1.0);
     }
     const auto& devicePage = pages[6];
-    assert(devicePage.controlCount == 14);
-    assert(devicePage.writeDraft && devicePage.invokeAction &&
+    REQUIRE(devicePage.controlCount == 14);
+    REQUIRE(devicePage.writeDraft && devicePage.invokeAction &&
            devicePage.readRecordItems);
-    assert(devicePage.apply && devicePage.cancel);
+    REQUIRE(devicePage.apply && devicePage.cancel);
     const auto* deviceRecords = FindControl(devicePage, "device-selection");
     const auto* deviceClear = FindControl(
         devicePage, "clear-device-calibration");
     const auto* deviceReassign = FindControl(
         devicePage, "reassign-duplicate-device");
-    assert(deviceRecords &&
+    REQUIRE(deviceRecords &&
            deviceRecords->kind == ControlKind::RecordCollection &&
            (deviceRecords->flags & kControlTransientSelection) != 0);
-    assert(deviceClear && deviceReassign &&
+    REQUIRE(deviceClear && deviceReassign &&
            (deviceClear->flags & kControlRequiresConfirmation) != 0 &&
            (deviceReassign->flags & kControlRequiresConfirmation) != 0);
-    assert(pages[1].writeDraft && pages[1].apply && pages[1].cancel);
-    assert(pages[2].writeDraft && pages[2].apply && pages[2].cancel);
-    assert(pages[2].readChoiceOptions);
-    assert(pages[3].writeDraft && pages[3].apply && pages[3].cancel);
-    assert(pages[4].writeDraft && pages[4].apply && pages[4].cancel);
-    assert(pages[4].invokeAction && pages[4].readChoiceOptions &&
+    REQUIRE(pages[1].writeDraft && pages[1].apply && pages[1].cancel);
+    REQUIRE(pages[2].writeDraft && pages[2].apply && pages[2].cancel);
+    REQUIRE(pages[2].readChoiceOptions);
+    REQUIRE(pages[3].writeDraft && pages[3].apply && pages[3].cancel);
+    const auto* reportPage = FindPageForControl(pages, pageCount, "export-support-report");
+    REQUIRE(reportPage && reportPage->invokeAction);
+    REQUIRE(reportPage->invokeAction(reportPage->context, "export-support-report") == Result::Ok);
+    REQUIRE(SupportReport::lastFrontend.contains("Control ABI 1"));
+    SupportReport::failExport = true;
+    REQUIRE(reportPage->invokeAction(reportPage->context, "export-support-report") == Result::Rejected);
+    ValueV1 reportStatus;
+    REQUIRE(reportPage->readValue(reportPage->context, "support-report-status", &reportStatus) == Result::Ok);
+    REQUIRE(std::string_view(reportStatus.stringValue) == "Report failed");
+    SupportReport::failExport = false;
+    REQUIRE(pages[4].writeDraft && pages[4].apply && pages[4].cancel);
+    REQUIRE(pages[4].invokeAction && pages[4].readChoiceOptions &&
            pages[4].readRecordItems);
-    assert(pages[5].writeDraft && pages[5].invokeAction && pages[5].apply &&
+    REQUIRE(pages[5].writeDraft && pages[5].invokeAction && pages[5].apply &&
            pages[5].cancel && pages[5].readChoiceOptions &&
            pages[5].readRecordItems && pages[5].beginBindingCapture);
-    assert(FindControl(pages[5], "macro-records"));
-    assert(FindControl(pages[5], "macro-step-records"));
-    assert(FindControl(pages[5], "macro-target-records"));
-    assert(FindControl(pages[5], "macro-step-amount"));
-    assert(FindControl(pages[1], "shortcut-records"));
-    assert(FindControl(pages[1], "shortcut-output"));
+    REQUIRE(FindControl(pages[5], "macro-records"));
+    REQUIRE(FindControl(pages[5], "macro-step-records"));
+    REQUIRE(FindControl(pages[5], "macro-target-records"));
+    REQUIRE(FindControl(pages[5], "macro-step-amount"));
+    REQUIRE(FindControl(pages[1], "shortcut-records"));
+    REQUIRE(FindControl(pages[1], "shortcut-output"));
     const auto* throttleSummary = FindControl(
         pages[0], "flight-throttle-summary");
     const auto* bindingsLink = FindControl(pages[0], "flight-open-bindings");
     const auto* throttleLink = FindControl(pages[0], "flight-open-throttle");
     const auto* macroLink = FindControl(pages[1], "shortcut-macro-link");
-    assert(throttleSummary &&
+    REQUIRE(throttleSummary &&
            (throttleSummary->flags & kControlReadOnly) != 0);
-    assert(throttleLink && throttleLink->kind == ControlKind::Action &&
+    REQUIRE(throttleLink && throttleLink->kind == ControlKind::Action &&
            pages[0].invokeAction);
-    assert(bindingsLink && bindingsLink->kind == ControlKind::Action);
-    assert(macroLink && macroLink->kind == ControlKind::Action &&
+    REQUIRE(bindingsLink && bindingsLink->kind == ControlKind::Action);
+    REQUIRE(macroLink && macroLink->kind == ControlKind::Action &&
            pages[1].invokeAction);
-    assert(!FindControl(pages[0], "rate-throttle-enabled"));
+    REQUIRE(!FindControl(pages[0], "rate-throttle-enabled"));
     const auto* profileRecords = FindControl(pages[4], "profile-records");
-    assert(profileRecords && profileRecords->kind == ControlKind::RecordCollection);
-    assert((profileRecords->flags & kControlTransientSelection) != 0);
+    REQUIRE(profileRecords && profileRecords->kind == ControlKind::RecordCollection);
+    REQUIRE((profileRecords->flags & kControlTransientSelection) != 0);
     const auto* profileImport = FindControl(pages[4], "profile-import-full");
     const auto* profileReset = FindControl(pages[4], "profile-reset-main");
-    assert(profileImport && profileReset);
-    assert((profileImport->flags & kControlRequiresConfirmation) != 0);
-    assert((profileReset->flags & kControlRequiresConfirmation) != 0);
+    REQUIRE(profileImport && profileReset);
+    REQUIRE((profileImport->flags & kControlRequiresConfirmation) != 0);
+    REQUIRE((profileReset->flags & kControlRequiresConfirmation) != 0);
 
     std::unordered_set<std::string_view> catalogIds;
     for (std::size_t index = 0;
          index < AbsoluteControlSettings::Definitions().size(); ++index) {
         const auto& definition = AbsoluteControlSettings::Definitions()[index];
-        assert(static_cast<std::size_t>(definition.field) == index);
-        assert(catalogIds.insert(definition.controlId).second);
-        assert(!definition.section.empty() && !definition.key.empty());
-        assert(definition.minimum <= definition.defaultValue);
-        assert(definition.defaultValue <= definition.maximum);
+        REQUIRE(static_cast<std::size_t>(definition.field) == index);
+        REQUIRE(catalogIds.insert(definition.controlId).second);
+        REQUIRE(!definition.section.empty() && !definition.key.empty());
+        REQUIRE(definition.minimum <= definition.defaultValue);
+        REQUIRE(definition.defaultValue <= definition.maximum);
     }
     std::string catalogError;
     auto invalidCatalogState = AbsoluteControlSettings::DefaultState();
-    assert(AbsoluteControlSettings::Validate(invalidCatalogState, catalogError));
+    REQUIRE(AbsoluteControlSettings::Validate(invalidCatalogState, catalogError));
     AbsoluteControlSettings::SetFloat(
         invalidCatalogState,
         AbsoluteControlSettings::ScalarField::MenuReleaseThreshold,
         AbsoluteControlSettings::GetFloat(
             invalidCatalogState,
             AbsoluteControlSettings::ScalarField::MenuEngageThreshold));
-    assert(!AbsoluteControlSettings::Validate(invalidCatalogState, catalogError));
-    assert(!catalogError.empty());
+    REQUIRE(!AbsoluteControlSettings::Validate(invalidCatalogState, catalogError));
+    REQUIRE(!catalogError.empty());
 
     for (std::size_t pageIndex = 0; pageIndex < pageCount; ++pageIndex) {
         for (std::uint32_t controlIndex = 0;
              controlIndex < pages[pageIndex].controlCount; ++controlIndex) {
             const std::string_view id =
                 pages[pageIndex].controls[controlIndex].controlId;
-            assert(id.find("power") == std::string_view::npos);
-            assert(id.find("head") == std::string_view::npos);
-            assert(id.find("mouse") == std::string_view::npos);
-            assert(id.find("hosam") == std::string_view::npos);
-            assert(id.find("alignment") == std::string_view::npos);
+            REQUIRE(id.find("power") == std::string_view::npos);
+            REQUIRE(id.find("head") == std::string_view::npos);
+            REQUIRE(id.find("mouse") == std::string_view::npos);
+            REQUIRE(id.find("hosam") == std::string_view::npos);
+            REQUIRE(id.find("alignment") == std::string_view::npos);
         }
     }
-    assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(pages, pageCount) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::ValidateDescriptors(pages, pageCount) ==
            Result::Ok);
 
     std::array<PageDescriptorV1, kExpectedPageIds.size()> invalidPages{};
@@ -902,62 +923,62 @@ int main()
         invalidPages[index].controls = copiedControls[index].data();
     }
     strcpy_s(copiedControls[7][3].controlId, copiedControls[8][0].controlId);
-    assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
+    REQUIRE(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
                invalidPages.data(), invalidPages.size()) == Result::Duplicate);
     copiedControls[7][3] = pages[7].controls[3];
     const auto profileText = std::ranges::find_if(copiedControls[4],
         [](const ControlDescriptorV1& control) {
             return std::string_view(control.controlId) == "profile-operation-name";
         });
-    assert(profileText != copiedControls[4].end());
+    REQUIRE(profileText != copiedControls[4].end());
     profileText->maximumValue = 0.0;
-    assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
+    REQUIRE(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
                invalidPages.data(), invalidPages.size()) == Result::InvalidArgument);
     *profileText = *FindControl(pages[4], "profile-operation-name");
     copiedControls[8][0].kind = static_cast<ControlKind>(99);
-    assert(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
+    REQUIRE(AbsoluteControlSubscriber::Testing::ValidateDescriptors(
                invalidPages.data(), invalidPages.size()) == Result::InvalidArgument);
 
     ResetFakeHost();
     g_resolvedApi = nullptr;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::NotFound);
-    assert(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
 
     ResetFakeHost();
     ApiV1 olderApi = g_api;
     olderApi.structSize = kApiV1BaseSize;
     g_resolvedApi = &olderApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
-    assert(g_moduleCalls == 0);
-    assert(g_pageCalls == 0);
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_moduleCalls == 0);
+    REQUIRE(g_pageCalls == 0);
 
     ResetFakeHost();
     ApiV1 capturelessApi = g_api;
     capturelessApi.capabilities = kCapabilityLabeledChoices;
     g_resolvedApi = &capturelessApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(AbsoluteControlSubscriber::IsHosted());
-    assert(g_pageCalls == kExpectedPageIds.size());
+    REQUIRE(AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_pageCalls == kExpectedPageIds.size());
     for (const auto& page : g_copiedPages) {
-        assert(page.beginBindingCapture == nullptr);
-        assert(page.pollBindingCapture == nullptr);
-        assert(page.cancelBindingCapture == nullptr);
-        assert(page.reassignBinding == nullptr);
+        REQUIRE(page.beginBindingCapture == nullptr);
+        REQUIRE(page.pollBindingCapture == nullptr);
+        REQUIRE(page.cancelBindingCapture == nullptr);
+        REQUIRE(page.reassignBinding == nullptr);
     }
     for (const auto& target : HotasBindingCatalog::kTargets) {
-        assert(FindPageForControl(g_copiedPages.data(), g_copiedPages.size(),
+        REQUIRE(FindPageForControl(g_copiedPages.data(), g_copiedPages.size(),
                                   target.controlId) == nullptr);
     }
-    assert(FindControl(g_copiedPages[6], "devices-scope"));
-    assert(!FindControl(g_copiedPages[6], "device-selection"));
-    assert(g_copiedPages[6].readRecordItems == nullptr);
-    assert(g_copiedPages[6].invokeAction == nullptr);
-    assert(!AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
-    assert(g_openPageCalls == 0);
+    REQUIRE(FindControl(g_copiedPages[6], "devices-scope"));
+    REQUIRE(!FindControl(g_copiedPages[6], "device-selection"));
+    REQUIRE(g_copiedPages[6].readRecordItems == nullptr);
+    REQUIRE(g_copiedPages[6].invokeAction == nullptr);
+    REQUIRE(!AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
+    REQUIRE(g_openPageCalls == 0);
 
     // A pre-command ABI-v1 host can still register every existing page. Its
     // shorter table must never be read past the advertised struct size.
@@ -966,19 +987,19 @@ int main()
     preOpenCommandApi.structSize =
         static_cast<std::uint32_t>(offsetof(ApiV1, requestOpenPage));
     g_resolvedApi = &preOpenCommandApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(!AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
-    assert(g_openPageCalls == 0);
-    assert(!FindControl(g_copiedPages[0], "flight-throttle-summary"));
-    assert(!FindControl(g_copiedPages[0], "flight-open-bindings"));
-    assert(!FindControl(g_copiedPages[0], "flight-open-throttle"));
+    REQUIRE(!AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
+    REQUIRE(g_openPageCalls == 0);
+    REQUIRE(!FindControl(g_copiedPages[0], "flight-throttle-summary"));
+    REQUIRE(!FindControl(g_copiedPages[0], "flight-open-bindings"));
+    REQUIRE(!FindControl(g_copiedPages[0], "flight-open-throttle"));
     const auto* fallbackMacroLink = FindControl(
         g_copiedPages[1], "shortcut-macro-link");
-    assert(fallbackMacroLink &&
+    REQUIRE(fallbackMacroLink &&
            fallbackMacroLink->kind == ControlKind::InputBinding &&
            (fallbackMacroLink->flags & kControlReadOnly) != 0);
-    assert(g_copiedPages[1].invokeAction(
+    REQUIRE(g_copiedPages[1].invokeAction(
                g_copiedPages[1].context, "shortcut-macro-link") ==
            Result::NotFound);
 
@@ -991,15 +1012,15 @@ int main()
         kCapabilityLabeledChoices | kCapabilityRecordCollections |
         kCapabilityActionConfirmation;
     g_resolvedApi = &compoundCapturelessApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(FindControl(g_copiedPages[6], "device-selection"));
-    assert(g_copiedPages[6].readRecordItems);
-    assert(g_copiedPages[6].invokeAction);
-    assert(g_copiedPages[6].writeDraft);
-    assert(!g_copiedPages[6].apply && !g_copiedPages[6].cancel);
+    REQUIRE(FindControl(g_copiedPages[6], "device-selection"));
+    REQUIRE(g_copiedPages[6].readRecordItems);
+    REQUIRE(g_copiedPages[6].invokeAction);
+    REQUIRE(g_copiedPages[6].writeDraft);
+    REQUIRE(!g_copiedPages[6].apply && !g_copiedPages[6].cancel);
     for (const auto& page : g_copiedPages) {
-        assert(page.beginBindingCapture == nullptr);
+        REQUIRE(page.beginBindingCapture == nullptr);
     }
 
     // A host may support static provider capture without the later selected-
@@ -1011,108 +1032,108 @@ int main()
         kCapabilityProviderBindingCapture |
         kCapabilityBindingConflictResolution;
     g_resolvedApi = &recordlessCaptureApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(g_copiedPages[0].beginBindingCapture != nullptr);
-    assert(g_copiedPages[4].controlCount == 1);
-    assert(FindControl(g_copiedPages[4], "profiles-scope"));
-    assert(g_copiedPages[4].readRecordItems == nullptr);
-    assert(g_copiedPages[4].beginBindingCapture == nullptr);
+    REQUIRE(g_copiedPages[0].beginBindingCapture != nullptr);
+    REQUIRE(g_copiedPages[4].controlCount == 1);
+    REQUIRE(FindControl(g_copiedPages[4], "profiles-scope"));
+    REQUIRE(g_copiedPages[4].readRecordItems == nullptr);
+    REQUIRE(g_copiedPages[4].beginBindingCapture == nullptr);
 
     ResetFakeHost();
     g_rejectPageIndex = 4;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
-    assert(g_moduleCalls == 1);
-    assert(g_pageCalls == 5);
-    assert(g_unregisterCalls == 1);
-    assert(g_copiedModule.moduleId[0] == '\0');
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_moduleCalls == 1);
+    REQUIRE(g_pageCalls == 5);
+    REQUIRE(g_unregisterCalls == 1);
+    REQUIRE(g_copiedModule.moduleId[0] == '\0');
     for (const auto& copiedPage : g_copiedPages) {
-        assert(copiedPage.pageId[0] == '\0');
+        REQUIRE(copiedPage.pageId[0] == '\0');
     }
 
     ResetFakeHost();
     g_behavior = HostBehavior::DuplicateModule;
     g_rejectPageIndex = 2;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
-    assert(g_moduleCalls == 1);
-    assert(g_pageCalls == 3);
-    assert(g_unregisterCalls == 0);
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_moduleCalls == 1);
+    REQUIRE(g_pageCalls == 3);
+    REQUIRE(g_unregisterCalls == 0);
 
     ResetFakeHost();
     ApiV1 missingCapabilityApi = g_api;
     missingCapabilityApi.capabilities = kCapabilityStructuredLayout |
                                         kCapabilityProviderBindingCapture;
     g_resolvedApi = &missingCapabilityApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
-    assert(g_moduleCalls == 0);
-    assert(g_pageCalls == 0);
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_moduleCalls == 0);
+    REQUIRE(g_pageCalls == 0);
 
     ResetFakeHost();
     g_behavior = HostBehavior::Reject;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
     g_behavior = HostBehavior::Accept;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
 
     ResetFakeHost();
     g_behavior = HostBehavior::Invalid;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
     g_behavior = HostBehavior::Accept;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
 
     ResetFakeHost();
     g_behavior = HostBehavior::NotReady;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::NotReady);
-    assert(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
     g_behavior = HostBehavior::Accept;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Ok);
-    assert(AbsoluteControlSubscriber::IsHosted());
-    assert(g_moduleCalls == 2);
-    assert(g_pageCalls == kExpectedPageIds.size());
-    assert(std::strcmp(g_copiedModule.moduleId, "absolute.hotas") == 0);
+    REQUIRE(AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(g_moduleCalls == 2);
+    REQUIRE(g_pageCalls == kExpectedPageIds.size());
+    REQUIRE(std::strcmp(g_copiedModule.moduleId, "absolute.hotas") == 0);
     for (std::size_t index = 0; index < kExpectedPageIds.size(); ++index) {
-        assert(std::strcmp(g_copiedPages[index].pageId,
+        REQUIRE(std::strcmp(g_copiedPages[index].pageId,
                            kExpectedPageIds[index]) == 0);
     }
 
     g_hostOpen = true;
     g_hostCapture = true;
-    assert(AbsoluteControlSubscriber::IsHostOpen());
-    assert(AbsoluteControlSubscriber::IsHostInputCaptureActive());
+    REQUIRE(AbsoluteControlSubscriber::IsHostOpen());
+    REQUIRE(AbsoluteControlSubscriber::IsHostInputCaptureActive());
     g_hostOpen = false;
     g_hostCapture = false;
 
-    assert(AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
-    assert(g_openPageCalls == 1);
-    assert(g_openModule == "absolute.hotas");
-    assert(g_openPage == "hotas-setup");
-    assert(g_copiedPages[0].invokeAction(
+    REQUIRE(AbsoluteControlSubscriber::RequestHostPage("hotas-setup"));
+    REQUIRE(g_openPageCalls == 1);
+    REQUIRE(g_openModule == "absolute.hotas");
+    REQUIRE(g_openPage == "hotas-setup");
+    REQUIRE(g_copiedPages[0].invokeAction(
                g_copiedPages[0].context, "flight-open-throttle") == Result::Ok);
-    assert(g_openPageCalls == 2 && g_openPage == "hotas-throttle");
-    assert(g_copiedPages[0].invokeAction(
+    REQUIRE(g_openPageCalls == 2 && g_openPage == "hotas-throttle");
+    REQUIRE(g_copiedPages[0].invokeAction(
                g_copiedPages[0].context, "flight-open-bindings") == Result::Ok);
-    assert(g_openPageCalls == 3 && g_openPage == "hotas-ship-buttons");
-    assert(g_copiedPages[1].invokeAction(
+    REQUIRE(g_openPageCalls == 3 && g_openPage == "hotas-ship-buttons");
+    REQUIRE(g_copiedPages[1].invokeAction(
                g_copiedPages[1].context, "shortcut-macro-link") == Result::Ok);
-    assert(g_openPageCalls == 4 && g_openPage == "hotas-macros");
+    REQUIRE(g_openPageCalls == 4 && g_openPage == "hotas-macros");
     g_openPageResult = Result::Rejected;
-    assert(!AbsoluteControlSubscriber::RequestHostPage("hotas-diagnostics"));
-    assert(g_openPageCalls == 5);
-    assert(g_openPage == "hotas-diagnostics");
-    assert(!AbsoluteControlSubscriber::RequestHostPage(nullptr));
-    assert(g_openPageCalls == 5);
+    REQUIRE(!AbsoluteControlSubscriber::RequestHostPage("hotas-diagnostics"));
+    REQUIRE(g_openPageCalls == 5);
+    REQUIRE(g_openPage == "hotas-diagnostics");
+    REQUIRE(!AbsoluteControlSubscriber::RequestHostPage(nullptr));
+    REQUIRE(g_openPageCalls == 5);
 
     const auto& axesPage = g_copiedPages[0];
     const auto& shipPage = g_copiedPages[1];
@@ -1120,51 +1141,51 @@ int main()
     const auto& profilesPage = g_copiedPages[4];
 
     ValueV1 throttleSummaryValue{};
-    assert(axesPage.readValue(
+    REQUIRE(axesPage.readValue(
                axesPage.context, "flight-throttle-summary",
                &throttleSummaryValue) == Result::Ok);
-    assert(throttleSummaryValue.kind == ValueKind::String);
-    assert(std::string_view{ throttleSummaryValue.stringValue }.find(
+    REQUIRE(throttleSummaryValue.kind == ValueKind::String);
+    REQUIRE(std::string_view{ throttleSummaryValue.stringValue }.find(
                "edited once on Throttle Setup") != std::string_view::npos);
 
     std::array<RecordItemV1, kMaximumRecordItems> profileItems{};
     std::uint32_t profileCount{};
-    assert(profilesPage.readRecordItems(
+    REQUIRE(profilesPage.readRecordItems(
                profilesPage.context, "profile-records", profileItems.data(), 2,
                &profileCount) == Result::CapacityExceeded);
-    assert(profileCount == 3);
-    assert(profilesPage.readRecordItems(
+    REQUIRE(profileCount == 3);
+    REQUIRE(profilesPage.readRecordItems(
                profilesPage.context, "profile-records", profileItems.data(),
                static_cast<std::uint32_t>(profileItems.size()), &profileCount) ==
            Result::Ok);
-    assert(std::strcmp(profileItems[0].recordId, "main-controls") == 0);
-    assert(std::string_view(profileItems[1].summary).find("inherits Main") !=
+    REQUIRE(std::strcmp(profileItems[0].recordId, "main-controls") == 0);
+    REQUIRE(std::string_view(profileItems[1].summary).find("inherits Main") !=
            std::string_view::npos);
 
     ValueV1 profileValue{};
-    assert(profilesPage.readValue(
+    REQUIRE(profilesPage.readValue(
                profilesPage.context, "profile-records", &profileValue) == Result::Ok);
-    assert(std::strcmp(profileValue.stringValue, "main-controls") == 0);
+    REQUIRE(std::strcmp(profileValue.stringValue, "main-controls") == 0);
     ValueV1 profileEdit{};
     profileEdit.kind = ValueKind::String;
     strcpy_s(profileEdit.stringValue, profileItems[1].recordId);
-    assert(profilesPage.writeDraft(
+    REQUIRE(profilesPage.writeDraft(
                profilesPage.context, "profile-records", &profileEdit) == Result::Ok);
     profileValue = {};
-    assert(profilesPage.readValue(
+    REQUIRE(profilesPage.readValue(
                profilesPage.context, "profile-records", &profileValue) == Result::Ok);
-    assert(std::strcmp(profileValue.stringValue, profileItems[1].recordId) == 0);
+    REQUIRE(std::strcmp(profileValue.stringValue, profileItems[1].recordId) == 0);
 
     profileEdit = {};
     profileEdit.kind = ValueKind::Integer;
     profileEdit.integerValue = 2;
-    assert(profilesPage.writeDraft(profilesPage.context,
+    REQUIRE(profilesPage.writeDraft(profilesPage.context,
                "profile-activation-mode", &profileEdit) == Result::Ok);
-    assert(profilesPage.beginBindingCapture(profilesPage.context,
+    REQUIRE(profilesPage.beginBindingCapture(profilesPage.context,
                "profile-activation-trigger") == Result::Ok);
-    assert(TestCapture::beginSlot == CaptureSlot::kProfileTrigger);
-    assert(TestCapture::settleMilliseconds == 300);
-    assert(profilesPage.cancelBindingCapture(profilesPage.context,
+    REQUIRE(TestCapture::beginSlot == CaptureSlot::kProfileTrigger);
+    REQUIRE(TestCapture::settleMilliseconds == 300);
+    REQUIRE(profilesPage.cancelBindingCapture(profilesPage.context,
                "profile-activation-trigger") == Result::Ok);
 
     // Dirty selection remains on the current record until one of the explicit
@@ -1172,195 +1193,195 @@ int main()
     profileEdit = {};
     profileEdit.kind = ValueKind::String;
     strcpy_s(profileEdit.stringValue, profileItems[2].recordId);
-    assert(profilesPage.writeDraft(
+    REQUIRE(profilesPage.writeDraft(
                profilesPage.context, "profile-records", &profileEdit) == Result::Ok);
     profileValue = {};
-    assert(profilesPage.readValue(
+    REQUIRE(profilesPage.readValue(
                profilesPage.context, "profile-records", &profileValue) == Result::Ok);
-    assert(std::strcmp(profileValue.stringValue, profileItems[1].recordId) == 0);
-    assert(profilesPage.invokeAction(
+    REQUIRE(std::strcmp(profileValue.stringValue, profileItems[1].recordId) == 0);
+    REQUIRE(profilesPage.invokeAction(
                profilesPage.context, "profile-switch-stay") == Result::Ok);
-    assert(profilesPage.apply(profilesPage.context) == Result::Ok);
-    assert(TestProfiles::repository.updates.size() == 1);
-    assert(TestProfiles::repository.updates.front().profile == "Flight Aux");
+    REQUIRE(profilesPage.apply(profilesPage.context) == Result::Ok);
+    REQUIRE(TestProfiles::repository.updates.size() == 1);
+    REQUIRE(TestProfiles::repository.updates.front().profile == "Flight Aux");
 
     // Ordinary assignment detects a collision; reassign atomically clears the
     // previous activation owner within this page draft.
     profileEdit = {};
     profileEdit.kind = ValueKind::String;
     strcpy_s(profileEdit.stringValue, "8");
-    assert(profilesPage.writeDraft(profilesPage.context,
+    REQUIRE(profilesPage.writeDraft(profilesPage.context,
                "profile-activation-trigger", &profileEdit) == Result::Duplicate);
-    assert(profilesPage.reassignBinding(profilesPage.context,
+    REQUIRE(profilesPage.reassignBinding(profilesPage.context,
                "profile-activation-trigger", "8") == Result::Ok);
-    assert(profilesPage.apply(profilesPage.context) == Result::Ok);
+    REQUIRE(profilesPage.apply(profilesPage.context) == Result::Ok);
 
     // Every rich page exposes the same pinned profile/layer context. Switching
     // here changes the actual Wizard edit target, activation fields share the
     // Profiles draft, and a dirty settings page cannot be silently abandoned.
     std::array<RecordItemV1, kMaximumRecordItems> pinnedProfileItems{};
     std::uint32_t pinnedProfileCount{};
-    assert(axesPage.readRecordItems(axesPage.context,
+    REQUIRE(axesPage.readRecordItems(axesPage.context,
                "flight-axes-edit-profile", pinnedProfileItems.data(),
                static_cast<std::uint32_t>(pinnedProfileItems.size()),
                &pinnedProfileCount) == Result::Ok);
-    assert(pinnedProfileCount == profileCount);
+    REQUIRE(pinnedProfileCount == profileCount);
     profileValue = {};
-    assert(axesPage.readValue(axesPage.context, "flight-axes-edit-profile",
+    REQUIRE(axesPage.readValue(axesPage.context, "flight-axes-edit-profile",
                &profileValue) == Result::Ok);
-    assert(std::strcmp(profileValue.stringValue,
+    REQUIRE(std::strcmp(profileValue.stringValue,
                profileItems[1].recordId) == 0);
 
     ValueV1 pinnedAxisEdit{};
     pinnedAxisEdit.kind = ValueKind::Boolean;
     pinnedAxisEdit.booleanValue = 1;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-inverted",
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-inverted",
                &pinnedAxisEdit) == Result::Ok);
     profileEdit = {};
     profileEdit.kind = ValueKind::String;
     strcpy_s(profileEdit.stringValue, profileItems[2].recordId);
-    assert(axesPage.writeDraft(axesPage.context, "flight-axes-edit-profile",
+    REQUIRE(axesPage.writeDraft(axesPage.context, "flight-axes-edit-profile",
                &profileEdit) == Result::Rejected);
-    assert(TestProfiles::repository.current == "Flight Aux");
+    REQUIRE(TestProfiles::repository.current == "Flight Aux");
     axesPage.cancel(axesPage.context);
 
-    assert(axesPage.writeDraft(axesPage.context, "flight-axes-edit-profile",
+    REQUIRE(axesPage.writeDraft(axesPage.context, "flight-axes-edit-profile",
                &profileEdit) == Result::Ok);
-    assert(TestProfiles::repository.current == "Independent");
-    assert(TestSettings::editTarget == "Independent");
+    REQUIRE(TestProfiles::repository.current == "Independent");
+    REQUIRE(TestSettings::editTarget == "Independent");
     profileEdit = {};
     profileEdit.kind = ValueKind::Integer;
     profileEdit.integerValue = 1;
-    assert(axesPage.writeDraft(axesPage.context, "flight-axes-layer-mode",
+    REQUIRE(axesPage.writeDraft(axesPage.context, "flight-axes-layer-mode",
                &profileEdit) == Result::Ok);
     profileEdit = {};
     profileEdit.kind = ValueKind::String;
     strcpy_s(profileEdit.stringValue, "10");
-    assert(axesPage.writeDraft(axesPage.context,
+    REQUIRE(axesPage.writeDraft(axesPage.context,
                "flight-axes-layer-modifier", &profileEdit) == Result::Ok);
-    assert(axesPage.beginBindingCapture(axesPage.context,
+    REQUIRE(axesPage.beginBindingCapture(axesPage.context,
                "flight-axes-layer-modifier") == Result::Ok);
-    assert(TestCapture::beginSlot == CaptureSlot::kProfileTrigger);
-    assert(TestCapture::settleMilliseconds == 50);
-    assert(axesPage.cancelBindingCapture(axesPage.context,
+    REQUIRE(TestCapture::beginSlot == CaptureSlot::kProfileTrigger);
+    REQUIRE(TestCapture::settleMilliseconds == 50);
+    REQUIRE(axesPage.cancelBindingCapture(axesPage.context,
                "flight-axes-layer-modifier") == Result::Ok);
 
     pinnedAxisEdit = {};
     pinnedAxisEdit.kind = ValueKind::Float;
     pinnedAxisEdit.floatValue = 1.25;
-    assert(axesPage.writeDraft(axesPage.context, "yaw-sensitivity",
+    REQUIRE(axesPage.writeDraft(axesPage.context, "yaw-sensitivity",
                &pinnedAxisEdit) == Result::Ok);
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
-    assert(TestSettings::editTarget == "Independent");
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(TestSettings::editTarget == "Independent");
     const auto independentUpdate = std::find_if(
         TestProfiles::repository.updates.begin(),
         TestProfiles::repository.updates.end(), [](const auto& update) {
             return update.profile == "Independent";
         });
-    assert(independentUpdate != TestProfiles::repository.updates.end());
-    assert(independentUpdate->mode == "toggle");
-    assert(independentUpdate->trigger == "10");
+    REQUIRE(independentUpdate != TestProfiles::repository.updates.end());
+    REQUIRE(independentUpdate->mode == "toggle");
+    REQUIRE(independentUpdate->trigger == "10");
 
     const auto* throttleBinding =
         HotasBindingCatalog::Find("bind-throttle-axis");
-    assert(throttleBinding);
-    assert(axesPage.beginBindingCapture(
+    REQUIRE(throttleBinding);
+    REQUIRE(axesPage.beginBindingCapture(
                axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
-    assert(TestCapture::beginSlot == throttleBinding->captureSlot);
+    REQUIRE(TestCapture::beginSlot == throttleBinding->captureSlot);
     BindingCaptureV1 capture{};
-    assert(axesPage.pollBindingCapture(
+    REQUIRE(axesPage.pollBindingCapture(
                axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
-    assert(capture.state == BindingCaptureState::Capturing);
-    assert(axesPage.pollBindingCapture(
+    REQUIRE(capture.state == BindingCaptureState::Capturing);
+    REQUIRE(axesPage.pollBindingCapture(
                aimingPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::InvalidArgument);
     TestCapture::nextState = HotasBindingCapture::PollState::Captured;
     TestCapture::nextBinding = "Test Stick@0x32";
     capture = {};
-    assert(axesPage.pollBindingCapture(
+    REQUIRE(axesPage.pollBindingCapture(
                axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
-    assert(capture.state == BindingCaptureState::Captured);
-    assert(std::strcmp(capture.binding, "Test Stick@0x32") == 0);
+    REQUIRE(capture.state == BindingCaptureState::Captured);
+    REQUIRE(std::strcmp(capture.binding, "Test Stick@0x32") == 0);
     ValueV1 bindingEdit{};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, capture.binding);
-    assert(axesPage.writeDraft(
+    REQUIRE(axesPage.writeDraft(
                axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
     ValueV1 bindingValue{};
-    assert(axesPage.readValue(
+    REQUIRE(axesPage.readValue(
                axesPage.context, throttleBinding->controlId.data(), &bindingValue) ==
            Result::Ok);
-    assert(std::strcmp(bindingValue.stringValue, "Test Stick@0x32") == 0);
+    REQUIRE(std::strcmp(bindingValue.stringValue, "Test Stick@0x32") == 0);
     axesPage.cancel(axesPage.context);
     bindingValue = {};
-    assert(axesPage.readValue(
+    REQUIRE(axesPage.readValue(
                axesPage.context, throttleBinding->controlId.data(), &bindingValue) ==
            Result::Ok);
-    assert(std::strcmp(bindingValue.stringValue, "(unbound)") == 0);
+    REQUIRE(std::strcmp(bindingValue.stringValue, "(unbound)") == 0);
 
     TestCapture::nextState = HotasBindingCapture::PollState::Capturing;
-    assert(axesPage.beginBindingCapture(
+    REQUIRE(axesPage.beginBindingCapture(
                axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, "Test Stick@0x31");
-    assert(axesPage.writeDraft(
+    REQUIRE(axesPage.writeDraft(
                axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
     capture = {};
-    assert(axesPage.pollBindingCapture(
+    REQUIRE(axesPage.pollBindingCapture(
                axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
-    assert(capture.state == BindingCaptureState::Cancelled);
+    REQUIRE(capture.state == BindingCaptureState::Cancelled);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, "(unbound)");
-    assert(axesPage.writeDraft(
+    REQUIRE(axesPage.writeDraft(
                axesPage.context, throttleBinding->controlId.data(), &bindingEdit) ==
            Result::Ok);
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
 
     const auto* previousBinding =
         HotasBindingCatalog::Find("bind-ship-fire-boosters");
     const auto* targetBinding =
         HotasBindingCatalog::Find("bind-ship-switch-flight-modes");
-    assert(previousBinding && targetBinding);
+    REQUIRE(previousBinding && targetBinding);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, "Test Throttle@7");
-    assert(shipPage.writeDraft(shipPage.context,
+    REQUIRE(shipPage.writeDraft(shipPage.context,
                previousBinding->controlId.data(), &bindingEdit) == Result::Ok);
     TestCapture::nextState = HotasBindingCapture::PollState::Captured;
     TestCapture::nextBinding = "Test Throttle@7";
-    assert(shipPage.beginBindingCapture(
+    REQUIRE(shipPage.beginBindingCapture(
                shipPage.context, targetBinding->controlId.data()) == Result::Ok);
     capture = {};
-    assert(shipPage.pollBindingCapture(
+    REQUIRE(shipPage.pollBindingCapture(
                shipPage.context, targetBinding->controlId.data(), &capture) ==
            Result::Ok);
-    assert(capture.state == BindingCaptureState::Captured);
+    REQUIRE(capture.state == BindingCaptureState::Captured);
     bindingEdit = {};
     bindingEdit.kind = ValueKind::String;
     strcpy_s(bindingEdit.stringValue, capture.binding);
-    assert(shipPage.writeDraft(shipPage.context,
+    REQUIRE(shipPage.writeDraft(shipPage.context,
                targetBinding->controlId.data(), &bindingEdit) == Result::Duplicate);
-    assert(shipPage.reassignBinding(
+    REQUIRE(shipPage.reassignBinding(
                shipPage.context, targetBinding->controlId.data(),
                capture.binding) == Result::Ok);
     bindingValue = {};
-    assert(shipPage.readValue(shipPage.context,
+    REQUIRE(shipPage.readValue(shipPage.context,
                previousBinding->controlId.data(), &bindingValue) == Result::Ok);
-    assert(std::strcmp(bindingValue.stringValue, "(unbound)") == 0);
+    REQUIRE(std::strcmp(bindingValue.stringValue, "(unbound)") == 0);
     bindingValue = {};
-    assert(shipPage.readValue(shipPage.context,
+    REQUIRE(shipPage.readValue(shipPage.context,
                targetBinding->controlId.data(), &bindingValue) == Result::Ok);
-    assert(std::strcmp(bindingValue.stringValue, "Test Throttle@7") == 0);
-    assert(shipPage.apply(shipPage.context) == Result::Ok);
-    assert(TestSettings::storedBindings[
+    REQUIRE(std::strcmp(bindingValue.stringValue, "Test Throttle@7") == 0);
+    REQUIRE(shipPage.apply(shipPage.context) == Result::Ok);
+    REQUIRE(TestSettings::storedBindings[
                HotasBindingCatalog::IndexOf(*targetBinding)] ==
            "Test Throttle@7");
 
@@ -1372,126 +1393,126 @@ int main()
     ValueV1 routeEdit{};
     routeEdit.kind = ValueKind::Integer;
     routeEdit.integerValue = 1;
-    assert(shipPage.writeDraft(shipPage.context, boostRouteId.c_str(),
+    REQUIRE(shipPage.writeDraft(shipPage.context, boostRouteId.c_str(),
                                &routeEdit) == Result::Ok);
-    assert(shipPage.writeDraft(axesPage.context, boostRouteId.c_str(),
+    REQUIRE(shipPage.writeDraft(axesPage.context, boostRouteId.c_str(),
                                &routeEdit) == Result::InvalidArgument);
     const auto* contextBinding =
         HotasBindingCatalog::Find("bind-ship-select-accept");
-    assert(contextBinding);
+    REQUIRE(contextBinding);
     const std::string contextRouteId =
         std::string(contextBinding->controlId) + "-route";
     ValueV1 directSelectEdit{};
     directSelectEdit.kind = ValueKind::Integer;
     directSelectEdit.integerValue = 0;
-    assert(shipPage.writeDraft(shipPage.context, contextRouteId.c_str(),
+    REQUIRE(shipPage.writeDraft(shipPage.context, contextRouteId.c_str(),
                                &directSelectEdit) == Result::Ok);
-    assert(shipPage.apply(shipPage.context) == Result::Ok);
+    REQUIRE(shipPage.apply(shipPage.context) == Result::Ok);
     const auto* boostAction = FindShipAction(previousBinding->actionId);
-    assert(boostAction);
-    assert(TestSettings::storedRoutes[static_cast<std::size_t>(
+    REQUIRE(boostAction);
+    REQUIRE(TestSettings::storedRoutes[static_cast<std::size_t>(
                boostAction - kShipActionCatalog.data())] ==
            ShipControlMethod::KeyboardCompatibility);
     const auto* selectAction = FindShipAction(contextBinding->actionId);
-    assert(selectAction);
-    assert(TestSettings::storedRoutes[static_cast<std::size_t>(
+    REQUIRE(selectAction);
+    REQUIRE(TestSettings::storedRoutes[static_cast<std::size_t>(
                selectAction - kShipActionCatalog.data())] ==
            ShipControlMethod::Direct);
     ValueV1 routeReadBack{};
-    assert(shipPage.readValue(shipPage.context, boostRouteId.c_str(),
+    REQUIRE(shipPage.readValue(shipPage.context, boostRouteId.c_str(),
                               &routeReadBack) == Result::Ok);
-    assert(routeReadBack.kind == ValueKind::Integer &&
+    REQUIRE(routeReadBack.kind == ValueKind::Integer &&
            routeReadBack.integerValue == 1);
 
     TestCapture::nextState = HotasBindingCapture::PollState::Capturing;
-    assert(axesPage.beginBindingCapture(
+    REQUIRE(axesPage.beginBindingCapture(
                axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
-    assert(axesPage.cancelBindingCapture(
+    REQUIRE(axesPage.cancelBindingCapture(
                axesPage.context, throttleBinding->controlId.data()) == Result::Ok);
     capture = {};
-    assert(axesPage.pollBindingCapture(
+    REQUIRE(axesPage.pollBindingCapture(
                axesPage.context, throttleBinding->controlId.data(), &capture) ==
            Result::Ok);
-    assert(capture.state == BindingCaptureState::Idle);
+    REQUIRE(capture.state == BindingCaptureState::Idle);
 
     ValueV1 value{};
-    assert(g_copiedPages[8].readValue(
+    REQUIRE(g_copiedPages[8].readValue(
                g_copiedPages[8].context,
                g_copiedPages[8].controls[0].controlId, &value) == Result::Ok);
-    assert(value.kind == ValueKind::String);
-    assert(value.stringValue[0] != '\0');
+    REQUIRE(value.kind == ValueKind::String);
+    REQUIRE(value.stringValue[0] != '\0');
 
-    assert(FindControl(axesPage, "flight-controls-enabled"));
+    REQUIRE(FindControl(axesPage, "flight-controls-enabled"));
     value = {};
-    assert(axesPage.readValue(axesPage.context, "flight-controls-enabled", &value) == Result::Ok);
-    assert(value.kind == ValueKind::Boolean && value.booleanValue == 1);
+    REQUIRE(axesPage.readValue(axesPage.context, "flight-controls-enabled", &value) == Result::Ok);
+    REQUIRE(value.kind == ValueKind::Boolean && value.booleanValue == 1);
 
     ValueV1 edit = {};
     edit.kind = ValueKind::Boolean;
     edit.booleanValue = 0;
-    assert(axesPage.writeDraft(axesPage.context, "flight-controls-enabled", &edit) == Result::Ok);
+    REQUIRE(axesPage.writeDraft(axesPage.context, "flight-controls-enabled", &edit) == Result::Ok);
     value = {};
-    assert(axesPage.readValue(axesPage.context, "flight-controls-enabled", &value) == Result::Ok);
-    assert(value.booleanValue == 0);
-    assert(AbsoluteControlSettings::GetBoolean(
+    REQUIRE(axesPage.readValue(axesPage.context, "flight-controls-enabled", &value) == Result::Ok);
+    REQUIRE(value.booleanValue == 0);
+    REQUIRE(AbsoluteControlSettings::GetBoolean(
         TestSettings::stored,
         AbsoluteControlSettings::ScalarField::FlightControlsEnabled));
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
-    assert(!AbsoluteControlSettings::GetBoolean(
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(!AbsoluteControlSettings::GetBoolean(
         TestSettings::stored,
         AbsoluteControlSettings::ScalarField::FlightControlsEnabled));
 
     edit = {};
     edit.kind = ValueKind::Float;
     edit.floatValue = 2.0;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) == Result::Ok);
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) == Result::Ok);
     axesPage.cancel(axesPage.context);
     value = {};
-    assert(axesPage.readValue(axesPage.context, "pitch-sensitivity", &value) == Result::Ok);
-    assert(value.kind == ValueKind::Float && value.floatValue == 1.0);
+    REQUIRE(axesPage.readValue(axesPage.context, "pitch-sensitivity", &value) == Result::Ok);
+    REQUIRE(value.kind == ValueKind::Float && value.floatValue == 1.0);
 
     edit = {};
     edit.kind = ValueKind::Integer;
     edit.integerValue = 2;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) ==
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) ==
            Result::InvalidArgument);
     edit.kind = ValueKind::Float;
     edit.floatValue = 3.1;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) ==
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-sensitivity", &edit) ==
            Result::InvalidArgument);
 
     const auto& throttlePage = g_copiedPages[2];
-    assert(FindControl(throttlePage, "throttle-landmark-guide")->kind ==
+    REQUIRE(FindControl(throttlePage, "throttle-landmark-guide")->kind ==
            ControlKind::GroupHeader);
-    assert(FindControl(throttlePage, "throttle-positional-zones")->kind ==
+    REQUIRE(FindControl(throttlePage, "throttle-positional-zones")->kind ==
            ControlKind::GroupHeader);
-    assert(FindControl(throttlePage, "throttle-rate-mode")->kind ==
+    REQUIRE(FindControl(throttlePage, "throttle-rate-mode")->kind ==
            ControlKind::GroupHeader);
     for (const auto* controlId : {
              "throttle-detent-center", "reverse-zone-center",
              "boost-zone-center"}) {
-        assert((FindControl(throttlePage, controlId)->flags &
+        REQUIRE((FindControl(throttlePage, controlId)->flags &
                 kControlAdvanced) != 0);
     }
     for (const auto* actionId : {
              "throttle-capture-detent", "throttle-capture-reverse",
              "throttle-capture-boost", "throttle-link-idle-saturation"}) {
         const auto* action = FindControl(throttlePage, actionId);
-        assert(action && action->kind == ControlKind::Action);
-        assert((action->flags & kControlMutatesDraft) != 0);
+        REQUIRE(action && action->kind == ControlKind::Action);
+        REQUIRE((action->flags & kControlMutatesDraft) != 0);
         if (std::string_view{actionId} != "throttle-link-idle-saturation") {
-            assert((action->flags & kControlLayoutInline) != 0);
+            REQUIRE((action->flags & kControlLayoutInline) != 0);
         }
     }
-    assert(throttlePage.invokeAction);
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction);
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-detent") == Result::Ok);
-    assert(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
+    REQUIRE(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
         AbsoluteControlTelemetry::ThrottleCaptureTarget::Detent);
     value = {};
-    assert(throttlePage.readValue(
+    REQUIRE(throttlePage.readValue(
                throttlePage.context, "throttle-scope", &value) == Result::Ok);
-    assert(std::string_view{value.stringValue}.find("LIVE SET") !=
+    REQUIRE(std::string_view{value.stringValue}.find("LIVE SET") !=
         std::string_view::npos);
 
     AbsoluteControlTelemetry::ThrottleSample currentThrottle;
@@ -1501,61 +1522,61 @@ int main()
     // Tracking previews the live landmark; the draft changes only when the
     // same action is pressed again (or Apply finalizes the gesture).
     value = {};
-    assert(throttlePage.readValue(
+    REQUIRE(throttlePage.readValue(
                throttlePage.context, "throttle-detent-center", &value) == Result::Ok);
-    assert(value.integerValue != 41234);
-    assert(throttlePage.invokeAction(
+    REQUIRE(value.integerValue != 41234);
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-detent") == Result::Ok);
-    assert(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
+    REQUIRE(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
         AbsoluteControlTelemetry::ThrottleCaptureTarget::None);
     value = {};
-    assert(throttlePage.readValue(
+    REQUIRE(throttlePage.readValue(
                throttlePage.context, "throttle-detent-center", &value) == Result::Ok);
-    assert(value.integerValue == 41234);
-    assert(AbsoluteControlSettings::GetInteger(
+    REQUIRE(value.integerValue == 41234);
+    REQUIRE(AbsoluteControlSettings::GetInteger(
                TestSettings::stored,
                AbsoluteControlSettings::ScalarField::DetentCenter) != 41234);
     throttlePage.cancel(throttlePage.context);
 
     // A direct graph drag writes the linked numeric control and cancels an
     // in-progress physical tracking gesture so the two editors never fight.
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-detent") == Result::Ok);
     edit = {};
     edit.kind = ValueKind::Integer;
     edit.integerValue = 36000;
-    assert(throttlePage.writeDraft(
+    REQUIRE(throttlePage.writeDraft(
                throttlePage.context, "throttle-detent-center", &edit) == Result::Ok);
-    assert(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
+    REQUIRE(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
         AbsoluteControlTelemetry::ThrottleCaptureTarget::None);
     throttlePage.cancel(throttlePage.context);
 
     edit = {};
     edit.kind = ValueKind::Float;
     edit.floatValue = 0.12;
-    assert(throttlePage.writeDraft(
+    REQUIRE(throttlePage.writeDraft(
                throttlePage.context, "throttle-idle-plateau", &edit) == Result::Ok);
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-reverse") == Result::Ok);
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-reverse") == Result::Ok);
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-capture-boost") == Result::Ok);
-    assert(throttlePage.invokeAction(
+    REQUIRE(throttlePage.invokeAction(
                throttlePage.context, "throttle-link-idle-saturation") == Result::Ok);
-    assert(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
+    REQUIRE(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
         AbsoluteControlTelemetry::ThrottleCaptureTarget::Boost);
     value = {};
-    assert(throttlePage.readValue(
+    REQUIRE(throttlePage.readValue(
                throttlePage.context, "throttle-saturation", &value) == Result::Ok);
-    assert(value.kind == ValueKind::Float && std::abs(value.floatValue - 0.88) < 1e-9);
-    assert(throttlePage.apply(throttlePage.context) == Result::Ok);
-    assert(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
+    REQUIRE(value.kind == ValueKind::Float && std::abs(value.floatValue - 0.88) < 1e-9);
+    REQUIRE(throttlePage.apply(throttlePage.context) == Result::Ok);
+    REQUIRE(AbsoluteControlTelemetry::GetThrottleCaptureTarget() ==
         AbsoluteControlTelemetry::ThrottleCaptureTarget::None);
-    assert(AbsoluteControlSettings::GetInteger(
+    REQUIRE(AbsoluteControlSettings::GetInteger(
                TestSettings::stored,
                AbsoluteControlSettings::ScalarField::ReverseZoneCenter) == 41234);
-    assert(AbsoluteControlSettings::GetInteger(
+    REQUIRE(AbsoluteControlSettings::GetInteger(
                TestSettings::stored,
                AbsoluteControlSettings::ScalarField::BoostZoneCenter) == 41234);
 
@@ -1563,13 +1584,13 @@ int main()
     edit.kind = ValueKind::Integer;
     for (const auto rawLandmark : {32768LL, 32868LL, 32769LL}) {
         edit.integerValue = rawLandmark;
-        assert(throttlePage.writeDraft(
+        REQUIRE(throttlePage.writeDraft(
                    throttlePage.context, "throttle-detent-center", &edit) == Result::Ok);
         value = {};
-        assert(throttlePage.readValue(
+        REQUIRE(throttlePage.readValue(
                    throttlePage.context, "throttle-detent-center", &value) == Result::Ok);
-        assert(value.kind == ValueKind::Integer);
-        assert(value.integerValue == rawLandmark);
+        REQUIRE(value.kind == ValueKind::Integer);
+        REQUIRE(value.integerValue == rawLandmark);
     }
     throttlePage.cancel(throttlePage.context);
 
@@ -1577,35 +1598,35 @@ int main()
     edit = {};
     edit.kind = ValueKind::Integer;
     edit.integerValue = 501;
-    assert(diagnosticsPage.writeDraft(
+    REQUIRE(diagnosticsPage.writeDraft(
                diagnosticsPage.context, "pilot-latch-ms", &edit) == Result::InvalidArgument);
     std::array<ChoiceOptionV1, 3> options{};
     std::uint32_t optionCount{};
-    assert(diagnosticsPage.readChoiceOptions(
+    REQUIRE(diagnosticsPage.readChoiceOptions(
                diagnosticsPage.context, "pilot-context-mode", options.data(),
                static_cast<std::uint32_t>(options.size()),
                &optionCount) == Result::Ok);
-    assert(optionCount == 3);
-    assert(options[1].value == 1);
-    assert(std::strcmp(options[1].label, "Park flight controls") == 0);
-    assert(diagnosticsPage.readChoiceOptions(
+    REQUIRE(optionCount == 3);
+    REQUIRE(options[1].value == 1);
+    REQUIRE(std::strcmp(options[1].label, "Park flight controls") == 0);
+    REQUIRE(diagnosticsPage.readChoiceOptions(
                diagnosticsPage.context, "pilot-context-mode", options.data(), 2, &optionCount) ==
            Result::CapacityExceeded);
-    assert(optionCount == 3);
+    REQUIRE(optionCount == 3);
 
-    assert(throttlePage.readChoiceOptions(
+    REQUIRE(throttlePage.readChoiceOptions(
                throttlePage.context, "turn-assist-mode", options.data(),
                static_cast<std::uint32_t>(options.size()),
                &optionCount) == Result::Ok);
-    assert(optionCount == 3);
-    assert(options[2].value == 2);
-    assert(std::strcmp(options[2].label, "Toggle on/off") == 0);
+    REQUIRE(optionCount == 3);
+    REQUIRE(options[2].value == 2);
+    REQUIRE(std::strcmp(options[2].label, "Toggle on/off") == 0);
 
     auto expectedRoundTrip = TestSettings::stored;
     for (const auto& definition : AbsoluteControlSettings::Definitions()) {
         const auto* owner = FindPageForControl(
             g_copiedPages.data(), g_copiedPages.size(), definition.controlId);
-        assert(owner && owner->writeDraft && owner->readValue);
+        REQUIRE(owner && owner->writeDraft && owner->readValue);
 
         ValueV1 invalid{};
         switch (definition.type) {
@@ -1624,7 +1645,7 @@ int main()
             invalid.floatValue = std::numeric_limits<double>::quiet_NaN();
             break;
         }
-        assert(owner->writeDraft(owner->context, definition.controlId.data(), &invalid) ==
+        REQUIRE(owner->writeDraft(owner->context, definition.controlId.data(), &invalid) ==
                Result::InvalidArgument);
 
         ValueV1 desired{};
@@ -1670,50 +1691,50 @@ int main()
             break;
         }
         }
-        assert(owner->writeDraft(owner->context, definition.controlId.data(), &desired) ==
+        REQUIRE(owner->writeDraft(owner->context, definition.controlId.data(), &desired) ==
                Result::Ok);
         ValueV1 readBack{};
-        assert(owner->readValue(
+        REQUIRE(owner->readValue(
                    owner->context, definition.controlId.data(), &readBack) == Result::Ok);
-        assert(readBack.kind == desired.kind);
+        REQUIRE(readBack.kind == desired.kind);
         if (desired.kind == ValueKind::Boolean) {
-            assert(readBack.booleanValue == desired.booleanValue);
+            REQUIRE(readBack.booleanValue == desired.booleanValue);
         } else if (desired.kind == ValueKind::Integer) {
-            assert(readBack.integerValue == desired.integerValue);
+            REQUIRE(readBack.integerValue == desired.integerValue);
         } else {
-            assert(std::abs(readBack.floatValue - desired.floatValue) < 1e-9);
+            REQUIRE(std::abs(readBack.floatValue - desired.floatValue) < 1e-9);
         }
     }
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
-    assert(AbsoluteControlSettings::Equivalent(
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(AbsoluteControlSettings::Equivalent(
         TestSettings::stored, expectedRoundTrip));
 
     edit = {};
     edit.kind = ValueKind::Boolean;
     edit.booleanValue = 0;
-    assert(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Ok);
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Ok);
     ++TestSettings::revision.sourceFingerprint;
-    assert(axesPage.apply(axesPage.context) == Result::Rejected);
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Rejected);
     axesPage.cancel(axesPage.context);
     value = {};
-    assert(axesPage.readValue(axesPage.context, "pitch-inverted", &value) == Result::Ok);
-    assert(value.booleanValue == 1);
+    REQUIRE(axesPage.readValue(axesPage.context, "pitch-inverted", &value) == Result::Ok);
+    REQUIRE(value.booleanValue == 1);
 
-    assert(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Ok);
+    REQUIRE(axesPage.writeDraft(axesPage.context, "pitch-inverted", &edit) == Result::Ok);
     TestSettings::failApply = true;
-    assert(axesPage.apply(axesPage.context) == Result::WriteFailure);
+    REQUIRE(axesPage.apply(axesPage.context) == Result::WriteFailure);
     TestSettings::failApply = false;
     value = {};
-    assert(axesPage.readValue(axesPage.context, "pitch-inverted", &value) == Result::Ok);
-    assert(value.booleanValue == 0);
-    assert(axesPage.apply(axesPage.context) == Result::Ok);
-    assert(!AbsoluteControlSettings::GetBoolean(
+    REQUIRE(axesPage.readValue(axesPage.context, "pitch-inverted", &value) == Result::Ok);
+    REQUIRE(value.booleanValue == 0);
+    REQUIRE(axesPage.apply(axesPage.context) == Result::Ok);
+    REQUIRE(!AbsoluteControlSettings::GetBoolean(
         TestSettings::stored,
         AbsoluteControlSettings::ScalarField::PitchInvert));
 
     AbsoluteControlSubscriber::Testing::ForceReadException(true);
     value = {};
-    assert(g_copiedPages[8].readValue(
+    REQUIRE(g_copiedPages[8].readValue(
                g_copiedPages[8].context,
                "setup-control-host", &value) ==
            Result::Rejected);
@@ -1723,9 +1744,9 @@ int main()
     ApiV1 invalidApi = g_api;
     invalidApi.structSize = static_cast<std::uint32_t>(offsetof(ApiV1, registerModule));
     g_resolvedApi = &invalidApi;
-    assert(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
+    REQUIRE(AbsoluteControlSubscriber::Testing::RegisterWithResolver(&ResolveHost) ==
            Result::Rejected);
-    assert(!AbsoluteControlSubscriber::IsHosted());
+    REQUIRE(!AbsoluteControlSubscriber::IsHosted());
 
     return 0;
 }

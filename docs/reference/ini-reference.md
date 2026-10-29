@@ -28,10 +28,13 @@ AbsoluteHOTAS no longer installs D3D12/DXGI hooks or embeds a renderer frontend.
 ## [Hardware]
 
 Axis bindings use **HID Usage ID** syntax with optional device name prefix.
+New recordings use the device's persistent DirectInput instance GUID. Legacy
+names and enumeration indices remain supported without automatic migration.
 
 ### Axis Binding Syntax
 
 ```
+guid:{INSTANCE-GUID}@0xNN — Bind to that exact DirectInput instance
 DeviceName@0xNN    — Bind to axis 0xNN on the named device
 #2@0xNN            — Bind to axis 0xNN on device index 2 (disambiguation)
 0xNN               — Bind to axis 0xNN on the first available device

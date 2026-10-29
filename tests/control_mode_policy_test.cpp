@@ -1,7 +1,7 @@
 #include "AimInputPolicy.h"
 #include "BoostZonePolicy.h"
 
-#include <cassert>
+#include "TestCheck.h"
 
 int main()
 {
@@ -43,6 +43,6 @@ int main()
     static_assert(!BoostZonePolicy::ShouldActivate(
         true, false, true, true, 65535, 60000, 2000));
 
-    assert(true);
+    REQUIRE(true);
     return 0;
 }

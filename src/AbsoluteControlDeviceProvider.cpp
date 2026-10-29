@@ -69,7 +69,7 @@ const std::array g_controls{
         "Remove all eight saved calibration ranges for the selected device and reload the runtime."),
     Control(ControlKind::GroupHeader, kControlNone,
         "device-reassignment-section", "Duplicate-device reassignment",
-        "Choose another instance of the same product. Reassignment swaps explicit device indices in the fixed HOTAS binding catalog and calibration map."),
+        "Choose another instance of the same product. Reassignment swaps persistent identities or legacy indices in fixed HOTAS bindings, plus indexed calibration."),
     Control(ControlKind::RecordCollection, kControlTransientSelection,
         "reassignment-target", "Duplicate target",
         "Select a non-adjacent duplicate by stable instance identity."),

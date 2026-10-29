@@ -206,6 +206,12 @@ void Update() {
         MacroRuntime& rt    = s_runtime[i];
         const uint32_t owner = MacroOwner(i);
 
+        if (!DeviceManager::GetCachedState(m.button.deviceIndex)) {
+            ShipOutputSystem::ReleaseOwnerOutputs(owner);
+            rt = MacroRuntime{};
+            continue;
+        }
+
         const bool down = DeviceManager::IsButtonPressed(m.button);
 
         // Start on the press edge, only if not already running.

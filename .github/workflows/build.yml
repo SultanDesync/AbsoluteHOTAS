@@ -1,0 +1,41 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, releasedbg]
+    env:
+      ABSOLUTEHOTAS_DEPLOY_DIR: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: '3.0.8'
+      - name: Configure
+        run: xmake f -y -p windows -a x64 -m ${{ matrix.mode }} --deploydir=
+      - name: Build plugin
+        run: xmake build AbsoluteHOTAS
+      - name: Test
+        run: xmake test
+      - name: Verify release package
+        if: matrix.mode == 'releasedbg'
+        shell: pwsh
+        run: ./tools/verify-package.ps1
+      - name: Retain validated package
+        if: matrix.mode == 'releasedbg'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AbsoluteHOTAS-validation
+          path: build/AbsoluteHOTAS-validation.zip
+          if-no-files-found: error

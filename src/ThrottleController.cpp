@@ -17,6 +17,8 @@
 #include "PilotState.h"
 #include "RuntimePaths.h"
 #include "DeviceManager.h"
+#include "SupportReport.h"
+#include "InputRecoveryPolicy.h"
 #include "NativeShipControl.h"
 #include "MenuControlReuse.h"
 #include <windows.h>
@@ -109,7 +111,7 @@ static void ResetMenuControlReuse() {
 }
 
 static float NormalizeMenuAxis(const BindingRef& ref, bool invert) {
-    if (!ref.IsValid() || ref.value <= 0) return 0.0f;
+    if (!DeviceManager::GetRawAxis(ref)) return 0.0f;
 
     float minimum = 0.0f;
     float maximum = 65535.0f;
@@ -124,7 +126,7 @@ static float NormalizeMenuAxis(const BindingRef& ref, bool invert) {
 
     const float center = (minimum + maximum) * 0.5f;
     const float raw = std::clamp(
-        static_cast<float>(DeviceManager::GetRawAxis(ref)), minimum, maximum);
+        static_cast<float>(*DeviceManager::GetRawAxis(ref)), minimum, maximum);
     const float span = raw < center ? center - minimum : maximum - center;
     float normalized = span > 0.0f ? (raw - center) / span : 0.0f;
     if (invert) normalized = -normalized;
@@ -153,8 +155,8 @@ static void UpdateDedicatedMenuNavigation(bool menuContextAllowed) {
 
 static void UpdateMenuControlReuse(bool menuContextAllowed) {
     const auto& cfg = ThrottleController::GetConfig();
-    const bool pitchValid = cfg.pitchAxis.IsValid() && cfg.pitchAxis.value > 0;
-    const bool yawValid = cfg.yawAxis.IsValid() && cfg.yawAxis.value > 0;
+    const bool pitchValid = DeviceManager::GetRawAxis(cfg.pitchAxis).has_value();
+    const bool yawValid = DeviceManager::GetRawAxis(cfg.yawAxis).has_value();
 
     const int verticalDirection = MenuControlReuse::UpdateAxis(
         s_menuVerticalState, menuContextAllowed, cfg.bUsePitchAxisForMenu, pitchValid,
@@ -246,10 +248,148 @@ float ThrottleController::NormalizeAxis(long rawValue, long axisMin, long axisMa
 
 namespace {
 
+void UpdateAxisRecovery(const ThrottleController::Config& cfg,
+                        long throttleMinimum, long throttleMaximum)
+{
+    // When one physical axis serves several roles, require all their neutral
+    // conditions before allowing any of them to resume.
+    struct Candidate { const BindingRef* ref; bool neutral; };
+    std::array<Candidate, 9> candidates{};
+    std::size_t count{};
+    auto add = [&](const BindingRef& ref, bool neutral) {
+        if (ref.deviceIndex < 0 || ref.value < 0x30 || ref.value > 0x37) return;
+        for (auto& candidate : std::span(candidates.data(), count)) {
+            if (candidate.ref->deviceIndex == ref.deviceIndex && candidate.ref->value == ref.value) {
+                candidate.neutral &= neutral;
+                return;
+            }
+        }
+        candidates[count++] = {&ref, neutral};
+    };
+    auto centered = [&](const BindingRef& ref, float deadzone) {
+        const auto sample = DeviceManager::GetPhysicalAxis(ref);
+        float low = 0.0F, high = 65535.0F;
+        if (ref.deviceIndex >= 0) {
+            const auto found = cfg.axisCalibration.find((ref.deviceIndex << 8) | ref.value);
+            if (found != cfg.axisCalibration.end()) {
+                low = static_cast<float>(found->second.first);
+                high = static_cast<float>(found->second.second);
+            }
+        }
+        add(ref, sample && InputRecoveryPolicy::CenteredNeutral(*sample, low, high, deadzone));
+    };
+    centered(cfg.pitchAxis, cfg.fPitchDeadzone);
+    centered(cfg.yawAxis, cfg.fYawDeadzone);
+    centered(cfg.rollAxis, cfg.fRollDeadzone);
+    centered(cfg.strafeLatAxis, cfg.fStrafeDeadzone);
+    centered(cfg.strafeVertAxis, cfg.fStrafeVertDeadzone);
+    centered(cfg.aimYawAxis, cfg.fAimDeadzone);
+    centered(cfg.aimPitchAxis, cfg.fAimDeadzone);
+
+    const auto throttle = DeviceManager::GetPhysicalAxis(cfg.throttleAxis);
+    const InputRecoveryPolicy::ThrottleNeutralZone zone{
+        throttleMinimum, throttleMaximum, cfg.detentCenter, cfg.detentDeadzone,
+        cfg.reverseZoneCenter, cfg.reverseZoneDeadzone, cfg.idlePlateau,
+        cfg.bInvertThrottle, cfg.bAccumulatorThrottle, cfg.unipolarMode, cfg.bUnipolarReverse};
+    add(cfg.throttleAxis, throttle && zone.Contains(*throttle));
+    const auto reverse = DeviceManager::GetPhysicalAxis(cfg.reverseAxis);
+    const auto reverseUnit = reverse ? static_cast<float>(*reverse) / 65535.0F : 1.0F;
+    add(cfg.reverseAxis, reverse &&
+        (cfg.bInvertReverse ? 1.0F - reverseUnit : reverseUnit) <=
+            (std::max)(cfg.reverseDeadzone, 0.03F));
+    for (const auto& candidate : std::span(candidates.data(), count))
+        DeviceManager::ObserveAxisNeutral(*candidate.ref, candidate.neutral);
+}
+
+void PublishSupportSnapshot(const ThrottleController::Config& cfg,
+                             const PilotState::Snapshot& pilot) noexcept
+{
+    static auto last = std::chrono::steady_clock::time_point{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(1)) return;
+    last = now;
+    try {
+        std::string report = std::format(
+            "Active profile: {} (slot {})\nPilot context: {}\nInjection configured: {}\nDevices:\n",
+            s_profiles.empty() ? "base" : s_profiles[s_activeSlot].profileId, s_activeSlot,
+            pilot.state == PilotState::State::Piloting ? "piloting" :
+                (pilot.gameplayContextKnown && !pilot.gameplayContextActive ? "menu/suspended" : "outside pilot seat"),
+            cfg.bEnableInjection);
+        for (int i = 0; i < DeviceManager::GetDeviceCount(); ++i) {
+            const auto& device = DeviceManager::GetDevice(i);
+            report += std::format("  #{} {} | {} | {} | {} axes, {} buttons | {}\n",
+                i, device.productName, device.persistentId, device.vidpidString,
+                device.axisCount, device.buttonCount,
+                DeviceManager::GetCachedState(i) ? "connected" : "unavailable");
+        }
+        report += "\nActive binding resolution:\n";
+        auto binding = [&](std::string_view label, const BindingRef& ref, bool axis) {
+            const bool bound = ref.IsValid() && ref.value > 0;
+            const bool connected = DeviceManager::GetCachedState(ref.deviceIndex) != nullptr;
+            const auto status = !bound ? "unbound" : !connected ? "unavailable" :
+                (axis && !DeviceManager::GetRawAxis(ref) ? "waiting for neutral" : "ready");
+            report += std::format("  {}: {} -> #{} ({})\n",
+                label, FormatBindingRef(ref, axis), ref.deviceIndex, status);
+        };
+        binding("throttleAxis", cfg.throttleAxis, true);
+        binding("pitchAxis", cfg.pitchAxis, true);
+        binding("yawAxis", cfg.yawAxis, true);
+        binding("rollAxis", cfg.rollAxis, true);
+        binding("strafeLatAxis", cfg.strafeLatAxis, true);
+        binding("strafeVertAxis", cfg.strafeVertAxis, true);
+        binding("reverseAxis", cfg.reverseAxis, true);
+        binding("aimYawAxis", cfg.aimYawAxis, true);
+        binding("aimPitchAxis", cfg.aimPitchAxis, true);
+        binding("activateButton", cfg.activateButton, false);
+        binding("stopButton", cfg.stopButton, false);
+        binding("toggleWizardButton", cfg.toggleWizardButton, false);
+        binding("cruiseHoldButton", cfg.cruiseHoldButton, false);
+        binding("fullStopButton", cfg.fullStopButton, false);
+        binding("cruiseHalfButton", cfg.cruiseHalfButton, false);
+        binding("cruiseMaxButton", cfg.cruiseMaxButton, false);
+        binding("digitalReverseButton", cfg.digitalReverseButton, false);
+        binding("digitalRollLeftButton", cfg.digitalRollLeftButton, false);
+        binding("digitalRollRightButton", cfg.digitalRollRightButton, false);
+        binding("digitalStrafeLeftButton", cfg.digitalStrafeLeftButton, false);
+        binding("digitalStrafeRightButton", cfg.digitalStrafeRightButton, false);
+        binding("digitalStrafeUpButton", cfg.digitalStrafeUpButton, false);
+        binding("digitalStrafeDownButton", cfg.digitalStrafeDownButton, false);
+        binding("digitalAimLeftButton", cfg.digitalAimLeftButton, false);
+        binding("digitalAimRightButton", cfg.digitalAimRightButton, false);
+        binding("digitalAimUpButton", cfg.digitalAimUpButton, false);
+        binding("digitalAimDownButton", cfg.digitalAimDownButton, false);
+        binding("digitalAimCenterButton", cfg.digitalAimCenterButton, false);
+        binding("toggleAimModeButton", cfg.toggleAimModeButton, false);
+        binding("turnAssistButton", cfg.turnAssistButton, false);
+        for (std::size_t i = 0; i < cfg.menuNavigationBindings.size(); ++i)
+            binding(kMenuNavigationCatalog[i].displayLabel, cfg.menuNavigationBindings[i], false);
+        for (int i = 0; i < ShipOutputSystem::GetShipButtonCount(); ++i) {
+            const auto& item = ShipOutputSystem::GetShipButtonBindings()[i];
+            binding(item.sourceIniKey, item.buttonRef, false);
+        }
+        for (const auto& macro : MacroEngine::GetMacrosMutable())
+            binding(macro.name, macro.button, false);
+        for (const auto& profile : s_profiles)
+            binding(profile.profileId, profile.trigger, false);
+        report += "\nNative action availability:\n";
+        for (const auto& action : kShipActionCatalog) {
+            const auto availability = NativeShipControl::GetActionAvailability(
+                NativeShipControl::ActionFromId(action.actionId));
+            const auto label = availability == ShipActionAvailability::AvailableNow ? "available" :
+                availability == ShipActionAvailability::SupportedWaitingForContext ? "waiting for ship context" :
+                availability == ShipActionAvailability::UnavailableForBuild ? "unavailable for build" : "unavailable in context";
+            report += std::format("  {}: {}\n", action.displayLabel, label);
+        }
+        SupportReport::PublishRuntime(std::move(report));
+    } catch (...) {
+        // Diagnostics must never interrupt input publication.
+    }
+}
+
 float TelemetryNormRaw(const ThrottleController::Config& cfg,
                        const BindingRef& ref, bool invert) noexcept
 {
-    if (!ref.IsValid() || ref.value <= 0) return 0.0F;
+    if (!DeviceManager::GetRawAxis(ref)) return 0.0F;
     float minimum = 0.0F;
     float maximum = 65535.0F;
     if (ref.deviceIndex >= 0) {
@@ -262,7 +402,7 @@ float TelemetryNormRaw(const ThrottleController::Config& cfg,
     }
     const auto halfRange = (maximum - minimum) * 0.5F;
     if (halfRange <= 0.0F) return 0.0F;
-    const auto raw = static_cast<float>(DeviceManager::GetRawAxis(ref));
+    const auto raw = static_cast<float>(*DeviceManager::GetRawAxis(ref));
     auto normalized = std::clamp(
         (raw - (minimum + maximum) * 0.5F) / halfRange, -1.0F, 1.0F);
     if (invert) normalized = -normalized;
@@ -279,9 +419,9 @@ float TelemetryShapeAxis(float normalized, float sensitivity,
 float TelemetryThrottleRaw(const ThrottleController::Config& cfg,
                            long axisMinimum, long axisMaximum) noexcept
 {
-    if (!cfg.throttleAxis.IsValid() || cfg.throttleAxis.value <= 0 ||
+    if (!DeviceManager::GetRawAxis(cfg.throttleAxis) ||
         axisMaximum <= axisMinimum) return 0.0F;
-    const auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis),
+    const auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0),
                                 axisMinimum, axisMaximum);
     const auto unit = static_cast<float>(raw - axisMinimum) /
         static_cast<float>(axisMaximum - axisMinimum);
@@ -291,8 +431,8 @@ float TelemetryThrottleRaw(const ThrottleController::Config& cfg,
 float TelemetryRateRequest(const ThrottleController::Config& cfg,
                            long axisMinimum, long axisMaximum) noexcept
 {
-    if (!cfg.throttleAxis.IsValid() || cfg.throttleAxis.value <= 0) return 0.0F;
-    auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis),
+    if (!DeviceManager::GetRawAxis(cfg.throttleAxis)) return 0.0F;
+    auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0),
                           axisMinimum, axisMaximum);
     if (cfg.bInvertThrottle) raw = axisMinimum + axisMaximum - raw;
     const auto low = cfg.detentCenter - cfg.detentDeadzone;
@@ -309,9 +449,9 @@ float TelemetryRateRequest(const ThrottleController::Config& cfg,
 float TelemetryPositionRequest(const ThrottleController::Config& cfg,
                                long axisMinimum, long axisMaximum) noexcept
 {
-    if (!cfg.throttleAxis.IsValid() || cfg.throttleAxis.value <= 0 ||
+    if (!DeviceManager::GetRawAxis(cfg.throttleAxis) ||
         axisMaximum <= axisMinimum) return 0.0F;
-    auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis),
+    auto raw = std::clamp(DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0),
                           axisMinimum, axisMaximum);
     if (cfg.bInvertThrottle) raw = axisMinimum + axisMaximum - raw;
     const auto low = cfg.detentCenter - cfg.detentDeadzone;
@@ -355,11 +495,11 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
 {
     using namespace AbsoluteControlTelemetry;
     const std::array<bool, 5> bound{
-        cfg.pitchAxis.IsValid() && cfg.pitchAxis.value > 0,
-        cfg.yawAxis.IsValid() && cfg.yawAxis.value > 0,
-        cfg.rollAxis.IsValid() && cfg.rollAxis.value > 0,
-        cfg.strafeLatAxis.IsValid() && cfg.strafeLatAxis.value > 0,
-        cfg.strafeVertAxis.IsValid() && cfg.strafeVertAxis.value > 0,
+        DeviceManager::GetRawAxis(cfg.pitchAxis).has_value(),
+        DeviceManager::GetRawAxis(cfg.yawAxis).has_value(),
+        DeviceManager::GetRawAxis(cfg.rollAxis).has_value(),
+        DeviceManager::GetRawAxis(cfg.strafeLatAxis).has_value(),
+        DeviceManager::GetRawAxis(cfg.strafeVertAxis).has_value(),
     };
     const std::array<float, 5> raw{
         TelemetryNormRaw(cfg, cfg.pitchAxis, false),
@@ -396,21 +536,20 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
     }
     PublishFlight(flight);
 
-    const bool throttleBound = cfg.throttleAxis.IsValid() &&
-        cfg.throttleAxis.value > 0;
+    const bool throttleBound = DeviceManager::GetRawAxis(cfg.throttleAxis).has_value();
     const auto request = cfg.bAccumulatorThrottle ?
         TelemetryRateRequest(cfg, axisMinimum, axisMaximum) :
         TelemetryPositionRequest(cfg, axisMinimum, axisMaximum);
     bool reverseActive = DeviceManager::IsButtonPressed(cfg.digitalReverseButton);
     if (cfg.bUnipolarReverse && cfg.unipolarMode && throttleBound) {
-        auto throttleRaw = DeviceManager::GetRawAxis(cfg.throttleAxis);
+        auto throttleRaw = DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0);
         if (cfg.bInvertThrottle) throttleRaw = axisMinimum + axisMaximum - throttleRaw;
         reverseActive |=
             throttleRaw < cfg.reverseZoneCenter - cfg.reverseZoneDeadzone;
     }
     bool boostActive{};
     if (cfg.bBoostZone && cfg.unipolarMode && throttleBound) {
-        auto throttleRaw = DeviceManager::GetRawAxis(cfg.throttleAxis);
+        auto throttleRaw = DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0);
         if (cfg.bInvertThrottle) throttleRaw = axisMinimum + axisMaximum - throttleRaw;
         boostActive =
             throttleRaw >= cfg.boostZoneCenter - cfg.boostZoneDeadzone;
@@ -419,7 +558,7 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
     auto logicalThrottleRaw = axisMinimum;
     if (throttleBound) {
         logicalThrottleRaw = std::clamp(
-            DeviceManager::GetRawAxis(cfg.throttleAxis), axisMinimum, axisMaximum);
+            DeviceManager::GetRawAxis(cfg.throttleAxis).value_or(0), axisMinimum, axisMaximum);
     }
     if (throttleBound && cfg.bInvertThrottle) {
         logicalThrottleRaw = axisMinimum + axisMaximum - logicalThrottleRaw;
@@ -437,8 +576,8 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
 
     AimSample aim;
     if (cfg.bSourceObjectAim && !cfg.bHOSAMMode) {
-        const bool aimYawBound = cfg.aimYawAxis.IsValid() && cfg.aimYawAxis.value > 0;
-        const bool aimPitchBound = cfg.aimPitchAxis.IsValid() && cfg.aimPitchAxis.value > 0;
+        const bool aimYawBound = DeviceManager::GetRawAxis(cfg.aimYawAxis).has_value();
+        const bool aimPitchBound = DeviceManager::GetRawAxis(cfg.aimPitchAxis).has_value();
         const bool digitalAimBound = cfg.digitalAimLeftButton.IsValid() ||
             cfg.digitalAimRightButton.IsValid() ||
             cfg.digitalAimUpButton.IsValid() ||
@@ -459,6 +598,8 @@ void PublishControlTelemetry(const ThrottleController::Config& cfg,
                     cfg.fAimSmoothing, deltaSeconds * 60.0F);
                 smoothYaw = smoothYaw * weight + aimYaw * (1.0F - weight);
                 smoothPitch = smoothPitch * weight + aimPitch * (1.0F - weight);
+                if (!aimYawBound) smoothYaw = 0.0F;
+                if (!aimPitchBound) smoothPitch = 0.0F;
                 outputYaw = smoothYaw;
                 outputPitch = smoothPitch;
             } else {
@@ -714,7 +855,9 @@ void ThrottleController::LoadConfig(const std::string* slotFile) {
 static void ResolveAndOpenRef(BindingRef& ref) {
     if (!ref.IsValid()) return;
     int resolvedIndex = -1;
-    if (ref.HasIndex()) {
+    if (ref.HasDevice()) {
+        resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
+    } else if (ref.HasIndex()) {
         if (ref.deviceIndex < DeviceManager::GetDeviceCount())
             resolvedIndex = ref.deviceIndex;
         else {
@@ -723,11 +866,10 @@ static void ResolveAndOpenRef(BindingRef& ref) {
                 ref.deviceIndex, DeviceManager::GetDeviceCount());
             RuntimePaths::Log("[Controller]", buf);
         }
-    } else if (ref.HasDevice()) {
-        resolvedIndex = DeviceManager::ResolveByName(ref.deviceName);
     } else {
         resolvedIndex = DeviceManager::GetDeviceCount() > 0 ? 0 : -1;
     }
+    if (ref.HasDevice()) ref.deviceIndex = resolvedIndex;
     if (resolvedIndex >= 0) {
         ref.deviceIndex = resolvedIndex;
         DeviceManager::OpenDevice(resolvedIndex);
@@ -1267,6 +1409,8 @@ void ThrottleController::ControlLoop() {
         const bool menuContext = pilotSnapshot.gameplayContextKnown &&
             !pilotSnapshot.gameplayContextActive;
         const bool contextReuseAllowed = active && !fullClosed && !editorOpen;
+        UpdateAxisRecovery(s_config, axisMin, axisMax);
+        PublishSupportSnapshot(s_config, pilotSnapshot);
         UpdateDedicatedMenuNavigation(contextReuseAllowed && menuContext);
         UpdateMenuControlReuse(contextReuseAllowed && menuContext);
 
@@ -1378,10 +1522,16 @@ void ThrottleController::ControlLoop() {
             return (value - dz) / (1.0f - dz);
         };
 
+        const auto throttleSample = DeviceManager::GetRawAxis(s_config.throttleAxis);
+        const auto reverseSample = DeviceManager::GetRawAxis(s_config.reverseAxis);
+        if (s_config.throttleAxis.IsValid() && !throttleSample) {
+            s_cruiseAssistMode = CruiseAssistMode::Off;
+            s_resetCruiseEdges = true;
+        }
         float reverseAxis = 0.0f;
         if (s_config.reverseAxisEnabled && !digitalReverseBound
-            && s_config.reverseAxis.IsValid() && s_config.reverseAxis.value > 0) {
-            reverseAxis = (float)DeviceManager::GetRawAxis(s_config.reverseAxis) / 65535.0f;
+            && reverseSample) {
+            reverseAxis = (float)DeviceManager::GetRawAxis(s_config.reverseAxis).value_or(0) / 65535.0f;
             reverseAxis = s_config.bInvertReverse ? (1.0f - reverseAxis) : reverseAxis;
             reverseAxis = std::clamp(reverseAxis * s_config.fReverseSensitivity, 0.0f, 1.0f);
             reverseAxis = ApplyUnipolarDeadzone(reverseAxis, s_config.reverseDeadzone);
@@ -1393,8 +1543,8 @@ void ThrottleController::ControlLoop() {
 
         // Unipolar reverse zone from main throttle axis
         if (s_config.bUnipolarReverse && s_config.unipolarMode
-            && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis);
+            && throttleSample) {
+            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis).value_or(0);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             if (rawThrottle < s_config.reverseZoneCenter - s_config.reverseZoneDeadzone)
                 reverseHeld = true;
@@ -1404,11 +1554,10 @@ void ThrottleController::ControlLoop() {
         // inBoostZone unconditionally and always publish its ownership state so a
         // gate flip (for example, unbinding the throttle) cannot orphan the request.
         bool inBoostZone = false;
-        const bool throttleBound = s_config.throttleAxis.IsValid() &&
-            s_config.throttleAxis.value > 0;
+        const bool throttleBound = throttleSample.has_value();
         if (flightInjectionAllowed && s_config.bBoostZone &&
             s_config.unipolarMode && throttleBound) {
-            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis);
+            long rawThrottle = DeviceManager::GetRawAxis(s_config.throttleAxis).value_or(0);
             if (s_config.bInvertThrottle) rawThrottle = axisMin + axisMax - rawThrottle;
             inBoostZone = BoostZonePolicy::ShouldActivate(
                 flightInjectionAllowed, s_config.bBoostZone,
@@ -1437,12 +1586,12 @@ void ThrottleController::ControlLoop() {
         };
 
         if (s_config.bAccumulatorThrottle) {
-            if (s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-                throttle = NormBipolarRate(DeviceManager::GetRawAxis(s_config.throttleAxis));
+            if (throttleSample) {
+                throttle = NormBipolarRate(*throttleSample);
                 throttle = std::clamp(throttle * s_config.fThrottleSensitivity, -1.0f, 1.0f);
             }
-        } else if (!reverseHeld && s_config.throttleAxis.IsValid() && s_config.throttleAxis.value > 0) {
-            throttle = NormalizeAxis(DeviceManager::GetRawAxis(s_config.throttleAxis), axisMin, axisMax);
+        } else if (!reverseHeld && throttleSample) {
+            throttle = NormalizeAxis(DeviceManager::GetRawAxis(s_config.throttleAxis).value_or(0), axisMin, axisMax);
             throttle = std::clamp(throttle * s_config.fThrottleSensitivity, 0.0f, 1.0f);
         }
 
@@ -1494,8 +1643,8 @@ void ThrottleController::ControlLoop() {
         // done by ShapeAxis so the deadzone and saturation behave as ABSOLUTE
         // positions on the physical axis, matching exactly what Control displays.
         auto NormRaw = [&](const BindingRef& ref, bool invert) -> float {
-            if (!ref.IsValid() || ref.value <= 0) return 0.0f;
-            float raw  = static_cast<float>(DeviceManager::GetRawAxis(ref));
+            if (!DeviceManager::GetRawAxis(ref)) return 0.0f;
+            float raw  = static_cast<float>(*DeviceManager::GetRawAxis(ref));
             float aMin = 0.0f, aMax = 65535.0f;
             if (ref.deviceIndex >= 0) {
                 int calibKey = (ref.deviceIndex << 8) | ref.value;

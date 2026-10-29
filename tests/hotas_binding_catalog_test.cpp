@@ -1,7 +1,7 @@
 #include "HotasBindingCatalog.h"
 
 #include <array>
-#include <cassert>
+#include "TestCheck.h"
 #include <string_view>
 
 namespace {
@@ -52,148 +52,148 @@ int main()
 
     for (std::size_t left = 0; left < kTargets.size(); ++left) {
         const auto& target = kTargets[left];
-        assert(ValidId(target.controlId));
-        assert(ValidId(target.pageId));
-        assert(!target.displayLabel.empty());
-        assert(!target.iniSection.empty());
-        assert(!target.iniKey.empty());
-        assert(target.iniSection != "HeadTracking");
-        assert(target.iniSection != "Power");
-        assert(!IsExcludedSlot(target.captureSlot));
-        assert(target.controlId.find("head") == std::string_view::npos);
-        assert(target.controlId.find("look") == std::string_view::npos);
-        assert(target.controlId.find("hosam") == std::string_view::npos);
-        assert(target.controlId.find("alignment") == std::string_view::npos);
-        assert(target.controlId.find("profile") == std::string_view::npos);
-        assert(target.controlId.find("macro") == std::string_view::npos);
-        assert(target.controlId.find("custom") == std::string_view::npos);
-        assert(target.controlId.find("power-preset") == std::string_view::npos);
+        REQUIRE(ValidId(target.controlId));
+        REQUIRE(ValidId(target.pageId));
+        REQUIRE(!target.displayLabel.empty());
+        REQUIRE(!target.iniSection.empty());
+        REQUIRE(!target.iniKey.empty());
+        REQUIRE(target.iniSection != "HeadTracking");
+        REQUIRE(target.iniSection != "Power");
+        REQUIRE(!IsExcludedSlot(target.captureSlot));
+        REQUIRE(target.controlId.find("head") == std::string_view::npos);
+        REQUIRE(target.controlId.find("look") == std::string_view::npos);
+        REQUIRE(target.controlId.find("hosam") == std::string_view::npos);
+        REQUIRE(target.controlId.find("alignment") == std::string_view::npos);
+        REQUIRE(target.controlId.find("profile") == std::string_view::npos);
+        REQUIRE(target.controlId.find("macro") == std::string_view::npos);
+        REQUIRE(target.controlId.find("custom") == std::string_view::npos);
+        REQUIRE(target.controlId.find("power-preset") == std::string_view::npos);
 
         for (std::size_t right = left + 1; right < kTargets.size(); ++right) {
-            assert(target.controlId != kTargets[right].controlId);
-            assert(target.captureSlot != kTargets[right].captureSlot);
+            REQUIRE(target.controlId != kTargets[right].controlId);
+            REQUIRE(target.captureSlot != kTargets[right].captureSlot);
         }
 
         switch (target.family) {
         case TargetFamily::CoreAxis:
         case TargetFamily::ReverseAxis: {
-            assert(target.pageId == kFlightAxesPageId);
-            assert(target.captureKind == CaptureKind::Axis);
-            assert(target.iniSection == "Hardware");
+            REQUIRE(target.pageId == kFlightAxesPageId);
+            REQUIRE(target.captureKind == CaptureKind::Axis);
+            REQUIRE(target.iniSection == "Hardware");
             const int index = target.captureSlot - CaptureSlot::kAxisBase;
-            assert(index >= 0 && index < kNumAxisSlots);
-            assert(target.iniKey == kAxisSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumAxisSlots);
+            REQUIRE(target.iniKey == kAxisSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             axes[index] = true;
             break;
         }
         case TargetFamily::DigitalFallback: {
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "DigitalAxes");
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "DigitalAxes");
             const int index = target.captureSlot - CaptureSlot::kDigitalAxisBase;
-            assert(index >= 0 && index < kNumDigitalAxisSlots);
-            assert(target.iniKey == kDigitalAxisSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumDigitalAxisSlots);
+            REQUIRE(target.iniKey == kDigitalAxisSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             digitalFallbacks[index] = true;
             break;
         }
         case TargetFamily::PluginButton: {
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "Buttons");
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "Buttons");
             const int index = target.captureSlot - CaptureSlot::kButtonBase;
-            assert(index >= 0 && index < kNumButtonSlots);
-            assert(target.iniKey == kButtonSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumButtonSlots);
+            REQUIRE(target.iniKey == kButtonSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             pluginButtons[index] = true;
             break;
         }
         case TargetFamily::FlightAssist: {
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "ControlExtensions");
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "ControlExtensions");
             const int index = target.captureSlot - CaptureSlot::kControlExtensionBase;
-            assert(index >= 0 && index < kNumControlExtensionSlots);
-            assert(target.iniKey == kControlExtensionSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumControlExtensionSlots);
+            REQUIRE(target.iniKey == kControlExtensionSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             flightAssists[index] = true;
             break;
         }
         case TargetFamily::AimAxis: {
-            assert(target.captureKind == CaptureKind::Axis);
-            assert(target.iniSection == "Aim");
+            REQUIRE(target.captureKind == CaptureKind::Axis);
+            REQUIRE(target.iniSection == "Aim");
             const int index = target.captureSlot - CaptureSlot::kAimAxisBase;
-            assert(index >= 0 && index < kNumAimAxisSlots);
-            assert(target.iniKey == kAimAxisSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumAimAxisSlots);
+            REQUIRE(target.iniKey == kAimAxisSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             aimAxes[index] = true;
             break;
         }
         case TargetFamily::DigitalAim: {
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "Aim");
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "Aim");
             const int index = target.captureSlot - CaptureSlot::kDigitalAimBase;
-            assert(index >= 0 && index < kNumDigitalAimSlots);
-            assert(target.iniKey == kDigitalAimSlots[index].iniKey);
-            assert(target.actionId.empty());
+            REQUIRE(index >= 0 && index < kNumDigitalAimSlots);
+            REQUIRE(target.iniKey == kDigitalAimSlots[index].iniKey);
+            REQUIRE(target.actionId.empty());
             digitalAim[index] = true;
             break;
         }
         case TargetFamily::AimModeToggle:
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "Aim");
-            assert(target.captureSlot == CaptureSlot::kToggleAimMode);
-            assert(target.iniKey == "iToggleAimModeButton");
-            assert(target.actionId.empty());
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "Aim");
+            REQUIRE(target.captureSlot == CaptureSlot::kToggleAimMode);
+            REQUIRE(target.iniKey == "iToggleAimModeButton");
+            REQUIRE(target.actionId.empty());
             aimToggle = true;
             break;
         case TargetFamily::TurnAssist:
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "DualStick");
-            assert(target.captureSlot == CaptureSlot::kTurnAssistBtn);
-            assert(target.iniKey == "iTurnAssistButton");
-            assert(target.actionId.empty());
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "DualStick");
+            REQUIRE(target.captureSlot == CaptureSlot::kTurnAssistBtn);
+            REQUIRE(target.iniKey == "iTurnAssistButton");
+            REQUIRE(target.actionId.empty());
             turnAssist = true;
             break;
         case TargetFamily::ShipAction: {
-            assert(target.pageId == kShipButtonsPageId);
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "ShipButtons");
+            REQUIRE(target.pageId == kShipButtonsPageId);
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "ShipButtons");
             const int index = target.captureSlot - CaptureSlot::kShipActionBase;
-            assert(index >= 0 && index < static_cast<int>(kShipActionCatalog.size()));
-            assert(target.actionId == kShipActionCatalog[index].actionId);
-            assert(target.iniKey == kShipActionCatalog[index].sourceIniKey);
+            REQUIRE(index >= 0 && index < static_cast<int>(kShipActionCatalog.size()));
+            REQUIRE(target.actionId == kShipActionCatalog[index].actionId);
+            REQUIRE(target.iniKey == kShipActionCatalog[index].sourceIniKey);
             shipActions[index] = true;
             break;
         }
         case TargetFamily::MenuNavigation: {
-            assert(target.pageId == kShipButtonsPageId);
-            assert(target.captureKind == CaptureKind::ButtonOrPov);
-            assert(target.iniSection == "MenuControls");
+            REQUIRE(target.pageId == kShipButtonsPageId);
+            REQUIRE(target.captureKind == CaptureKind::ButtonOrPov);
+            REQUIRE(target.iniSection == "MenuControls");
             const int index = target.captureSlot - CaptureSlot::kMenuNavigationBase;
-            assert(index >= 0 &&
+            REQUIRE(index >= 0 &&
                    index < static_cast<int>(kMenuNavigationCatalog.size()));
-            assert(target.actionId == kMenuNavigationCatalog[index].actionId);
-            assert(target.iniKey == kMenuNavigationCatalog[index].iniKey);
+            REQUIRE(target.actionId == kMenuNavigationCatalog[index].actionId);
+            REQUIRE(target.iniKey == kMenuNavigationCatalog[index].iniKey);
             menuNavigation[index] = true;
             break;
         }
         }
     }
 
-    for (const bool covered : axes) assert(covered);
-    for (const bool covered : digitalFallbacks) assert(covered);
-    for (const bool covered : pluginButtons) assert(covered);
-    for (const bool covered : flightAssists) assert(covered);
-    for (const bool covered : aimAxes) assert(covered);
-    for (const bool covered : digitalAim) assert(covered);
-    for (const bool covered : shipActions) assert(covered);
-    for (const bool covered : menuNavigation) assert(covered);
-    assert(aimToggle);
-    assert(turnAssist);
+    for (const bool covered : axes) REQUIRE(covered);
+    for (const bool covered : digitalFallbacks) REQUIRE(covered);
+    for (const bool covered : pluginButtons) REQUIRE(covered);
+    for (const bool covered : flightAssists) REQUIRE(covered);
+    for (const bool covered : aimAxes) REQUIRE(covered);
+    for (const bool covered : digitalAim) REQUIRE(covered);
+    for (const bool covered : shipActions) REQUIRE(covered);
+    for (const bool covered : menuNavigation) REQUIRE(covered);
+    REQUIRE(aimToggle);
+    REQUIRE(turnAssist);
 
-    assert(Find("bind-throttle-axis") != nullptr);
-    assert(Find("bind-ship-autopilot-on-off") != nullptr);
-    assert(Find("bind-turn-assist") != nullptr);
-    assert(Find("bind-menu-accept") != nullptr);
-    assert(Find("missing-binding") == nullptr);
+    REQUIRE(Find("bind-throttle-axis") != nullptr);
+    REQUIRE(Find("bind-ship-autopilot-on-off") != nullptr);
+    REQUIRE(Find("bind-turn-assist") != nullptr);
+    REQUIRE(Find("bind-menu-accept") != nullptr);
+    REQUIRE(Find("missing-binding") == nullptr);
     return 0;
 }
